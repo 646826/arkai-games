@@ -1,0 +1,1140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="color-scheme" content="dark">
+<title>Memory Match — Arkai</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #140a1e; overflow: hidden; }
+  body { -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+  canvas { display: block; width: 100vw; height: 100vh; touch-action: none; outline: none; cursor: pointer; }
+</style>
+</head>
+<body>
+<canvas id="game" tabindex="0" aria-label="Memory Match. Flip two cards at a time and find every matching pair. The arrow keys move a focus ring between the cards, Enter or Space flips the focused card, M toggles the sound and P pauses."></canvas>
+<script>
+(() => {
+  'use strict';
+
+  // ---- the stage, in logical pixels (origin upper-left, x right, y down) ----
+  const W = 540, H = 720;
+  const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+  const PLUM = '#140a1e', ACCENT = '#f472b6', INK = '#f7e8f5', DIM = 'rgba(247, 232, 245, 0.55)';
+  const RING = '253, 230, 138';   // the keyboard focus ring, as rgb components
+  const TAU = Math.PI * 2;
+
+  // The whole difficulty curve is this table: three board shapes, and the number
+  // of pairs falls straight out of them. Twelve pairs is the ceiling because a
+  // pair has to be one symbol and SYMBOLS has twelve members — and because a
+  // sixth column is the narrowest card that still reads at 540 logical pixels.
+  const BOARDS = [
+    { id: 'easy', cols: 4, rows: 3, label: 'EASY', name: '4 × 3' },
+    { id: 'normal', cols: 4, rows: 4, label: 'NORMAL', name: '4 × 4' },
+    { id: 'hard', cols: 6, rows: 4, label: 'HARD', name: '6 × 4' },
+  ];
+
+  // Timings, named because they are the feel of the game and nothing else.
+  // 180 ms is long enough for the flip to read as a card turning over and short
+  // enough that a fast player never sits waiting for it.
+  const FLIP_S = 0.18;
+  const MISS_HOLD_S = 0.95;        // how long a wrong pair stays readable — always skippable
+  const MATCH_POP_S = 0.26;
+  const DEAL_DUR_S = 0.26, DEAL_STEP_S = 0.05;
+  const CARD_RATIO = 1.36;         // height / width: a playing card, not a tile
+  const GAP = 14;
+  const AREA = { x: 24, y: 104, w: 492, h: 540 };
+
+  const STORE = 'arkai:memory-cards:';
+  const KEY_MUTE = STORE + 'muted', KEY_BOARD = STORE + 'board';
+  const bestKey = (id) => STORE + 'best:' + id;
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+
+  // Private mode throws on every one of these, and an uncaught throw here is a
+  // blank page rather than a game with no saved best.
+  const storage = {
+    get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+    set(key, value) { try { localStorage.setItem(key, value); return true; } catch { return false; } },
+  };
+
+  // A record is { m: moves, t: milliseconds }. Fewest moves first, and the clock
+  // only breaks a tie: this is a memory game, not a speed run.
+  const readBest = (id) => {
+    const raw = storage.get(bestKey(id));
+    if (!raw) return null;
+    try {
+      const value = JSON.parse(raw);
+      if (value && typeof value.m === 'number' && typeof value.t === 'number' && value.m > 0) return value;
+    } catch { /* a record from an older build, or something else entirely */ }
+    return null;
+  };
+  const beats = (record, previous) => !previous || record.m < previous.m || (record.m === previous.m && record.t < previous.t);
+
+  // ---- the one allowed channel to the portal ----
+  const emit = (event, data) => {
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: 'game-event', event, data: data || {} }, location.origin);
+      }
+    } catch { /* not embedded */ }
+  };
+
+  // ---- sound: generated on the spot, no files ----
+  let audio = null;
+  const ensureAudio = () => {
+    if (audio || S.muted) return;
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (Ctx) audio = new Ctx();
+    } catch { audio = null; }
+  };
+  const tone = (freq, dur = 0.07, type = 'triangle', vol = 0.05, delay = 0) => {
+    if (S.muted || !audio || audio.state !== 'running') return;
+    const at = audio.currentTime + delay;
+    const osc = audio.createOscillator();
+    const gain = audio.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, at);
+    gain.gain.setValueAtTime(0, at);
+    gain.gain.linearRampToValueAtTime(vol, at + 0.006);
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    osc.connect(gain);
+    gain.connect(audio.destination);
+    osc.start(at);
+    osc.stop(at + dur + 0.02);
+  };
+  const sfx = {
+    tick: () => tone(880, 0.045, 'triangle', 0.035),          // a card turning over
+    back: () => tone(520, 0.05, 'triangle', 0.028),           // the same card turning back
+    move: () => tone(1240, 0.028, 'sine', 0.022),             // the focus ring stepping across
+    match: (n) => {                                           // a two-note rise, a touch higher each pair
+      const base = 560 + Math.min(10, n) * 22;
+      tone(base, 0.09, 'triangle', 0.05);
+      tone(base * 1.5, 0.14, 'triangle', 0.05, 0.075);
+    },
+    miss: () => { tone(150, 0.2, 'sine', 0.06); tone(112, 0.26, 'sine', 0.045, 0.05); },
+    deal: () => { tone(320, 0.06, 'sine', 0.035); tone(420, 0.07, 'sine', 0.03, 0.05); },
+    fanfare: () => {
+      [0, 0.1, 0.2, 0.34].forEach((delay, i) => tone([523, 659, 784, 1047][i], i === 3 ? 0.42 : 0.12, 'triangle', 0.052, delay));
+      tone(262, 0.5, 'sine', 0.04, 0.34);
+    },
+  };
+
+  // ---- the symbol family -----------------------------------------------------
+  // Drawn with canvas paths on purpose. An emoji font is a different font on
+  // every machine and half of these glyphs simply do not exist in a plain CI
+  // browser, so a game built on them looks broken in exactly the frame someone
+  // screenshots. Paths look identical everywhere.
+  //
+  // Every symbol is a distinct SHAPE as well as a distinct COLOUR, so a
+  // colour-blind player still has a whole second channel to match on — and a
+  // player on a washed-out phone screen in sunlight has one too.
+  const poly = (c, n, r, rot) => {
+    c.beginPath();
+    for (let i = 0; i < n; i++) {
+      const a = rot + (TAU * i) / n;
+      c[i ? 'lineTo' : 'moveTo'](Math.cos(a) * r, Math.sin(a) * r);
+    }
+    c.closePath();
+  };
+
+  const SYMBOLS = [
+    { name: 'circle', color: '#f472b6', draw(c, r) {
+      c.beginPath(); c.arc(0, 0, r * 0.9, 0, TAU); c.fill();
+    } },
+    { name: 'triangle', color: '#fbbf24', draw(c, r) {
+      poly(c, 3, r, -Math.PI / 2); c.fill();
+    } },
+    { name: 'square', color: '#38bdf8', draw(c, r) {
+      const s = r * 0.78, rr = r * 0.16;
+      c.beginPath();
+      c.moveTo(-s + rr, -s);
+      c.arcTo(s, -s, s, s, rr); c.arcTo(s, s, -s, s, rr);
+      c.arcTo(-s, s, -s, -s, rr); c.arcTo(-s, -s, s, -s, rr);
+      c.closePath(); c.fill();
+    } },
+    { name: 'diamond', color: '#a78bfa', draw(c, r) {
+      c.beginPath();
+      c.moveTo(0, -r); c.lineTo(r * 0.72, 0); c.lineTo(0, r); c.lineTo(-r * 0.72, 0);
+      c.closePath(); c.fill();
+    } },
+    { name: 'star', color: '#fde047', draw(c, r) {
+      c.beginPath();
+      for (let i = 0; i < 10; i++) {
+        const a = -Math.PI / 2 + (Math.PI / 5) * i;
+        const rr = i % 2 ? r * 0.44 : r;
+        c[i ? 'lineTo' : 'moveTo'](Math.cos(a) * rr, Math.sin(a) * rr);
+      }
+      c.closePath(); c.fill();
+    } },
+    { name: 'hexagon', color: '#34d399', draw(c, r) {
+      poly(c, 6, r * 0.95, -Math.PI / 2); c.fill();
+    } },
+    { name: 'crescent', color: '#fb923c', draw(c, r) {
+      // Two circles, the second subtracted by the even-odd rule: a boolean cut
+      // without touching the card underneath, which is what a composite op would do.
+      c.beginPath();
+      c.arc(0, 0, r * 0.92, 0, TAU);
+      c.arc(r * 0.44, -r * 0.14, r * 0.8, 0, TAU);
+      c.fill('evenodd');
+    } },
+    { name: 'cross', color: '#f87171', draw(c, r) {
+      const a = r * 0.3, b = r * 0.95;
+      c.beginPath();
+      c.moveTo(-a, -b); c.lineTo(a, -b); c.lineTo(a, -a); c.lineTo(b, -a);
+      c.lineTo(b, a); c.lineTo(a, a); c.lineTo(a, b); c.lineTo(-a, b);
+      c.lineTo(-a, a); c.lineTo(-b, a); c.lineTo(-b, -a); c.lineTo(-a, -a);
+      c.closePath(); c.fill();
+    } },
+    { name: 'spiral', color: '#22d3ee', draw(c, r) {
+      c.lineWidth = r * 0.26; c.lineCap = 'round'; c.lineJoin = 'round';
+      c.beginPath();
+      for (let i = 0; i <= 96; i++) {
+        const t = i / 96, ang = t * TAU * 2.35, rr = r * 0.12 + t * r * 0.82;
+        c[i ? 'lineTo' : 'moveTo'](Math.cos(ang) * rr, Math.sin(ang) * rr);
+      }
+      c.stroke();
+    } },
+    { name: 'wave', color: '#818cf8', draw(c, r) {
+      c.lineWidth = r * 0.28; c.lineCap = 'round'; c.lineJoin = 'round';
+      c.beginPath();
+      for (let i = 0; i <= 48; i++) {
+        const t = i / 48;
+        c[i ? 'lineTo' : 'moveTo'](-r * 0.92 + t * r * 1.84, Math.sin(t * TAU * 1.5 - Math.PI / 2) * r * 0.52);
+      }
+      c.stroke();
+    } },
+    { name: 'arrow', color: '#4ade80', draw(c, r) {
+      const s = r * 0.29;
+      c.beginPath();
+      c.moveTo(0, -r);
+      c.lineTo(r * 0.8, -r * 0.08); c.lineTo(s, -r * 0.08);
+      c.lineTo(s, r * 0.92); c.lineTo(-s, r * 0.92);
+      c.lineTo(-s, -r * 0.08); c.lineTo(-r * 0.8, -r * 0.08);
+      c.closePath(); c.fill();
+    } },
+    { name: 'heart', color: '#fb7185', draw(c, r) {
+      c.beginPath();
+      c.moveTo(0, r * 0.9);
+      c.bezierCurveTo(-r * 1.32, r * 0.02, -r * 0.6, -r * 1.06, 0, -r * 0.32);
+      c.bezierCurveTo(r * 0.6, -r * 1.06, r * 1.32, r * 0.02, 0, r * 0.9);
+      c.closePath(); c.fill();
+    } },
+  ];
+
+  // ---- state -----------------------------------------------------------------
+  const savedBoard = BOARDS.findIndex((b) => b.id === storage.get(KEY_BOARD));
+  const S = {
+    mode: 'title',            // title | playing | paused | won
+    boardIndex: savedBoard >= 0 ? savedBoard : 1,
+    cards: [], L: null, shape: null,   // `shape` is the board being played; boardIndex is the one selected next
+    sel: [],                  // the one or two cards currently face up and unjudged
+    moves: 0, found: 0, time: 0,
+    hold: 0,                  // seconds left on a wrong pair the player has not skipped
+    guardT: 0,                // a breath after the deal in which a stray second tap cannot flip
+    cursor: 0,                // the card the keyboard is on
+    best: null, newBest: false,
+    muted: storage.get(KEY_MUTE) === '1',
+    clock: 0, overT: 0, shake: 0,
+    parts: [], floats: [],
+  };
+
+  const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+  const board = () => BOARDS[S.boardIndex];
+
+  // A grid that fits the area on both axes and keeps the card proportion: the
+  // hard board is limited by width, the 4 × 4 one by height, and neither is
+  // allowed to stretch a card into a different shape than its neighbours.
+  function layout(shape) {
+    const maxW = (AREA.w - (shape.cols - 1) * GAP) / shape.cols;
+    const maxH = (AREA.h - (shape.rows - 1) * GAP) / shape.rows;
+    const w = Math.min(maxW, maxH / CARD_RATIO);
+    const h = w * CARD_RATIO;
+    const gw = shape.cols * w + (shape.cols - 1) * GAP;
+    const gh = shape.rows * h + (shape.rows - 1) * GAP;
+    return {
+      w, h, cols: shape.cols, rows: shape.rows,
+      x: AREA.x + (AREA.w - gw) / 2,
+      y: AREA.y + (AREA.h - gh) / 2,
+    };
+  }
+  const cardRect = (L, i) => ({
+    x: L.x + (i % L.cols) * (L.w + GAP),
+    y: L.y + Math.floor(i / L.cols) * (L.h + GAP),
+    w: L.w, h: L.h,
+  });
+
+  function shuffle(list) {
+    for (let i = list.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const swap = list[i]; list[i] = list[j]; list[j] = swap;
+    }
+    return list;
+  }
+
+  function deal(shape) {
+    const pairs = (shape.cols * shape.rows) / 2;
+    const picks = shuffle(SYMBOLS.map((_, i) => i)).slice(0, pairs);
+    const deck = shuffle(picks.concat(picks));
+    S.cards = deck.map((sym, i) => ({
+      sym,
+      up: false,            // the face this card settles on
+      from: false,          // the face it is turning away from, for the mid-flip swap
+      flipT: -1,            // seconds into a flip, or -1 when the card is at rest
+      matched: false,
+      matchT: 0,
+      shakeT: 0,
+      // A diagonal cascade rather than reading order: the board fills from the
+      // corner and the eye follows it, which is a half second of "this was dealt
+      // to me" for free.
+      dealT: -(((i % shape.cols) + Math.floor(i / shape.cols)) * DEAL_STEP_S),
+    }));
+  }
+
+  const centreCard = (L) => Math.floor(L.rows / 2) * L.cols + Math.floor(L.cols / 2);
+
+  function spawnBurst(rect, color, count) {
+    const cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * TAU, sp = 50 + Math.random() * 170;
+      S.parts.push({ x: cx, y: cy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, g: 300, life: 0.45 + Math.random() * 0.4, t: 0, size: 2 + Math.random() * 3, color });
+    }
+  }
+  function spawnConfetti() {
+    for (let i = 0; i < 90; i++) {
+      S.parts.push({
+        x: AREA.x + Math.random() * AREA.w,
+        y: AREA.y - 20 - Math.random() * 120,
+        vx: (Math.random() - 0.5) * 90, vy: 60 + Math.random() * 190, g: 140,
+        life: 1.4 + Math.random() * 1.1, t: 0, size: 3 + Math.random() * 4,
+        color: SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)].color,
+      });
+    }
+  }
+  const float = (x, y, text, color) => S.floats.push({ x, y, text, color, t: 0 });
+
+  // ---- game flow -------------------------------------------------------------
+  function start() {
+    const shape = board();
+    S.shape = shape;
+    storage.set(KEY_BOARD, shape.id);
+    S.L = layout(shape);
+    deal(shape);
+    S.sel = []; S.moves = 0; S.found = 0; S.time = 0; S.hold = 0;
+    // A tap on a title chip both picks the board and starts it, so the second tap
+    // of a double tap lands on a card that has just appeared under the finger.
+    S.guardT = 0.25;
+    S.overT = 0; S.shake = 0; S.newBest = false;
+    S.parts = []; S.floats = [];
+    S.best = readBest(shape.id);
+    S.cursor = centreCard(S.L);
+    S.mode = 'playing';
+    ensureAudio();
+    if (audio && audio.state === 'suspended') audio.resume().catch(() => {});
+    sfx.deal();
+    emit('start', { game: 'memory-cards', board: shape.id, pairs: S.cards.length / 2 });
+  }
+
+  // One number for the portal's records, and it has to agree with what the game
+  // tells the player: a run found in the fewest possible moves is worth double
+  // the pair score, and the clock is a small bonus rather than the point.
+  const scoreOf = (pairs, moves, seconds) =>
+    pairs * 100
+    + Math.round(pairs * 100 * (pairs / Math.max(pairs, moves)))
+    + Math.max(0, 240 - Math.round(seconds) * 2);
+
+  function win() {
+    const shape = S.shape;
+    const pairs = S.cards.length / 2;
+    const record = { m: S.moves, t: Math.round(S.time * 1000) };
+    const previous = readBest(shape.id);
+    // Claim the record only if it was actually written. In private mode the write
+    // throws, storage.set says so, and an overlay that announced a new best the
+    // device never kept would be contradicted by the very next run.
+    const kept = beats(record, previous) && storage.set(bestKey(shape.id), JSON.stringify(record));
+    S.newBest = kept;
+    S.best = kept ? record : previous;
+    S.mode = 'won';
+    S.overT = 0;
+    spawnConfetti();
+    sfx.fanfare();
+    emit('gameover', {
+      score: scoreOf(pairs, S.moves, S.time),
+      moves: S.moves, seconds: Math.round(S.time), pairs, board: shape.id, best: S.best ? S.best.m : S.moves,
+    });
+  }
+
+  function judge() {
+    const [a, b] = S.sel;
+    const first = S.cards[a], second = S.cards[b];
+    if (first.sym === second.sym) {
+      first.matched = second.matched = true;
+      first.matchT = second.matchT = 0;
+      S.sel = [];
+      S.found++;
+      const ra = cardRect(S.L, a), rb = cardRect(S.L, b);
+      const color = SYMBOLS[first.sym].color;
+      spawnBurst(ra, color, 14);
+      spawnBurst(rb, color, 14);
+      float((ra.x + rb.x) / 2 + S.L.w / 2, (ra.y + rb.y) / 2 + S.L.h / 2, 'PAIR', color);
+      sfx.match(S.found);
+      if (S.found === S.cards.length / 2) win();
+    } else {
+      // The wait is deliberate and so is the fact that it can be cut short: the
+      // player has already read the two cards, and being made to watch a timer
+      // run out on information you have is the most annoying thing in the genre.
+      S.hold = MISS_HOLD_S;
+      first.shakeT = second.shakeT = 0.34;
+      S.shake = 5;
+      sfx.miss();
+    }
+  }
+
+  // Turn the unmatched pair back over.
+  function flipBackPair() {
+    S.hold = 0;
+    for (const i of S.sel) {
+      const card = S.cards[i];
+      card.from = true; card.up = false; card.flipT = 0; card.shakeT = 0;
+    }
+    if (S.sel.length) sfx.back();
+    S.sel = [];
+  }
+
+  // The skip. Guarded on the hold and nothing else: a pair that is still turning
+  // face up has not been judged yet, and an early version of this cleared *that*
+  // too — a player who tapped an arrow key a tenth of a second after their second
+  // card watched the pair vanish without ever being told whether it matched.
+  function skipHold() {
+    if (S.hold <= 0) return false;
+    flipBackPair();
+    return true;
+  }
+
+  function flipCard(i) {
+    if (S.mode !== 'playing') return false;
+    const card = S.cards[i];
+    if (!card || card.matched || card.up || card.flipT >= 0 || S.sel.length >= 2) return false;
+    // A card still waiting its turn in the deal cascade is not on the table yet:
+    // flipping it would play the whole animation on something nobody can see.
+    if (card.dealT <= 0) return false;
+    card.from = false; card.up = true; card.flipT = 0;
+    S.sel.push(i);
+    // A move is a pair attempted, not a card turned: that is the number the
+    // player is trying to keep down, so it is the number the game counts.
+    if (S.sel.length === 2) S.moves++;
+    sfx.tick();
+    return true;
+  }
+
+  function moveCursor(dx, dy) {
+    const L = S.L;
+    let cx = S.cursor % L.cols, cy = Math.floor(S.cursor / L.cols);
+    // Wrapping, not clamping. On a four-wide board an arrow that silently does
+    // nothing at the edge reads as a dropped key, and a keyboard player should
+    // never have to count columns to know whether a press will land.
+    cx = (cx + dx + L.cols) % L.cols;
+    cy = (cy + dy + L.rows) % L.rows;
+    S.cursor = cy * L.cols + cx;
+    sfx.move();
+  }
+
+  function setBoard(index) {
+    const next = (index + BOARDS.length) % BOARDS.length;
+    if (next === S.boardIndex) return;
+    titleDirty = true;
+    S.boardIndex = next;
+    storage.set(KEY_BOARD, board().id);
+    sfx.move();
+  }
+
+  function toggleMute() {
+    titleDirty = true;
+    S.muted = !S.muted;
+    storage.set(KEY_MUTE, S.muted ? '1' : '0');
+    if (!S.muted) { ensureAudio(); sfx.tick(); }
+  }
+
+  // ---- update ----------------------------------------------------------------
+  function update(dt) {
+    S.clock += dt;
+    if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 22);
+
+    for (let i = S.parts.length - 1; i >= 0; i--) {
+      const p = S.parts[i];
+      p.t += dt;
+      if (p.t >= p.life) { S.parts.splice(i, 1); continue; }
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vx *= 0.96; p.vy = p.vy * 0.96 + p.g * dt;
+    }
+    for (let i = S.floats.length - 1; i >= 0; i--) {
+      S.floats[i].t += dt;
+      if (S.floats[i].t > 0.95) S.floats.splice(i, 1);
+    }
+
+    if (S.mode === 'paused' || S.mode === 'title') return;
+
+    for (const card of S.cards) {
+      if (card.dealT < DEAL_DUR_S) card.dealT += dt;
+      if (card.flipT >= 0) {
+        card.flipT += dt;
+        if (card.flipT >= FLIP_S) card.flipT = -1;
+      }
+      if (card.shakeT > 0) card.shakeT = Math.max(0, card.shakeT - dt);
+      if (card.matched) card.matchT += dt;
+    }
+
+    if (S.mode === 'won') { S.overT += dt; return; }
+
+    S.time += dt;
+    if (S.guardT > 0) S.guardT = Math.max(0, S.guardT - dt);
+    if (S.hold > 0) {
+      S.hold -= dt;
+      if (S.hold <= 0) flipBackPair();
+    } else if (S.sel.length === 2 && S.cards[S.sel[0]].flipT < 0 && S.cards[S.sel[1]].flipT < 0) {
+      judge();
+    }
+  }
+
+  // ---- drawing ---------------------------------------------------------------
+  const view = { scale: 1, ox: 0, oy: 0, dpr: 1, cw: 0, ch: 0 };
+  // The title screen is a still picture, so it is painted when something about it
+  // changes and not once per frame. That is three cards with baked shadows and a
+  // screen of text saved every 16 ms — and it stops `readBest` asking localStorage
+  // for a record sixty times a second while nobody is playing.
+  let titleDirty = true;
+
+  function resize() {
+    titleDirty = true;
+    // The portal serves the game in a frame that is never 540 × 720, so the
+    // backing store is CSS size × the device ratio — capped at 2, because four
+    // times the pixels on a 3× phone costs real frames for nothing visible.
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const cw = canvas.clientWidth || window.innerWidth;
+    const ch = canvas.clientHeight || window.innerHeight;
+    view.dpr = dpr; view.cw = cw; view.ch = ch;
+    view.scale = Math.min(cw / W, ch / H);
+    view.ox = (cw - W * view.scale) / 2;
+    view.oy = (ch - H * view.scale) / 2;
+    canvas.width = Math.round(cw * dpr);
+    canvas.height = Math.round(ch * dpr);
+  }
+
+  const roundRectOn = (c, x, y, w, h, r) => {
+    const rr = Math.max(0, Math.min(r, w / 2, h / 2));
+    c.beginPath();
+    c.moveTo(x + rr, y);
+    c.arcTo(x + w, y, x + w, y + h, rr);
+    c.arcTo(x + w, y + h, x, y + h, rr);
+    c.arcTo(x, y + h, x, y, rr);
+    c.arcTo(x, y, x + w, y, rr);
+    c.closePath();
+  };
+  const roundRect = (x, y, w, h, r) => roundRectOn(ctx, x, y, w, h, r);
+
+  const timeText = (seconds) => {
+    const whole = Math.max(0, Math.floor(seconds));
+    return Math.floor(whole / 60) + ':' + String(whole % 60).padStart(2, '0');
+  };
+  const bestText = (record) => record ? `${record.m} moves · ${timeText(record.t / 1000)}` : 'not set yet';
+
+  // ---- how a card is painted -------------------------------------------------
+  // These take a context rather than using the one on screen, because they are
+  // run into an off-screen canvas once per layout and blitted after that.
+  function paintBack(c, x, y, w, h) {
+    const rr = Math.min(w, h) * 0.16;
+    c.save();
+    c.shadowColor = 'rgba(0, 0, 0, 0.45)';
+    c.shadowBlur = 12;
+    c.shadowOffsetY = 4;
+    const g = c.createLinearGradient(x, y, x + w, y + h);
+    g.addColorStop(0, '#3d2057');
+    g.addColorStop(1, '#220f36');
+    c.fillStyle = g;
+    roundRectOn(c, x, y, w, h, rr);
+    c.fill();
+    c.restore();
+
+    // A hatch clipped to the card: the back has to look printed, not filled.
+    c.save();
+    roundRectOn(c, x + 3, y + 3, w - 6, h - 6, rr - 2);
+    c.clip();
+    c.strokeStyle = 'rgba(244, 114, 182, 0.13)';
+    c.lineWidth = 2;
+    c.beginPath();
+    for (let d = -h; d < w; d += 11) { c.moveTo(x + d, y); c.lineTo(x + d + h, y + h); }
+    c.stroke();
+    c.restore();
+
+    c.save();
+    c.translate(x + w / 2, y + h / 2);
+    const er = Math.min(w, h) * 0.21;
+    c.strokeStyle = 'rgba(244, 114, 182, 0.55)';
+    c.lineWidth = 1.6;
+    poly(c, 4, er, -Math.PI / 2); c.stroke();
+    poly(c, 4, er * 0.62, -Math.PI / 2); c.stroke();
+    c.fillStyle = 'rgba(244, 114, 182, 0.35)';
+    poly(c, 4, er * 0.28, -Math.PI / 2); c.fill();
+    c.restore();
+
+    c.lineWidth = 2;
+    c.strokeStyle = 'rgba(244, 114, 182, 0.3)';
+    roundRectOn(c, x + 1, y + 1, w - 2, h - 2, rr - 1);
+    c.stroke();
+  }
+
+  // `lit` is the matched state at full strength. It is baked as its own picture
+  // and cross-faded over the plain one, so the glow can breathe without a blur
+  // being recomputed for every matched card on every frame.
+  function paintFace(c, x, y, w, h, sym, lit) {
+    const rr = Math.min(w, h) * 0.16;
+    c.save();
+    if (lit) { c.shadowColor = sym.color; c.shadowBlur = 22; }
+    else { c.shadowColor = 'rgba(0, 0, 0, 0.45)'; c.shadowBlur = 12; c.shadowOffsetY = 4; }
+    const g = c.createLinearGradient(x, y, x, y + h);
+    g.addColorStop(0, '#fdf2fa');
+    g.addColorStop(1, lit ? '#f0dcee' : '#ddcae4');
+    c.fillStyle = g;
+    roundRectOn(c, x, y, w, h, rr);
+    c.fill();
+    c.restore();
+
+    c.save();
+    c.lineWidth = lit ? 2.4 : 1.6;
+    c.strokeStyle = lit ? sym.color : 'rgba(20, 10, 30, 0.16)';
+    roundRectOn(c, x + 1.2, y + 1.2, w - 2.4, h - 2.4, rr - 1);
+    c.stroke();
+    c.restore();
+
+    c.save();
+    c.translate(x + w / 2, y + h / 2);
+    c.fillStyle = sym.color;
+    c.strokeStyle = sym.color;
+    if (lit) { c.shadowColor = sym.color; c.shadowBlur = 12; }
+    sym.draw(c, Math.min(w, h) * 0.3);
+    c.restore();
+  }
+
+  // ---- the sprite cache ------------------------------------------------------
+  // Every card is one of fourteen pictures: one back, and a plain and a matched
+  // face per symbol in play. Painted live, a full board put 24 blurred shadows,
+  // 24 clipped hatch fills and 48 gradients into every frame, and a 1800 × 1350
+  // desktop surface ran at half rate — measurably, against snake in the same
+  // browser. Baked once per layout it is 24 drawImage calls, and the picture on
+  // screen is the same one.
+  const SPRITE_PAD = 24;                 // logical room for the baked shadow and glow
+  const sprites = { key: '', q: 1, back: null, faces: new Map() };
+
+  function makeSprite(w, h, q, paint) {
+    const off = document.createElement('canvas');
+    off.width = Math.max(1, Math.ceil((w + SPRITE_PAD * 2) * q));
+    off.height = Math.max(1, Math.ceil((h + SPRITE_PAD * 2) * q));
+    const c = off.getContext('2d');
+    c.scale(q, q);
+    c.translate(SPRITE_PAD, SPRITE_PAD);
+    paint(c);
+    return off;
+  }
+
+  function buildSprites() {
+    const L = S.L;
+    if (!L || !S.cards.length) return;
+    // Bake at the resolution the card is actually drawn at, so it is never
+    // upscaled. Capped, because past three device pixels per logical one the
+    // sharpness is gone and only the memory is left.
+    const q = clamp(view.scale * view.dpr, 1, 2.5);
+    const key = `${L.w.toFixed(2)}|${q.toFixed(2)}`;
+    if (sprites.key === key) return;
+    sprites.key = key;
+    sprites.q = q;
+    sprites.back = makeSprite(L.w, L.h, q, (c) => paintBack(c, 0, 0, L.w, L.h));
+    sprites.faces = new Map();
+    for (const card of S.cards) {
+      if (sprites.faces.has(card.sym)) continue;
+      const sym = SYMBOLS[card.sym];
+      sprites.faces.set(card.sym, {
+        plain: makeSprite(L.w, L.h, q, (c) => paintFace(c, 0, 0, L.w, L.h, sym, 0)),
+        lit: makeSprite(L.w, L.h, q, (c) => paintFace(c, 0, 0, L.w, L.h, sym, 1)),
+      });
+    }
+  }
+
+  function drawCards() {
+    const L = S.L;
+    if (!L || !S.cards.length) return;
+    buildSprites();
+    if (!sprites.back) return;
+    const dw = L.w + SPRITE_PAD * 2, dh = L.h + SPRITE_PAD * 2;
+    const glow = 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(S.clock * 2.6));
+
+    for (let i = 0; i < S.cards.length; i++) {
+      const card = S.cards[i];
+      if (card.dealT <= 0) continue;                 // still waiting its turn in the cascade
+      const rect = cardRect(L, i);
+      const deal = Math.min(1, card.dealT / DEAL_DUR_S);
+      const ease = 1 - Math.pow(1 - deal, 3);
+
+      // The flip: a horizontal scale from 1 through 0 back to 1, with the face
+      // swapped at the halfway point, eased by a cosine so the card is quickest
+      // when it is edge-on. A memory game with instant swaps feels like a
+      // spreadsheet; this is the one animation worth spending frames on.
+      let showUp = card.up, sx = 1, sy = 1;
+      if (card.flipT >= 0) {
+        const p = card.flipT / FLIP_S;
+        showUp = p < 0.5 ? card.from : card.up;
+        sx = Math.max(0.02, Math.abs(Math.cos(Math.PI * p)));
+        sy = 1 + 0.07 * Math.sin(Math.PI * p);       // the small lift that sells it as a card
+      }
+      if (card.matched && card.matchT < MATCH_POP_S) {
+        const pop = 1 + 0.13 * Math.sin((card.matchT / MATCH_POP_S) * Math.PI);
+        sx *= pop; sy *= pop;
+      }
+      sx *= 0.74 + 0.26 * ease; sy *= 0.74 + 0.26 * ease;
+
+      const ox = card.shakeT > 0 ? Math.sin(card.shakeT * 62) * card.shakeT * 26 : 0;
+      const oy = (1 - ease) * -24;
+
+      ctx.save();
+      ctx.globalAlpha = ease;
+      ctx.translate(rect.x + rect.w / 2 + ox, rect.y + rect.h / 2 + oy);
+      ctx.scale(sx, sy);
+      if (showUp) {
+        const pair = sprites.faces.get(card.sym);
+        ctx.drawImage(pair.plain, -dw / 2, -dh / 2, dw, dh);
+        if (card.matched) {
+          ctx.globalAlpha = ease * glow;
+          ctx.drawImage(pair.lit, -dw / 2, -dh / 2, dw, dh);
+        }
+      } else {
+        ctx.drawImage(sprites.back, -dw / 2, -dh / 2, dw, dh);
+      }
+      ctx.restore();
+    }
+
+    // The keyboard focus ring, drawn last and outside the flip transform so it
+    // stays a steady frame while the card turns inside it.
+    if (S.mode === 'playing' || S.mode === 'paused') {
+      const focused = clamp(S.cursor, 0, S.cards.length - 1);
+      const rect = cardRect(L, focused);
+      // Fade in with the card it belongs to. Drawn unconditionally, the ring hung
+      // in mid-air around an empty slot for the length of the deal cascade, which
+      // reads as a rendering bug rather than as a focus indicator.
+      const dealt = clamp(S.cards[focused].dealT / DEAL_DUR_S, 0, 1);
+      if (dealt <= 0) return;
+      // The ring never dims below "obviously there": what breathes is the glow
+      // around it, not the ring itself. A focus indicator that fades out for half
+      // of every second is a focus indicator you have to hunt for.
+      const pulse = 0.5 + 0.5 * Math.sin(S.clock * 4.6);
+      ctx.save();
+      ctx.strokeStyle = `rgba(${RING}, ${(dealt * (0.82 + 0.18 * pulse)).toFixed(3)})`;
+      ctx.lineWidth = 3.5;
+      ctx.shadowColor = `rgba(${RING}, ${(dealt * 0.8).toFixed(3)})`;
+      ctx.shadowBlur = 8 + pulse * 14;
+      roundRect(rect.x - 5, rect.y - 5, rect.w + 10, rect.h + 10, Math.min(rect.w, rect.h) * 0.16 + 5);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+
+  // ---- chrome ----------------------------------------------------------------
+  // Two round buttons in the upper right. They are there because a phone has no
+  // M key and no P key, and they are up in the corner because the middle of the
+  // board belongs to the cards.
+  const BTN_SOUND = { x: 508, y: 26, r: 15 };
+  const BTN_PAUSE = { x: 468, y: 26, r: 15 };
+  const inButton = (btn, p) => Math.hypot(p.x - btn.x, p.y - btn.y) <= btn.r + 6;
+
+  function drawButton(btn, kind) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(btn.x, btn.y, btn.r, 0, TAU);
+    ctx.fillStyle = 'rgba(244, 114, 182, 0.12)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(244, 114, 182, 0.4)';
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    ctx.translate(btn.x, btn.y);
+    ctx.fillStyle = INK;
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 1.7;
+    ctx.lineCap = 'round';
+    if (kind === 'sound') {
+      ctx.beginPath();
+      ctx.moveTo(-6, -2.4); ctx.lineTo(-2.6, -2.4); ctx.lineTo(1.2, -6.2);
+      ctx.lineTo(1.2, 6.2); ctx.lineTo(-2.6, 2.4); ctx.lineTo(-6, 2.4);
+      ctx.closePath(); ctx.fill();
+      if (S.muted) {
+        ctx.beginPath();
+        ctx.moveTo(3.6, -4.2); ctx.lineTo(8.2, 4.2);
+        ctx.moveTo(8.2, -4.2); ctx.lineTo(3.6, 4.2);
+        ctx.stroke();
+      } else {
+        ctx.beginPath(); ctx.arc(1.8, 0, 4, -0.8, 0.8); ctx.stroke();
+        ctx.beginPath(); ctx.arc(1.8, 0, 7, -0.8, 0.8); ctx.stroke();
+      }
+    } else if (S.mode === 'paused') {
+      ctx.beginPath();
+      ctx.moveTo(-3.6, -5.6); ctx.lineTo(5.6, 0); ctx.lineTo(-3.6, 5.6);
+      ctx.closePath(); ctx.fill();
+    } else {
+      ctx.fillRect(-4.6, -5.4, 3.2, 10.8);
+      ctx.fillRect(1.4, -5.4, 3.2, 10.8);
+    }
+    ctx.restore();
+  }
+
+  function stat(x, align, label, value, color) {
+    ctx.textAlign = align;
+    ctx.font = `600 11px ${FONT}`;
+    ctx.fillStyle = 'rgba(244, 114, 182, 0.8)';
+    ctx.fillText(label, x, 56);
+    ctx.font = `700 26px ${FONT}`;
+    ctx.fillStyle = color || INK;
+    ctx.fillText(value, x, 82);
+  }
+
+  function drawHud() {
+    const shape = S.shape || board();
+    const pairs = S.cards.length / 2;
+    ctx.textBaseline = 'middle';
+
+    ctx.textAlign = 'left';
+    ctx.font = `700 12px ${FONT}`;
+    ctx.fillStyle = 'rgba(244, 114, 182, 0.75)';
+    ctx.fillText(`MEMORY MATCH · ${shape.label} ${shape.name}`, 24, 26);
+
+    stat(24, 'left', 'MOVES', String(S.moves));
+    stat(W / 2, 'center', 'PAIRS', `${S.found}/${pairs}`, S.found === pairs ? '#fde047' : INK);
+    stat(W - 24, 'right', 'TIME', timeText(S.time));
+
+    drawButton(BTN_SOUND, 'sound');
+    drawButton(BTN_PAUSE, 'pause');
+
+    ctx.textAlign = 'center';
+    ctx.font = `600 13px ${FONT}`;
+    ctx.fillStyle = S.newBest ? '#fde047' : 'rgba(244, 114, 182, 0.85)';
+    ctx.fillText(`BEST on ${shape.name} — ${bestText(S.best)}`, W / 2, 670);
+    ctx.font = `500 12px ${FONT}`;
+    ctx.fillStyle = DIM;
+    ctx.fillText('Arrows move · Enter flips · M sound · P pause', W / 2, 696);
+  }
+
+  function drawEffects() {
+    for (const p of S.parts) {
+      ctx.globalAlpha = Math.max(0, 1 - p.t / p.life);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+    }
+    ctx.globalAlpha = 1;
+    for (const f of S.floats) {
+      ctx.globalAlpha = Math.max(0, 1 - f.t / 0.95);
+      ctx.fillStyle = f.color;
+      ctx.font = `800 22px ${FONT}`;
+      ctx.textAlign = 'center';
+      ctx.fillText(f.text, f.x, f.y - f.t * 42);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  const chipRect = (i) => ({ x: 30 + i * 164, y: 462, w: 152, h: 54 });
+
+  function drawChips(selected) {
+    for (let i = 0; i < BOARDS.length; i++) {
+      const r = chipRect(i);
+      const on = i === selected;
+      ctx.fillStyle = on ? 'rgba(244, 114, 182, 0.22)' : 'rgba(255, 255, 255, 0.045)';
+      roundRect(r.x, r.y, r.w, r.h, 14);
+      ctx.fill();
+      ctx.lineWidth = on ? 2.2 : 1.2;
+      ctx.strokeStyle = on ? ACCENT : 'rgba(244, 114, 182, 0.24)';
+      roundRect(r.x, r.y, r.w, r.h, 14);
+      ctx.stroke();
+      ctx.textAlign = 'center';
+      ctx.font = `800 13px ${FONT}`;
+      ctx.fillStyle = on ? ACCENT : 'rgba(247, 232, 245, 0.6)';
+      ctx.fillText(BOARDS[i].label, r.x + r.w / 2, r.y + 19);
+      ctx.font = `600 16px ${FONT}`;
+      ctx.fillStyle = on ? INK : 'rgba(247, 232, 245, 0.45)';
+      ctx.fillText(BOARDS[i].name, r.x + r.w / 2, r.y + 38);
+    }
+  }
+
+  function drawTitle() {
+    // A still title screen on purpose: the first thing the player sees should be
+    // a composed picture, not a loop asking for attention.
+    const shape = board();
+    const fan = [
+      { sym: 4, angle: -0.17, dx: -108, up: true },
+      { sym: 11, angle: 0.17, dx: 108, up: true },
+      { sym: 0, angle: 0, dx: 0, up: false },
+    ];
+    for (const card of fan) {
+      ctx.save();
+      ctx.translate(270 + card.dx, 214);
+      ctx.rotate(card.angle);
+      if (card.up) paintFace(ctx, -47, -64, 94, 128, SYMBOLS[card.sym], 0);
+      else paintBack(ctx, -50, -68, 100, 136);
+      ctx.restore();
+    }
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `800 46px ${FONT}`;
+    ctx.fillStyle = INK;
+    ctx.fillText('MEMORY MATCH', W / 2, 352);
+
+    ctx.font = `500 16px ${FONT}`;
+    ctx.fillStyle = 'rgba(247, 232, 245, 0.72)';
+    ctx.fillText('Flip two cards at a time and find every pair.', W / 2, 396);
+    ctx.fillText('Fewest moves wins; the clock breaks a tie.', W / 2, 420);
+
+    drawChips(S.boardIndex);
+
+    ctx.font = `600 13px ${FONT}`;
+    ctx.fillStyle = 'rgba(244, 114, 182, 0.85)';
+    ctx.fillText(`Best on ${shape.name} — ${bestText(readBest(shape.id))}`, W / 2, 548);
+
+    ctx.font = `700 20px ${FONT}`;
+    ctx.fillStyle = ACCENT;
+    ctx.fillText('Tap or press Space to play', W / 2, 594);
+
+    ctx.font = `500 13px ${FONT}`;
+    ctx.fillStyle = DIM;
+    ctx.fillText('Left and right arrows choose the board · 1 2 3 pick one', W / 2, 636);
+    ctx.fillText('In play: arrows move the ring, Enter flips, M mutes', W / 2, 660);
+
+    drawButton(BTN_SOUND, 'sound');
+  }
+
+  function drawOverlay(title, lines, accent) {
+    ctx.fillStyle = 'rgba(20, 10, 30, 0.88)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = accent;
+    ctx.font = `800 48px ${FONT}`;
+    ctx.fillText(title, W / 2, H / 2 - 110);
+    lines.forEach((line, i) => {
+      ctx.font = i === 0 ? `700 24px ${FONT}` : `500 17px ${FONT}`;
+      ctx.fillStyle = i === 0 ? INK : 'rgba(247, 232, 245, 0.72)';
+      ctx.fillText(line, W / 2, H / 2 - 46 + i * 34);
+    });
+  }
+
+  // The glow behind the stage is fixed in logical space, so it is built once.
+  let washCache = null;
+  const wash = () => {
+    if (!washCache) {
+      washCache = ctx.createRadialGradient(W / 2, 250, 40, W / 2, 300, 460);
+      washCache.addColorStop(0, 'rgba(244, 114, 182, 0.13)');
+      washCache.addColorStop(1, 'rgba(244, 114, 182, 0)');
+    }
+    return washCache;
+  };
+
+  function draw() {
+    ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+    ctx.fillStyle = '#0c0614';
+    ctx.fillRect(0, 0, view.cw, view.ch);
+
+    ctx.save();
+    ctx.translate(view.ox, view.oy);
+    ctx.scale(view.scale, view.scale);
+    if (S.shake > 0) ctx.translate((Math.random() - 0.5) * S.shake, (Math.random() - 0.5) * S.shake);
+
+    // The stage itself, so the letterbox bars are clearly outside the game.
+    ctx.fillStyle = PLUM;
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = wash();
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.textBaseline = 'middle';
+    if (S.mode === 'title') {
+      drawTitle();
+    } else {
+      drawHud();
+      drawCards();
+      drawEffects();
+      if (S.mode === 'paused') {
+        drawOverlay('PAUSED', ['The clock is stopped', 'Tap, or press P, to carry on'], ACCENT);
+      } else if (S.mode === 'won') {
+        const played = S.shape, next = board();
+        drawOverlay('ALL PAIRS FOUND', [
+          `${S.moves} moves · ${timeText(S.time)}`,
+          S.newBest ? `A new best on ${played.name}!` : `Best on ${played.name} — ${bestText(S.best)}`,
+          `Next board: ${next.label} ${next.name}  (← → to change)`,
+          '',
+          S.overT > 0.6 ? 'Tap or press Space to play again' : '',
+        ], S.newBest ? '#fde047' : ACCENT);
+      }
+    }
+
+    ctx.restore();
+  }
+
+  // ---- input -----------------------------------------------------------------
+  // The canvas is stretched to the viewport and the game is letterboxed inside
+  // it, so a pointer has to come back through exactly the transform it was drawn
+  // with — a guess is off by the width of the bars, which on a 4:3 frame is
+  // about two hundred pixels.
+  const toLogical = (clientX, clientY) => {
+    const rect = canvas.getBoundingClientRect();
+    const px = (clientX - rect.left) * (view.cw / rect.width || 1);
+    const py = (clientY - rect.top) * (view.ch / rect.height || 1);
+    return { x: (px - view.ox) / view.scale, y: (py - view.oy) / view.scale };
+  };
+
+  // Snap to the nearest card rather than demanding a hit inside its rectangle.
+  // Rejecting the gutter sounds tidy and plays badly: a tap two pixels into the
+  // gap did nothing at all, which on a phone reads as the game ignoring you. It
+  // is also load-bearing here — on the 6 x 4 board the exact centre of the canvas
+  // falls on the crossing of two gutters, so a tap there hit nothing, and the
+  // centre of the canvas is precisely where a first-time player (and the portal's
+  // own check) puts their finger.
+  function cardAt(p) {
+    const L = S.L;
+    if (!L || !S.cards.length) return -1;
+    const gw = L.cols * L.w + (L.cols - 1) * GAP;
+    const gh = L.rows * L.h + (L.rows - 1) * GAP;
+    // One gutter of slack around the grid, and nothing beyond it: the score line
+    // and the footer stay un-tappable.
+    if (p.x < L.x - GAP || p.x > L.x + gw + GAP || p.y < L.y - GAP || p.y > L.y + gh + GAP) return -1;
+    const col = clamp(Math.round((p.x - L.x - L.w / 2) / (L.w + GAP)), 0, L.cols - 1);
+    const row = clamp(Math.round((p.y - L.y - L.h / 2) / (L.h + GAP)), 0, L.rows - 1);
+    return row * L.cols + col;
+  }
+
+  const MOVES = {
+    ArrowLeft: [-1, 0], KeyA: [-1, 0],
+    ArrowRight: [1, 0], KeyD: [1, 0],
+    ArrowUp: [0, -1], KeyW: [0, -1],
+    ArrowDown: [0, 1], KeyS: [0, 1],
+  };
+
+  canvas.addEventListener('pointerdown', (e) => {
+    canvas.focus();
+    const p = toLogical(e.clientX, e.clientY);
+
+    if (S.mode === 'title' || S.mode === 'playing') {
+      if (inButton(BTN_SOUND, p)) { toggleMute(); return; }
+      if (S.mode === 'playing' && inButton(BTN_PAUSE, p)) { S.mode = 'paused'; return; }
+    }
+
+    if (S.mode === 'title') {
+      for (let i = 0; i < BOARDS.length; i++) {
+        const r = chipRect(i);
+        if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) {
+          // Tapping HARD means "play hard", not "select hard and then tell me again".
+          S.boardIndex = i;
+          start();
+          return;
+        }
+      }
+      start();
+      return;
+    }
+    if (S.mode === 'paused') { S.mode = 'playing'; return; }
+    if (S.mode === 'won') { if (S.overT > 0.6) start(); return; }
+
+    // Playing. A tap on the board always cuts a pending wrong pair short first —
+    // the delay is never allowed to swallow an input — and then does whatever the
+    // tap asked for. (A tap on the sound or pause button returned above and
+    // deliberately leaves the pair up: adjusting the volume is not a move.)
+    skipHold();
+    if (S.guardT > 0) return;
+    const hit = cardAt(p);
+    if (hit >= 0) {
+      S.cursor = hit;
+      flipCard(hit);
+    }
+  });
+
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  window.addEventListener('keydown', (e) => {
+    // Anything with a modifier belongs to the browser or the operating system.
+    // Without this, Cmd+R and Ctrl+R restarted the run on their way to reloading
+    // the page, and Alt+Arrow walked the focus ring while switching desktops.
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const code = e.code;
+
+    if (code === 'KeyM') { e.preventDefault(); toggleMute(); return; }
+    if (code === 'KeyP' || code === 'Escape') {
+      e.preventDefault();
+      if (S.mode === 'playing') S.mode = 'paused';
+      else if (S.mode === 'paused') S.mode = 'playing';
+      return;
+    }
+    if (code === 'KeyR') { e.preventDefault(); if (S.mode !== 'title') start(); return; }
+    if (code === 'Digit1' || code === 'Digit2' || code === 'Digit3') {
+      e.preventDefault();
+      if (S.mode === 'title' || S.mode === 'won') setBoard(Number(code.slice(5)) - 1);
+      return;
+    }
+
+    const move = MOVES[code];
+    if (move) {
+      e.preventDefault();
+      // Every screen answers the arrows. On the board they walk the focus ring
+      // from card to card, which is the keyboard half of this game; on the title
+      // and the finish screen they pick the board size for the next run.
+      if (S.mode === 'title' || S.mode === 'won') { setBoard(S.boardIndex + move[0] + move[1]); return; }
+      if (S.mode !== 'playing') return;
+      skipHold();
+      moveCursor(move[0], move[1]);
+      return;
+    }
+
+    if (code === 'Space' || code === 'Enter' || code === 'NumpadEnter') {
+      e.preventDefault();
+      if (S.mode === 'title') { start(); return; }
+      if (S.mode === 'paused') { S.mode = 'playing'; return; }
+      if (S.mode === 'won') { if (S.overT > 0.6) start(); return; }
+      skipHold();
+      flipCard(S.cursor);
+    }
+  });
+
+  // A tab sent to the background must not keep the clock running: a best time
+  // earned while the player was reading their mail is not a best time.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && S.mode === 'playing') S.mode = 'paused';
+  });
+
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', resize);
+
+  // ---- loop ------------------------------------------------------------------
+  let last = 0;
+  function frame(now) {
+    if (!last) last = now;
+    // Clamped: a tab restored after a minute away should resume, not fast-forward
+    // a minute of animation in one step.
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    // The CSS size is not the only thing that can change under us: dragging the
+    // window to a display with different scaling moves devicePixelRatio and
+    // nothing else, and a backing store left at the old ratio is blurry until
+    // something happens to resize the page.
+    const cw = canvas.clientWidth || window.innerWidth;
+    const ch = canvas.clientHeight || window.innerHeight;
+    if (cw !== view.cw || ch !== view.ch || Math.min(window.devicePixelRatio || 1, 2) !== view.dpr) resize();
+    update(dt);
+    if (S.mode !== 'title' || titleDirty) {
+      draw();
+      titleDirty = false;
+    }
+    requestAnimationFrame(frame);
+  }
+
+  S.L = layout(board());
+  S.best = readBest(board().id);
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

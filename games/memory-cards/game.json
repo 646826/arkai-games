@@ -1,0 +1,17 @@
+{
+  "slug": "memory-cards",
+  "title": "Memory Match",
+  "tagline": "Find every pair in the fewest moves",
+  "description": "Flip two cards at a time, remember what you saw, and match every pair on the board. Twelve drawn symbols, each in its own strong colour, across three board sizes from a gentle four by three up to a twenty-four card test of nerve. Your fewest moves and fastest time are kept on this device for every size.",
+  "categories": ["Memory", "Family"],
+  "controls": "Keyboard, touch & mouse",
+  "instructions": [
+    "Tap the board or press Space to start, and choose a board size with the left and right arrow keys or by tapping one of the three chips.",
+    "Flip two cards at a time: tap them, or move the focus ring with the arrow keys and press Enter or Space.",
+    "A matching pair stays face up and glows, while a mismatch shakes and flips back after a moment you can always tap straight through.",
+    "Clear every pair to finish. Press M for sound and P to pause; your fewest moves and best time are saved for each board size."
+  ],
+  "palette": ["#140a1e", "#f472b6"],
+  "added": "2026-09-16",
+  "updated": "2026-09-16"
+}

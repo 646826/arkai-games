@@ -1,0 +1,17 @@
+{
+  "slug": "breakout",
+  "title": "Breakout",
+  "tagline": "Bounce, smash, repeat.",
+  "description": "Bounce the ball, smash every brick and grab power-ups: wide paddle, multi-ball and slow motion. Six hand-made levels that loop faster and tougher, with your best score saved on this device.",
+  "categories": ["Arcade", "Classic"],
+  "controls": "Mouse, touch & keyboard",
+  "instructions": [
+    "Press Play, then tap, click or press Space to launch the ball.",
+    "Move the paddle with your mouse, finger or the arrow keys — where the ball hits the paddle sets its angle.",
+    "Catch falling capsules: W widens the paddle, M splits the ball, S slows it down, + gives an extra life.",
+    "Press P to pause, M to mute and F for fullscreen. Your best score is stored locally."
+  ],
+  "palette": ["#080d1a", "#6366f1"],
+  "added": "2026-09-15",
+  "updated": "2026-09-15"
+}

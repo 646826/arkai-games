@@ -1,0 +1,17 @@
+{
+  "slug": "sudoku-mini",
+  "title": "Mini Sudoku",
+  "tagline": "Sudoku that fits a coffee break",
+  "description": "A six-by-six sudoku with two-by-three boxes: every row, every column and every box holds the digits 1 to 6 exactly once. Every puzzle is generated fresh and checked to have exactly one solution, in three difficulties set by how many clues are left standing, and your best time is kept for each.",
+  "categories": ["Logic", "Daily"],
+  "controls": "Keyboard, touch & mouse",
+  "instructions": [
+    "Pick Easy, Medium or Hard on the title screen, or tap anywhere to play the last difficulty you used.",
+    "Tap a cell to select it, then tap a number on the pad or press 1 to 6; the arrow keys move the selected cell and 0 or Backspace clears it.",
+    "Selecting a cell lights up its row, its column, its 2x3 box and every other cell holding the same digit, which is how you spot where a digit can still go.",
+    "Turn on NOTES (or press N, or hold Shift while typing a digit) to leave small pencil marks, and watch for a digit that turns red: it clashes with a neighbour and it counts against your mistakes."
+  ],
+  "palette": ["#081a1a", "#22d3ee"],
+  "added": "2026-09-16",
+  "updated": "2026-09-16"
+}

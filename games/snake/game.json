@@ -1,0 +1,17 @@
+{
+  "slug": "snake",
+  "title": "Snake",
+  "tagline": "Eat, grow, never bite yourself.",
+  "description": "Steer the snake around a 21 by 25 board, eat to grow and keep clear of the walls and your own tail. The pace climbs with every bite, gold stars are worth five ordinary ones and vanish if you dawdle, and your best score is kept on this device.",
+  "categories": ["Arcade", "Classic"],
+  "controls": "Keyboard, touch & swipe",
+  "instructions": [
+    "Tap the board or press Space to start.",
+    "Steer with the arrow keys, WASD, or by swiping anywhere on the board.",
+    "Eating food scores 10 and makes you longer; every fifth bite drops a gold star worth 50 that disappears when its ring runs out.",
+    "Press P to pause and M for sound. Walls and your own tail end the run — your best score is stored locally."
+  ],
+  "palette": ["#04120c", "#4ade80"],
+  "added": "2026-09-15",
+  "updated": "2026-09-15"
+}

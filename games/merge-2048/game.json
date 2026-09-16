@@ -1,0 +1,17 @@
+{
+  "slug": "merge-2048",
+  "title": "Merge 2048",
+  "tagline": "Slide, merge, chase the 2048 tile",
+  "description": "Slide every tile on a four by four board at once, and any two equal numbers that meet collapse into their sum. A new tile arrives after each move, the colours heat up from pale sand to glowing orange as the numbers climb, and the run ends only when no move is left anywhere on the board. Reach 2048 and you may keep going.",
+  "categories": ["Puzzle", "Numbers"],
+  "controls": "Keyboard, touch & swipe",
+  "instructions": [
+    "Tap the board or press Space to start.",
+    "Slide the whole board with the arrow keys, WASD, or a swipe in any direction.",
+    "Two tiles with the same number merge into one tile worth double, and that number is added to your score.",
+    "Press U to take back the last move, M for sound, and P to pause; the board's colour tells you how hot the run has become."
+  ],
+  "palette": ["#0b1020", "#f5a524"],
+  "added": "2026-09-16",
+  "updated": "2026-09-16"
+}

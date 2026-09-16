@@ -1,0 +1,634 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="color-scheme" content="dark">
+<title>Snake — Arkai</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #04120c; overflow: hidden; }
+  body { -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+  canvas { display: block; width: 100vw; height: 100vh; touch-action: none; outline: none; cursor: pointer; }
+</style>
+</head>
+<body>
+<canvas id="game" tabindex="0" aria-label="Snake game. Steer with the arrow keys, WASD or by swiping. Eat to grow and avoid the walls and your own tail."></canvas>
+<script>
+(() => {
+  'use strict';
+
+  // ---- board (logical pixels, origin top-left, x right, y down) ----
+  const W = 540, H = 720, TOP = 64;
+  const COLS = 21, ROWS = 25, CELL = 24;
+  const BOARD_X = (W - COLS * CELL) / 2;          // 18
+  const BOARD_Y = TOP + (H - TOP - 48 - ROWS * CELL) / 2;
+  const BOARD_W = COLS * CELL, BOARD_H = ROWS * CELL;
+  const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+
+  // Speed is cells per second: the whole difficulty curve lives in these three
+  // numbers, so "too easy at the start" is one edit and not a hunt through code.
+  const SPEED_START = 7, SPEED_MAX = 16, SPEED_RAMP = 34; // foods eaten to reach max
+  const GOLD_EVERY = 5, GOLD_LIFE = 6;                    // every Nth food, seconds alive
+  const STORE_BEST = 'arkai:snake:best', STORE_MUTE = 'arkai:snake:muted';
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+
+  const storage = {
+    get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+    set(key, value) { try { localStorage.setItem(key, value); return true; } catch { return false; } },
+  };
+
+  const S = {
+    mode: 'title',            // title | playing | paused | gameover
+    cells: [], dir: { x: 1, y: 0 }, queue: [],
+    prevTail: null, grew: false,
+    food: null, gold: null, goldT: 0,
+    eaten: 0, score: 0, best: Number(storage.get(STORE_BEST)) || 0, newBest: false,
+    muted: storage.get(STORE_MUTE) === '1',
+    acc: 0, clock: 0, shake: 0, overT: 0, flash: 0,
+    parts: [], floats: [],
+  };
+
+  // ---- portal events (same-origin parent only) ----
+  const emit = (event, data) => {
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: 'game-event', event, data: data || {} }, location.origin);
+      }
+    } catch { /* not embedded */ }
+  };
+
+  // ---- sound (generated, no assets) ----
+  let audio = null;
+  const ensureAudio = () => {
+    if (audio || S.muted) return;
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (Ctx) audio = new Ctx();
+    } catch { audio = null; }
+  };
+  const tone = (freq, dur = 0.07, type = 'square', vol = 0.05, delay = 0) => {
+    if (S.muted || !audio || audio.state !== 'running') return;
+    const t = audio.currentTime + delay;
+    const osc = audio.createOscillator();
+    const gain = audio.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t);
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(vol, t + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(gain);
+    gain.connect(audio.destination);
+    osc.start(t);
+    osc.stop(t + dur + 0.02);
+  };
+
+  // ---- helpers ----
+  const rnd = (n) => Math.floor(Math.random() * n);
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const cellX = (cx) => BOARD_X + cx * CELL + CELL / 2;
+  const cellY = (cy) => BOARD_Y + cy * CELL + CELL / 2;
+  const speed = () => SPEED_START + (SPEED_MAX - SPEED_START) * Math.min(1, S.eaten / SPEED_RAMP);
+  const stepTime = () => 1 / speed();
+
+  const occupied = (x, y) => S.cells.some((c) => c.x === x && c.y === y);
+
+  // Every spawn has to dodge the snake *and* whatever else is already on the
+  // board: food landing under the gold star made one of them unreachable.
+  function freeCell(...avoid) {
+    const free = [];
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        if (occupied(x, y)) continue;
+        if (avoid.some((c) => c && c.x === x && c.y === y)) continue;
+        free.push({ x, y });
+      }
+    }
+    // On a board with no room left there is nothing to place. The caller has to
+    // treat that as "not yet", not as "never": `step` asks again every move, and
+    // a moving tail frees cells up.
+    return free.length ? free[rnd(free.length)] : null;
+  }
+
+  function spawnParts(x, y, color, count) {
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2, s = 40 + Math.random() * 140;
+      S.parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.45 + Math.random() * 0.35, t: 0, color });
+    }
+  }
+
+  function float(x, y, text, color) {
+    S.floats.push({ x, y, text, color, t: 0 });
+  }
+
+  // ---- game flow ----
+  function reset() {
+    const cy = Math.floor(ROWS / 2);
+    S.cells = [{ x: 5, y: cy }, { x: 4, y: cy }, { x: 3, y: cy }];
+    S.dir = { x: 1, y: 0 };
+    S.queue = [];
+    S.prevTail = null;
+    S.grew = false;
+    S.eaten = 0; S.score = 0; S.newBest = false;
+    S.acc = 0; S.shake = 0; S.overT = 0; S.flash = 0;
+    S.parts = []; S.floats = [];
+    S.gold = null; S.goldT = 0;
+    S.food = freeCell(null);
+  }
+
+  function start() {
+    reset();
+    S.mode = 'playing';
+    ensureAudio();
+    if (audio && audio.state === 'suspended') audio.resume().catch(() => {});
+    tone(440, 0.08, 'triangle', 0.05);
+    tone(660, 0.1, 'triangle', 0.05, 0.08);
+    emit('start', { game: 'snake' });
+  }
+
+  function gameOver() {
+    S.mode = 'gameover';
+    S.overT = 0;
+    S.shake = 12;
+    S.flash = 0.35;
+    const head = S.cells[0];
+    spawnParts(cellX(head.x), cellY(head.y), '#f87171', 26);
+    if (S.score > S.best) {
+      S.best = S.score;
+      S.newBest = true;
+      storage.set(STORE_BEST, String(S.best));
+    }
+    tone(300, 0.14, 'sawtooth', 0.05);
+    tone(200, 0.2, 'sawtooth', 0.05, 0.1);
+    tone(120, 0.3, 'sawtooth', 0.05, 0.22);
+    emit('gameover', { score: S.score, best: S.best, length: S.cells.length });
+  }
+
+  function turn(x, y) {
+    // Queue instead of overwrite: at 16 cells per second a quick up-then-left is
+    // two turns inside one step, and dropping the second one feels like a missed
+    // input rather than a mistake.
+    const last = S.queue.length ? S.queue[S.queue.length - 1] : S.dir;
+    if (last.x === x && last.y === y) return;            // already going there
+    if (last.x === -x && last.y === -y) return;          // no instant reversal
+    if (S.queue.length < 2) S.queue.push({ x, y });
+  }
+
+  function step() {
+    if (S.queue.length) S.dir = S.queue.shift();
+    const head = S.cells[0];
+    const next = { x: head.x + S.dir.x, y: head.y + S.dir.y };
+
+    if (next.x < 0 || next.y < 0 || next.x >= COLS || next.y >= ROWS) return gameOver();
+
+    const eatsFood = !!(S.food && next.x === S.food.x && next.y === S.food.y);
+    const eatsGold = !!(S.gold && next.x === S.gold.x && next.y === S.gold.y);
+
+    // The tail cell frees up on this very step unless the snake grows, so moving
+    // into it is legal — and it has to be, or every long run would end on a move
+    // that never actually collides with anything.
+    const tail = S.cells[S.cells.length - 1];
+    const hitsSelf = S.cells.some((c, i) =>
+      c.x === next.x && c.y === next.y && !(i === S.cells.length - 1 && !eatsFood));
+    if (hitsSelf) return gameOver();
+
+    S.cells.unshift(next);
+    if (eatsFood) {
+      S.grew = true;
+      S.prevTail = null;
+    } else {
+      S.grew = false;
+      S.prevTail = tail;
+      S.cells.pop();
+    }
+
+    if (eatsFood) {
+      S.eaten++;
+      S.score += 10;
+      spawnParts(cellX(next.x), cellY(next.y), '#f97316', 12);
+      float(cellX(next.x), cellY(next.y) - 6, '+10', '#fdba74');
+      tone(520 + Math.min(12, S.eaten) * 18, 0.07, 'square', 0.05);
+      S.food = freeCell(S.gold);
+      if (S.eaten % GOLD_EVERY === 0 && !S.gold) {
+        S.gold = freeCell(S.food);
+        S.goldT = GOLD_LIFE;
+        if (S.gold) tone(880, 0.09, 'triangle', 0.045);
+      }
+    }
+    if (eatsGold) {
+      S.score += 50;
+      S.gold = null;
+      spawnParts(cellX(next.x), cellY(next.y), '#fbbf24', 20);
+      float(cellX(next.x), cellY(next.y) - 6, '+50', '#fde68a');
+      tone(700, 0.08, 'triangle', 0.05);
+      tone(1050, 0.12, 'triangle', 0.05, 0.07);
+      // The gold is eaten without growing, so the freed tail cell may be where
+      // the next food belongs: ask for a fresh spot only if the board lost it.
+    }
+    // The board can be too full to place food at the moment it is eaten. Asking
+    // again every step is what keeps that from being permanent: without it a
+    // long snake could end up with no food and no gold, circling forever.
+    if (!S.food) S.food = freeCell(S.gold);
+  }
+
+  function update(dt) {
+    S.clock += dt;
+    if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 30);
+    if (S.flash > 0) S.flash = Math.max(0, S.flash - dt);
+
+    for (let i = S.parts.length - 1; i >= 0; i--) {
+      const p = S.parts[i];
+      p.t += dt;
+      if (p.t >= p.life) { S.parts.splice(i, 1); continue; }
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vx *= 0.94; p.vy = p.vy * 0.94 + 260 * dt;
+    }
+    for (let i = S.floats.length - 1; i >= 0; i--) {
+      const f = S.floats[i];
+      f.t += dt;
+      if (f.t > 0.9) S.floats.splice(i, 1);
+    }
+
+    if (S.mode === 'gameover') { S.overT += dt; return; }
+    if (S.mode !== 'playing') return;
+
+    if (S.gold) {
+      S.goldT -= dt;
+      if (S.goldT <= 0) S.gold = null;
+    }
+
+    S.acc += dt;
+    let guard = 0;
+    while (S.acc >= stepTime() && S.mode === 'playing' && guard++ < 4) {
+      S.acc -= stepTime();
+      step();
+    }
+    // A tab restored after a minute in the background must not replay a minute
+    // of steps: drop the backlog instead of killing the player off-screen.
+    if (guard >= 4) S.acc = 0;
+  }
+
+  // ---- drawing ----
+  const view = { scale: 1, ox: 0, oy: 0, dpr: 1, cw: 0, ch: 0 };
+
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    const cw = window.innerWidth, ch = window.innerHeight;
+    view.dpr = dpr; view.cw = cw; view.ch = ch;
+    view.scale = Math.min(cw / W, ch / H);
+    view.ox = (cw - W * view.scale) / 2;
+    view.oy = (ch - H * view.scale) / 2;
+    canvas.width = Math.round(cw * dpr);
+    canvas.height = Math.round(ch * dpr);
+  }
+
+  const roundRect = (x, y, w, h, r) => {
+    const rr = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + rr, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rr);
+    ctx.arcTo(x + w, y + h, x, y + h, rr);
+    ctx.arcTo(x, y + h, x, y, rr);
+    ctx.arcTo(x, y, x + w, y, rr);
+    ctx.closePath();
+  };
+
+  function drawBoard() {
+    ctx.fillStyle = '#071b12';
+    roundRect(BOARD_X - 6, BOARD_Y - 6, BOARD_W + 12, BOARD_H + 12, 14);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(52, 211, 153, 0.22)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Checkerboard, two shades apart by a hair: it gives the eye a grid to judge
+    // distance by without turning the board into graph paper.
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        if ((x + y) % 2 === 0) continue;
+        ctx.fillStyle = 'rgba(255,255,255,0.022)';
+        ctx.fillRect(BOARD_X + x * CELL, BOARD_Y + y * CELL, CELL, CELL);
+      }
+    }
+  }
+
+  function drawFood(f, t) {
+    const pulse = 1 + Math.sin(t * 6) * 0.06;
+    const x = cellX(f.x), y = cellY(f.y), r = CELL * 0.3 * pulse;
+    const g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.2, x, y, r);
+    g.addColorStop(0, '#fdba74');
+    g.addColorStop(1, '#ea580c');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(253, 186, 116, 0.5)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x, y, r + 3, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  function drawGold(f, t) {
+    const left = S.goldT / GOLD_LIFE;
+    const pulse = 1 + Math.sin(t * 12) * 0.1;
+    const x = cellX(f.x), y = cellY(f.y), r = CELL * 0.32 * pulse;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = '#fbbf24';
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = (Math.PI / 5) * i - Math.PI / 2;
+      const rr = i % 2 === 0 ? r : r * 0.45;
+      ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    // The ring is the clock: gold that vanishes without warning reads as a bug.
+    ctx.strokeStyle = 'rgba(251, 191, 36, 0.85)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(x, y, CELL * 0.46, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * left);
+    ctx.stroke();
+  }
+
+  function snakePoints(t) {
+    const pts = S.cells.map((c) => ({ x: cellX(c.x), y: cellY(c.y) }));
+    if (pts.length === 0) return pts;
+    if (pts.length > 1) {
+      // Head slides out of the cell it left, tail slides out of the cell it freed:
+      // the same snake, one step of animation later.
+      pts[0] = { x: lerp(pts[1].x, pts[0].x, t), y: lerp(pts[1].y, pts[0].y, t) };
+    }
+    if (S.prevTail && pts.length > 1) {
+      const last = pts.length - 1;
+      pts[last] = {
+        x: lerp(cellX(S.prevTail.x), pts[last].x, t),
+        y: lerp(cellY(S.prevTail.y), pts[last].y, t),
+      };
+    }
+    return pts;
+  }
+
+  function drawSnake(t) {
+    const pts = snakePoints(t);
+    if (!pts.length) return;
+    const dead = S.mode === 'gameover';
+
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = dead ? 'rgba(248, 113, 113, 0.28)' : 'rgba(52, 211, 153, 0.22)';
+    ctx.lineWidth = CELL * 0.92;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    if (pts.length === 1) ctx.lineTo(pts[0].x + 0.01, pts[0].y);
+    ctx.stroke();
+
+    const grad = ctx.createLinearGradient(pts[0].x, pts[0].y, pts[pts.length - 1].x, pts[pts.length - 1].y);
+    grad.addColorStop(0, dead ? '#f87171' : '#4ade80');
+    grad.addColorStop(1, dead ? '#7f1d1d' : '#15803d');
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = CELL * 0.72;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    if (pts.length === 1) ctx.lineTo(pts[0].x + 0.01, pts[0].y);
+    ctx.stroke();
+
+    // eyes, looking where the snake is going
+    const head = pts[0];
+    const d = S.dir;
+    const side = { x: -d.y, y: d.x };
+    const eo = CELL * 0.17, ef = CELL * 0.12;
+    for (const sign of [1, -1]) {
+      const ex = head.x + side.x * eo * sign + d.x * ef;
+      const ey = head.y + side.y * eo * sign + d.y * ef;
+      ctx.fillStyle = '#04120c';
+      ctx.beginPath();
+      ctx.arc(ex, ey, CELL * 0.1, 0, Math.PI * 2);
+      ctx.fill();
+      if (!dead) {
+        ctx.fillStyle = '#ecfdf5';
+        ctx.beginPath();
+        ctx.arc(ex + d.x * 1.2, ey + d.y * 1.2, CELL * 0.045, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  function drawHud() {
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.font = `600 15px ${FONT}`;
+    ctx.fillStyle = '#6ee7b7';
+    ctx.fillText('SCORE', 20, 24);
+    ctx.font = `700 26px ${FONT}`;
+    ctx.fillStyle = '#ecfdf5';
+    ctx.fillText(String(S.score), 20, 46);
+
+    ctx.textAlign = 'center';
+    ctx.font = `600 15px ${FONT}`;
+    ctx.fillStyle = '#6ee7b7';
+    ctx.fillText('LENGTH', W / 2, 24);
+    ctx.font = `700 26px ${FONT}`;
+    ctx.fillStyle = '#ecfdf5';
+    ctx.fillText(String(S.cells.length), W / 2, 46);
+
+    ctx.textAlign = 'right';
+    ctx.font = `600 15px ${FONT}`;
+    ctx.fillStyle = '#6ee7b7';
+    ctx.fillText('BEST', W - 20, 24);
+    ctx.font = `700 26px ${FONT}`;
+    ctx.fillStyle = S.newBest ? '#fbbf24' : '#ecfdf5';
+    ctx.fillText(String(S.best), W - 20, 46);
+
+    ctx.textAlign = 'center';
+    ctx.font = `500 13px ${FONT}`;
+    ctx.fillStyle = 'rgba(167, 243, 208, 0.55)';
+    ctx.fillText(S.muted ? 'P pause · M sound off' : 'P pause · M sound on', W / 2, H - 22);
+  }
+
+  function drawOverlay(title, lines, accent) {
+    ctx.fillStyle = 'rgba(4, 18, 12, 0.82)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = accent;
+    ctx.font = `800 54px ${FONT}`;
+    ctx.fillText(title, W / 2, H / 2 - 90);
+    ctx.font = `500 19px ${FONT}`;
+    lines.forEach((line, i) => {
+      ctx.fillStyle = i === 0 ? '#ecfdf5' : 'rgba(209, 250, 229, 0.72)';
+      ctx.fillText(line, W / 2, H / 2 - 30 + i * 32);
+    });
+  }
+
+  function draw() {
+    const dpr = view.dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = '#04120c';
+    ctx.fillRect(0, 0, view.cw, view.ch);
+
+    ctx.save();
+    ctx.translate(view.ox, view.oy);
+    ctx.scale(view.scale, view.scale);
+    if (S.shake > 0) {
+      ctx.translate((Math.random() - 0.5) * S.shake, (Math.random() - 0.5) * S.shake);
+    }
+
+    drawBoard();
+    const t = S.mode === 'playing' ? Math.min(1, S.acc / stepTime()) : 1;
+    if (S.food && S.mode !== 'title') drawFood(S.food, S.clock);
+    if (S.gold && S.mode !== 'title') drawGold(S.gold, S.clock);
+    if (S.mode !== 'title') drawSnake(t);
+
+    for (const p of S.parts) {
+      const k = 1 - p.t / p.life;
+      ctx.globalAlpha = k;
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x - 2.5, p.y - 2.5, 5, 5);
+    }
+    ctx.globalAlpha = 1;
+    for (const f of S.floats) {
+      ctx.globalAlpha = Math.max(0, 1 - f.t / 0.9);
+      ctx.fillStyle = f.color;
+      ctx.font = `700 18px ${FONT}`;
+      ctx.textAlign = 'center';
+      ctx.fillText(f.text, f.x, f.y - f.t * 34);
+    }
+    ctx.globalAlpha = 1;
+
+    drawHud();
+
+    if (S.flash > 0) {
+      ctx.fillStyle = `rgba(248, 113, 113, ${S.flash * 0.5})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    if (S.mode === 'title') {
+      drawOverlay('SNAKE', [
+        'Eat, grow, and never bite yourself.',
+        'Arrow keys, WASD or swipe to steer.',
+        'Gold stars are worth 50 — and they do not wait.',
+        '',
+        'Tap or press Space to play',
+      ], '#4ade80');
+      if (S.best > 0) {
+        ctx.fillStyle = '#fbbf24';
+        ctx.font = `700 20px ${FONT}`;
+        ctx.fillText(`Best ${S.best}`, W / 2, H / 2 + 150);
+      }
+    } else if (S.mode === 'paused') {
+      drawOverlay('PAUSED', ['Tap or press P to continue'], '#6ee7b7');
+    } else if (S.mode === 'gameover') {
+      drawOverlay('GAME OVER', [
+        `Score ${S.score} · length ${S.cells.length}`,
+        S.newBest ? 'New personal best!' : `Best ${S.best}`,
+        '',
+        S.overT > 0.7 ? 'Tap or press Space to play again' : '',
+      ], S.newBest ? '#fbbf24' : '#f87171');
+    }
+
+    ctx.restore();
+  }
+
+  // ---- input ----
+  const KEY_DIRS = {
+    ArrowUp: [0, -1], KeyW: [0, -1],
+    ArrowDown: [0, 1], KeyS: [0, 1],
+    ArrowLeft: [-1, 0], KeyA: [-1, 0],
+    ArrowRight: [1, 0], KeyD: [1, 0],
+  };
+
+  function primary() {
+    if (S.mode === 'title') return start();
+    if (S.mode === 'paused') { S.mode = 'playing'; return; }
+    if (S.mode === 'gameover' && S.overT > 0.7) return start();
+  }
+
+  window.addEventListener('keydown', (e) => {
+    const dir = KEY_DIRS[e.code];
+    if (dir) {
+      e.preventDefault();
+      // An arrow on the title screen starts the run *and* counts as the first
+      // turn: pressing Up to begin and watching the snake set off rightwards
+      // reads as a dropped key.
+      if (S.mode === 'title') start();
+      if (S.mode === 'playing') turn(dir[0], dir[1]);
+      return;
+    }
+    if (e.code === 'Space' || e.code === 'Enter') {
+      e.preventDefault();
+      primary();
+      return;
+    }
+    if (e.code === 'KeyP' || e.code === 'Escape') {
+      e.preventDefault();
+      if (S.mode === 'playing') S.mode = 'paused';
+      else if (S.mode === 'paused') S.mode = 'playing';
+      return;
+    }
+    if (e.code === 'KeyM') {
+      S.muted = !S.muted;
+      storage.set(STORE_MUTE, S.muted ? '1' : '0');
+      if (!S.muted) { ensureAudio(); tone(660, 0.08, 'triangle', 0.05); }
+    }
+  });
+
+  let swipe = null;
+  const SWIPE_MIN = 24;
+
+  canvas.addEventListener('pointerdown', (e) => {
+    canvas.focus();
+    swipe = { x: e.clientX, y: e.clientY, turned: false };
+    if (S.mode !== 'playing') primary();
+  });
+
+  canvas.addEventListener('pointermove', (e) => {
+    // A drag released outside the frame never delivers pointerup here, and the
+    // stale swipe then steered the snake on the next ordinary mouse move — a
+    // turn the player never asked for, often into a wall.
+    if (swipe && e.pointerType === 'mouse' && e.buttons === 0) swipe = null;
+    if (!swipe || S.mode !== 'playing') return;
+    const dx = e.clientX - swipe.x, dy = e.clientY - swipe.y;
+    if (Math.abs(dx) < SWIPE_MIN && Math.abs(dy) < SWIPE_MIN) return;
+    if (Math.abs(dx) > Math.abs(dy)) turn(dx > 0 ? 1 : -1, 0);
+    else turn(0, dy > 0 ? 1 : -1);
+    // Re-anchor so one long drag can steer a whole route instead of one turn.
+    swipe = { x: e.clientX, y: e.clientY, turned: true };
+  });
+
+  const endSwipe = () => { swipe = null; };
+  canvas.addEventListener('pointerup', endSwipe);
+  canvas.addEventListener('pointercancel', endSwipe);
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && S.mode === 'playing') S.mode = 'paused';
+  });
+
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', resize);
+
+  // ---- loop ----
+  let last = 0;
+  function frame(now) {
+    if (!last) last = now;
+    // Clamped so a backgrounded tab resumes instead of teleporting the snake.
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  reset();
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

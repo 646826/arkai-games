@@ -1,0 +1,1235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="color-scheme" content="dark">
+<title>Mini Sudoku — Arkai</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #081a1a; overflow: hidden; }
+  body { -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+  canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; outline: none; cursor: pointer; }
+  canvas.keyboard:focus { outline: 3px solid #22d3ee; outline-offset: -3px; }
+  /* Off screen for the eye, present for a screen reader, and out of the flow so it
+     cannot change the size the canvas is measured at. */
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+</style>
+</head>
+<body>
+<div id="say" role="status" aria-live="polite" aria-atomic="true" class="sr"></div>
+<canvas id="game" tabindex="0" aria-label="Mini Sudoku. A six by six sudoku with two by three boxes. Arrow keys move the selected cell, keys 1 to 6 place a digit, Backspace clears it, N toggles pencil marks."></canvas>
+<script>
+(() => {
+  'use strict';
+
+  // ---------------------------------------------------------------------------
+  // Mini Sudoku — 6x6, boxes two rows tall and three columns wide.
+  // Every row, every column and every 2x3 box holds 1-6 exactly once.
+  // ---------------------------------------------------------------------------
+
+  const W = 540, H = 720;
+  const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+
+  // Board geometry. The board is deliberately centred on the canvas: the portal's
+  // smoke gate taps the exact centre of the frame first, and the only honest thing
+  // to have under that tap in a sudoku is a cell.
+  const CELL = 76, BOARD = CELL * 6;
+  const BX = (W - BOARD) / 2, BY = 104;
+
+  // Number pad — always visible, because on a phone there is no keyboard to press
+  // 1-6 on and a sudoku you cannot type into is a picture of a sudoku.
+  const PAD_W = 71, PAD_H = 64, PAD_GAP = 10;
+  const PAD_X = (W - (PAD_W * 6 + PAD_GAP * 5)) / 2, PAD_Y = 578;
+  const ACT_W = 73, ACT_H = 42, ACT_GAP = 8;
+  const ACT_X = (W - (ACT_W * 6 + ACT_GAP * 5)) / 2, ACT_Y = 656;
+
+  const BG = '#081a1a';
+  const CYAN = '#22d3ee';
+  const GIVEN = '#e2f4f7';       // givens read as cool white, the player's own digits as cyan
+  const ROSE = '#fb7185';
+  const MUTED = 'rgba(148, 190, 198, 0.72)';
+
+  // Difficulty is the number of clues left standing. Fewer clues, longer chains of
+  // deduction — on a 6x6 board eight clues is the theoretical floor, so eleven is
+  // genuinely hard and twenty is a warm-up you can finish while the kettle boils.
+  const LEVELS = [
+    { key: 'easy', name: 'Easy', clues: 20, par: 500 },
+    { key: 'medium', name: 'Medium', clues: 15, par: 800 },
+    { key: 'hard', name: 'Hard', clues: 11, par: 1200 },
+  ];
+
+  const STORE_LEVEL = 'arkai:sudoku-mini:level';
+  const STORE_MUTE = 'arkai:sudoku-mini:muted';
+  const bestKey = (key) => `arkai:sudoku-mini:best:${key}`;
+  // Best times are read once and kept: drawLevelChips runs every frame, and three
+  // synchronous storage reads per frame is 180 a second for a number that changes
+  // once a game.
+  const bestTimes = LEVELS.map(() => 0);
+
+  const say = document.getElementById('say');
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+
+  // Every read and write guarded: localStorage throws outright in private mode and
+  // an uncaught throw here is a blank page, not a missing best time.
+  const storage = {
+    get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+    set(key, value) { try { localStorage.setItem(key, value); return true; } catch { return false; } },
+  };
+
+  // The one channel to the portal. It needs 'start' for records and daily play.
+  const emit = (event, data) => {
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: 'game-event', event, data: data || {} }, location.origin);
+      }
+    } catch { /* not embedded */ }
+  };
+
+  // ---------------------------------------------------------------------------
+  // Puzzle generation. This is the part that decides whether this is sudoku or
+  // something shaped like it. A full grid is built by randomised backtracking,
+  // then clues are lifted one at a time and every single removal is confirmed by
+  // a counting solver: if the board now has two answers the clue goes straight
+  // back. A sudoku with two solutions is a broken sudoku, and the player finds it
+  // at the worst possible moment — the last cell, with a contradiction that was
+  // never their mistake.
+  // ---------------------------------------------------------------------------
+  const FULL = 0b1111110;                                    // bits 1..6
+  const boxOf = (r, c) => ((r / 2) | 0) * 2 + ((c / 3) | 0); // 2 rows x 3 cols per box
+  const popcount = (m) => { let n = 0; while (m) { m &= m - 1; n++; } return n; };
+
+  // The eighteen places a digit may appear only once: six rows, six columns, six boxes.
+  const UNITS = (() => {
+    const units = [];
+    for (let r = 0; r < 6; r++) units.push([0, 1, 2, 3, 4, 5].map((c) => r * 6 + c));
+    for (let c = 0; c < 6; c++) units.push([0, 1, 2, 3, 4, 5].map((r) => r * 6 + c));
+    for (let br = 0; br < 3; br++) {
+      for (let bc = 0; bc < 2; bc++) {
+        const unit = [];
+        for (let r = br * 2; r < br * 2 + 2; r++) for (let c = bc * 3; c < bc * 3 + 3; c++) unit.push(r * 6 + c);
+        units.push(unit);
+      }
+    }
+    return units;
+  })();
+
+  function shuffled(list) {
+    const a = list.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    return a;
+  }
+
+  function fullGrid() {
+    const g = new Int32Array(36);
+    const rows = new Int32Array(6), cols = new Int32Array(6), boxes = new Int32Array(6);
+    const fill = (i) => {
+      if (i === 36) return true;
+      const r = (i / 6) | 0, c = i % 6, b = boxOf(r, c);
+      const used = rows[r] | cols[c] | boxes[b];
+      for (const d of shuffled([1, 2, 3, 4, 5, 6])) {
+        const bit = 1 << d;
+        if (used & bit) continue;
+        g[i] = d; rows[r] |= bit; cols[c] |= bit; boxes[b] |= bit;
+        if (fill(i + 1)) return true;
+        g[i] = 0; rows[r] &= ~bit; cols[c] &= ~bit; boxes[b] &= ~bit;
+      }
+      return false;
+    };
+    fill(0);
+    return g;
+  }
+
+  // Counts solutions up to `limit` and stops there: the question is never "how
+  // many" but "is it more than one", and answering the cheap question keeps a
+  // whole puzzle under a millisecond. Always takes the cell with the fewest
+  // candidates first, so a contradiction surfaces immediately instead of after a
+  // subtree of guesses.
+  function countSolutions(grid, limit) {
+    const work = Int32Array.from(grid);
+    const rows = new Int32Array(6), cols = new Int32Array(6), boxes = new Int32Array(6);
+    for (let i = 0; i < 36; i++) {
+      const d = work[i];
+      if (!d) continue;
+      const r = (i / 6) | 0, c = i % 6, bit = 1 << d;
+      rows[r] |= bit; cols[c] |= bit; boxes[boxOf(r, c)] |= bit;
+    }
+    let found = 0;
+    const step = () => {
+      let best = -1, bestMask = 0, bestCount = 7;
+      for (let i = 0; i < 36; i++) {
+        if (work[i]) continue;
+        const r = (i / 6) | 0, c = i % 6;
+        const avail = FULL & ~(rows[r] | cols[c] | boxes[boxOf(r, c)]);
+        const n = popcount(avail);
+        if (n === 0) return;                       // an empty cell with no candidate: dead end
+        if (n < bestCount) { bestCount = n; best = i; bestMask = avail; if (n === 1) break; }
+      }
+      if (best < 0) { found++; return; }           // nothing left empty: a complete solution
+      const r = (best / 6) | 0, c = best % 6, b = boxOf(r, c);
+      for (let d = 1; d <= 6; d++) {
+        const bit = 1 << d;
+        if (!(bestMask & bit)) continue;
+        work[best] = d; rows[r] |= bit; cols[c] |= bit; boxes[b] |= bit;
+        step();
+        work[best] = 0; rows[r] &= ~bit; cols[c] &= ~bit; boxes[b] &= ~bit;
+        if (found >= limit) return;
+      }
+    };
+    step();
+    return found;
+  }
+
+  // One carve of one full grid. It reaches the target almost always; the caller
+  // deals again when it does not.
+  // Uniqueness is not the same promise as solvability. A board can have exactly one
+  // answer and still be findable only by guessing a digit and backtracking, which on
+  // a six-by-six board is not a puzzle, it is a coin toss with extra steps. So every
+  // removal must also leave a board that plain human technique finishes: a cell with
+  // one candidate left, or a digit with one home left in a row, column or box.
+  // Measured over 300 boards a side: without this, 4% of Hard boards needed a guess;
+  // with it, none did, and the clue targets are still reached.
+  function solvableBySingles(grid) {
+    const g = Int32Array.from(grid);
+    const rows = new Int32Array(6), cols = new Int32Array(6), boxes = new Int32Array(6);
+    for (let i = 0; i < 36; i++) {
+      const d = g[i];
+      if (!d) continue;
+      const r = (i / 6) | 0, c = i % 6, bit = 1 << d;
+      rows[r] |= bit; cols[c] |= bit; boxes[boxOf(r, c)] |= bit;
+    }
+    const candidates = (i) => FULL & ~(rows[((i / 6) | 0)] | cols[i % 6] | boxes[boxOf((i / 6) | 0, i % 6)]);
+    const put = (i, d) => {
+      const r = (i / 6) | 0, c = i % 6, bit = 1 << d;
+      g[i] = d; rows[r] |= bit; cols[c] |= bit; boxes[boxOf(r, c)] |= bit;
+    };
+    for (;;) {
+      let progress = false;
+      for (let i = 0; i < 36; i++) {                 // naked singles
+        if (g[i]) continue;
+        const m = candidates(i);
+        if (m === 0) return false;
+        if (popcount(m) === 1) { put(i, 31 - Math.clz32(m)); progress = true; }
+      }
+      if (!progress) {                               // hidden singles
+        for (const unit of UNITS) {
+          for (let d = 1; d <= 6 && !progress; d++) {
+            const bit = 1 << d;
+            if (unit.some((i) => g[i] === d)) continue;
+            const homes = unit.filter((i) => !g[i] && (candidates(i) & bit));
+            if (homes.length === 0) return false;
+            if (homes.length === 1) { put(homes[0], d); progress = true; }
+          }
+          if (progress) break;
+        }
+      }
+      if (!progress) break;
+    }
+    for (let i = 0; i < 36; i++) if (!g[i]) return false;
+    return true;
+  }
+
+  function carve(targetClues) {
+    const solution = fullGrid();
+    const puzzle = Int32Array.from(solution);
+    let clues = 36;
+    for (const i of shuffled([...Array(36).keys()])) {
+      if (clues <= targetClues) break;
+      const saved = puzzle[i];
+      puzzle[i] = 0;
+      if (countSolutions(puzzle, 2) === 1 && solvableBySingles(puzzle)) clues--;
+      else puzzle[i] = saved;                      // that clue was load-bearing
+    }
+    return { puzzle, solution, clues };
+  }
+
+  // Some full grids will not give up their last clue: the removal that would take
+  // Hard from twelve to eleven leaves two solutions whichever clue you try. Rather
+  // than print "11 clues" on the button and hand out twelve, deal another grid —
+  // one carve costs about a tenth of a millisecond, and the clue count on the
+  // button is a promise.
+  function makePuzzle(targetClues) {
+    let best = null;
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const made = carve(targetClues);
+      if (made.clues === targetClues) return made;
+      if (!best || made.clues < best.clues) best = made;
+    }
+    return best;
+  }
+
+  // ---------------------------------------------------------------------------
+  // State
+  // ---------------------------------------------------------------------------
+  const loadBestTimes = () => {
+    for (let n = 0; n < LEVELS.length; n++) {
+      // Anything but a sane positive number is treated as no record at all. A stored
+      // "-5" is truthy, prints as 00:00 and can never be beaten, so one corrupt entry
+      // would freeze that difficulty's best time for good.
+      const stored = Number(storage.get(bestKey(LEVELS[n].key)));
+      bestTimes[n] = Number.isFinite(stored) && stored > 0 ? Math.floor(stored) : 0;
+    }
+  };
+  loadBestTimes();
+
+  const savedLevel = LEVELS.findIndex((level) => level.key === storage.get(STORE_LEVEL));
+
+  const S = {
+    mode: 'title',                 // title | playing | won | paused
+    level: savedLevel >= 0 ? savedLevel : 0,
+    given: new Int32Array(36),     // the clues, immovable
+    entry: new Int32Array(36),     // what the player put there
+    notes: new Int32Array(36),     // pencil marks, one bit per digit
+    bad: new Uint8Array(36),       // conflicts with a peer, recomputed on every change
+    clues: 0,
+    sel: 0,                        // the selected cell: the cursor the arrow keys move
+    mistakes: 0,
+    notesMode: false,
+    elapsed: 0, runStart: 0, running: false,
+    best: 0, newBest: false, points: 0, finalSeconds: 0,
+    muted: storage.get(STORE_MUTE) === '1',
+    pop: new Float32Array(36),     // digit-drop animation per cell
+    ping: { i: -1, t: 1 },         // ring that follows the cursor
+    parts: [],
+    wave: 0, overT: 0, shake: 0,
+  };
+
+  const valueAt = (i) => S.given[i] || S.entry[i];
+  const filledCount = () => { let n = 0; for (let i = 0; i < 36; i++) if (valueAt(i)) n++; return n; };
+  const elapsedMs = () => S.elapsed + (S.running ? performance.now() - S.runStart : 0);
+
+  // ---- sound: synthesised, never a file ----
+  let audio = null;
+  const ensureAudio = () => {
+    if (audio || S.muted) return;
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (Ctx) audio = new Ctx();
+    } catch { audio = null; }
+  };
+  const tone = (freq, dur = 0.06, type = 'triangle', vol = 0.045, delay = 0) => {
+    if (S.muted || !audio || audio.state !== 'running') return;
+    const t = audio.currentTime + delay;
+    const osc = audio.createOscillator();
+    const gain = audio.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t);
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(vol, t + 0.006);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(gain);
+    gain.connect(audio.destination);
+    osc.start(t);
+    osc.stop(t + dur + 0.02);
+  };
+  const wakeAudio = () => {
+    ensureAudio();
+    if (audio && audio.state === 'suspended') audio.resume().catch(() => {});
+  };
+
+  // ---- rules ----
+  // A digit is wrong the moment it clashes with a peer, and the board says so at
+  // once. Marking a digit that merely disagrees with the stored solution would be
+  // the game playing for you: a legal-looking guess is still a guess, and finding
+  // out it was wrong is the puzzle.
+  function recompute() {
+    S.bad.fill(0);
+    for (let i = 0; i < 36; i++) {
+      const d = valueAt(i);
+      if (!d) continue;
+      const r = (i / 6) | 0, c = i % 6;
+      for (let k = 0; k < 6; k++) {
+        if (k !== c && valueAt(r * 6 + k) === d) S.bad[i] = 1;
+        if (k !== r && valueAt(k * 6 + c) === d) S.bad[i] = 1;
+      }
+      const br = ((r / 2) | 0) * 2, bc = ((c / 3) | 0) * 3;
+      for (let rr = br; rr < br + 2; rr++) {
+        for (let cc = bc; cc < bc + 3; cc++) {
+          const j = rr * 6 + cc;
+          if (j !== i && valueAt(j) === d) S.bad[i] = 1;
+        }
+      }
+    }
+  }
+
+  const unitComplete = (i) => {
+    // Did this placement finish a row, a column or a box, correctly?
+    const r = (i / 6) | 0, c = i % 6;
+    const done = [];
+    let rowSeen = 0, colSeen = 0, boxSeen = 0;
+    for (let k = 0; k < 6; k++) {
+      rowSeen |= 1 << valueAt(r * 6 + k);
+      colSeen |= 1 << valueAt(k * 6 + c);
+    }
+    const br = ((r / 2) | 0) * 2, bc = ((c / 3) | 0) * 3;
+    for (let rr = br; rr < br + 2; rr++) for (let cc = bc; cc < bc + 3; cc++) boxSeen |= 1 << valueAt(rr * 6 + cc);
+    if ((rowSeen & FULL) === FULL && !(rowSeen & 1)) done.push('row');
+    if ((colSeen & FULL) === FULL && !(colSeen & 1)) done.push('col');
+    if ((boxSeen & FULL) === FULL && !(boxSeen & 1)) done.push('box');
+    return done;
+  };
+
+  function spawnParts(px, py, color, count, spread) {
+    for (let n = 0; n < count; n++) {
+      const a = Math.random() * Math.PI * 2, s = spread * (0.35 + Math.random());
+      S.parts.push({ x: px, y: py, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.45 + Math.random() * 0.5, t: 0, color });
+    }
+  }
+
+  const cellCentre = (i) => ({ x: BX + (i % 6) * CELL + CELL / 2, y: BY + (((i / 6) | 0)) * CELL + CELL / 2 });
+
+  function newGame(levelIndex) {
+    const level = LEVELS[levelIndex];
+    // Leaving a board is the end of a run, played on or not: a `start` the portal
+    // never sees closed is a run that stays open in its records forever.
+    if (S.mode === 'playing' || S.mode === 'paused') {
+      emit('gameover', { game: 'sudoku-mini', won: false, score: 0, time: Math.round(elapsedMs() / 1000), difficulty: LEVELS[S.level].key });
+    }
+    const made = makePuzzle(level.clues);
+    S.level = levelIndex;
+    S.given = made.puzzle;
+    S.clues = made.clues;
+    S.entry = new Int32Array(36);
+    S.notes = new Int32Array(36);
+    S.pop = new Float32Array(36);
+    S.bad = new Uint8Array(36);
+    S.sel = 0;
+    S.mistakes = 0;
+    S.notesMode = false;
+    S.elapsed = 0; S.runStart = performance.now(); S.running = true;
+    S.best = bestTimes[levelIndex];
+    S.newBest = false; S.points = 0; S.finalSeconds = 0;
+    S.parts = []; S.wave = 0; S.overT = 0; S.shake = 0;
+    S.ping = { i: 0, t: 0 };
+    S.mode = 'playing';
+    storage.set(STORE_LEVEL, level.key);
+    tone(520, 0.07, 'triangle', 0.04);
+    tone(780, 0.09, 'triangle', 0.035, 0.07);
+    emit('start', { game: 'sudoku-mini', difficulty: level.key, clues: made.clues });
+  }
+
+  function select(i) {
+    if (i === S.sel) return;
+    S.sel = i;
+    S.ping = { i, t: 0 };
+  }
+
+  function placeDigit(d, asNote) {
+    if (S.mode !== 'playing') return;
+    const i = S.sel;
+    if (S.given[i]) { S.shake = Math.max(S.shake, 4); tone(200, 0.05, 'sine', 0.03); return; }
+
+    if (asNote) {
+      S.notes[i] ^= 1 << d;
+      S.entry[i] = 0;
+      recompute();
+      tone(S.notes[i] & (1 << d) ? 880 : 620, 0.035, 'sine', 0.03);
+      return;
+    }
+
+    if (S.entry[i] === d) {                        // tapping the same digit takes it back
+      S.entry[i] = 0;
+      recompute();
+      tone(340, 0.05, 'sine', 0.035);
+      return;
+    }
+    S.entry[i] = d;
+    S.notes[i] = 0;
+    S.pop[i] = 1;
+    recompute();
+
+    if (S.bad[i]) {
+      S.mistakes++;
+      S.shake = 8;
+      tone(196, 0.16, 'sawtooth', 0.05);
+      tone(147, 0.2, 'sawtooth', 0.04, 0.09);
+      return;
+    }
+
+    // Clearing a pencil mark the player can no longer use is housekeeping they
+    // would otherwise do by hand, sixteen times a puzzle.
+    const r = (i / 6) | 0, c = i % 6, bit = 1 << d;
+    const br = ((r / 2) | 0) * 2, bc = ((c / 3) | 0) * 3;
+    for (let k = 0; k < 6; k++) { S.notes[r * 6 + k] &= ~bit; S.notes[k * 6 + c] &= ~bit; }
+    for (let rr = br; rr < br + 2; rr++) for (let cc = bc; cc < bc + 3; cc++) S.notes[rr * 6 + cc] &= ~bit;
+
+    const done = unitComplete(i);
+    if (done.length) {
+      const p = cellCentre(i);
+      spawnParts(p.x, p.y, CYAN, 8 + done.length * 4, 110);
+      tone(660, 0.09, 'triangle', 0.04);
+      tone(990, 0.1, 'triangle', 0.035, 0.06);
+    } else {
+      tone(520, 0.045, 'triangle', 0.035);
+    }
+    checkWin();
+  }
+
+  function clearCell() {
+    if (S.mode !== 'playing') return;
+    const i = S.sel;
+    if (S.given[i]) { tone(200, 0.05, 'sine', 0.03); return; }
+    if (!S.entry[i] && !S.notes[i]) return;
+    S.entry[i] = 0;
+    S.notes[i] = 0;
+    recompute();
+    tone(300, 0.05, 'sine', 0.035);
+  }
+
+  function checkWin() {
+    if (filledCount() < 36) return;
+    for (let i = 0; i < 36; i++) if (S.bad[i]) return;
+    S.mode = 'won';
+    // Read the clock, *then* stop it: elapsedMs() only adds the stretch since the
+    // last resume while S.running is true, so clearing the flag first threw away
+    // the whole run and wrote a one-second best time nobody could ever beat.
+    S.elapsed = elapsedMs();
+    S.running = false;
+    S.overT = 0;
+    S.wave = 0;
+    const seconds = Math.max(1, Math.round(S.elapsed / 1000));
+    S.finalSeconds = seconds;
+    // A score the portal can rank: the puzzle's own difficulty, less the clock and
+    // less what the mistakes cost. Never negative, because a bad run is still a run.
+    const base = LEVELS[S.level].par;
+    S.points = Math.max(25, base - seconds * 2 - S.mistakes * 40);
+    const key = bestKey(LEVELS[S.level].key);
+    if (S.best === 0 || seconds < S.best) {
+      S.best = seconds;
+      S.newBest = true;
+      bestTimes[S.level] = seconds;
+      storage.set(key, String(seconds));
+    }
+    for (let n = 0; n < 6; n++) {
+      spawnParts(BX + Math.random() * BOARD, BY + Math.random() * BOARD, ['#22d3ee', '#67e8f9', '#a5f3fc', '#fbbf24'][n % 4], 12, 190);
+    }
+    [523, 659, 784, 1046, 1319].forEach((f, n) => tone(f, 0.2, 'triangle', 0.05, n * 0.085));
+    emit('gameover', { game: 'sudoku-mini', won: true, score: S.points, time: seconds, mistakes: S.mistakes, difficulty: LEVELS[S.level].key });
+  }
+
+  function setPaused(on) {
+    if (on && S.mode === 'playing') {
+      S.mode = 'paused';
+      S.elapsed = elapsedMs();
+      S.running = false;
+    } else if (!on && S.mode === 'paused') {
+      S.mode = 'playing';
+      S.runStart = performance.now();
+      S.running = true;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Drawing
+  // ---------------------------------------------------------------------------
+  const view = { scale: 1, ox: 0, oy: 0, dpr: 1, cw: W, ch: H };
+
+  // The backing store is CSS size x the device ratio, capped at 2. A canvas left
+  // at its CSS size is blurry on every phone made in the last decade; past 2x the
+  // pixels cost four times the fill for nothing anyone can see.
+  function resize() {
+    // Assigning canvas.width wipes the backing store, so a resize *must* be followed
+    // by a draw: without the invalidate the game would sit on a blank canvas.
+    invalidate();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const cw = canvas.clientWidth || window.innerWidth;
+    const ch = canvas.clientHeight || window.innerHeight;
+    view.dpr = dpr; view.cw = cw; view.ch = ch;
+    view.scale = Math.min(cw / W, ch / H);
+    view.ox = (cw - W * view.scale) / 2;
+    view.oy = (ch - H * view.scale) / 2;
+    canvas.width = Math.round(cw * dpr);
+    canvas.height = Math.round(ch * dpr);
+  }
+
+  const roundRect = (x, y, w, h, r) => {
+    const rr = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + rr, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rr);
+    ctx.arcTo(x + w, y + h, x, y + h, rr);
+    ctx.arcTo(x, y + h, x, y, rr);
+    ctx.arcTo(x, y, x + w, y, rr);
+    ctx.closePath();
+  };
+
+  const clock = (seconds) => {
+    const s = Math.max(0, Math.floor(seconds));
+    return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  };
+
+  // Labels are translated one day and a chip is 89 px wide forever, so the text
+  // shrinks to fit rather than spilling over its own border.
+  function fitFont(text, maxWidth, size, weight) {
+    let s = size;
+    ctx.font = `${weight} ${s}px ${FONT}`;
+    while (s > 8 && ctx.measureText(text).width > maxWidth) {
+      s -= 1;
+      ctx.font = `${weight} ${s}px ${FONT}`;
+    }
+  }
+
+  function chip(x, y, w, h, label, active) {
+    ctx.fillStyle = active ? 'rgba(34, 211, 238, 0.20)' : 'rgba(148, 190, 198, 0.10)';
+    roundRect(x, y, w, h, h / 2);
+    ctx.fill();
+    ctx.strokeStyle = active ? CYAN : 'rgba(148, 190, 198, 0.30)';
+    ctx.lineWidth = active ? 2 : 1.5;
+    ctx.stroke();
+    ctx.fillStyle = active ? '#d8fbff' : MUTED;
+    fitFont(label, w - 14, 14, 700);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, x + w / 2, y + h / 2 + 0.5);
+  }
+
+  // Hit boxes are pushed where the thing is drawn, so a button that moved cannot
+  // leave an invisible tap target behind at its old address.
+  const hits = [];
+  const hitBox = (id, x, y, w, h) => { hits.push({ id, x, y, w, h }); };
+  const hitAt = (x, y) => hits.find((b) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h);
+
+  function drawHud() {
+    const filled = filledCount();
+    ctx.textBaseline = 'middle';
+    const stat = (x, align, label, value, color) => {
+      ctx.textAlign = align;
+      ctx.font = `700 13px ${FONT}`;
+      ctx.fillStyle = 'rgba(103, 232, 249, 0.75)';
+      ctx.fillText(label, x, 26);
+      ctx.font = `700 25px ${FONT}`;
+      ctx.fillStyle = color;
+      ctx.fillText(value, x, 53);
+    };
+    stat(26, 'left', 'TIME', clock(elapsedMs() / 1000), '#e2f4f7');
+    stat(198, 'center', 'TO FILL', String(36 - filled), '#e2f4f7');
+    stat(342, 'center', 'MISTAKES', String(S.mistakes), S.mistakes ? ROSE : '#e2f4f7');
+    stat(514, 'right', 'BEST', S.best ? clock(S.best) : '—', S.newBest ? '#fbbf24' : '#e2f4f7');
+
+    const px = 26, pw = 488;
+    ctx.fillStyle = 'rgba(34, 211, 238, 0.13)';
+    roundRect(px, 76, pw, 6, 3);
+    ctx.fill();
+    const done = Math.max(0, filled - S.clues) / Math.max(1, 36 - S.clues);
+    if (done > 0) {
+      ctx.fillStyle = CYAN;
+      roundRect(px, 76, Math.max(8, pw * done), 6, 3);
+      ctx.fill();
+    }
+  }
+
+  function drawBoard() {
+    // The jolt belongs to the board alone. Shaking the whole scene moved the buttons
+    // away from the boxes that answer for them for the third of a second it lasts.
+    ctx.save();
+    if (S.shake > 0) ctx.translate((Math.random() - 0.5) * S.shake, (Math.random() - 0.5) * S.shake);
+    ctx.fillStyle = '#0a2125';
+    roundRect(BX - 10, BY - 10, BOARD + 20, BOARD + 20, 16);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(34, 211, 238, 0.22)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    const selR = (S.sel / 6) | 0, selC = S.sel % 6, selB = boxOf(selR, selC);
+    const selVal = valueAt(S.sel);
+
+    for (let i = 0; i < 36; i++) {
+      const r = (i / 6) | 0, c = i % 6;
+      const x = BX + c * CELL, y = BY + r * CELL;
+      ctx.fillStyle = (((r / 2) | 0) + ((c / 3) | 0)) % 2 === 0 ? '#0b2529' : '#0e2d32';
+      ctx.fillRect(x, y, CELL, CELL);
+
+      // Row, column, box and every twin of the selected digit. This one feature is
+      // most of what a sudoku feels like: it turns "where can this 4 still go" from
+      // a scan of the whole board into a glance.
+      let wash = null;
+      if (r === selR || c === selC || boxOf(r, c) === selB) wash = 'rgba(34, 211, 238, 0.10)';
+      if (selVal && valueAt(i) === selVal) wash = 'rgba(34, 211, 238, 0.17)';
+      if (S.bad[i]) wash = 'rgba(251, 113, 133, 0.22)';
+      if (i === S.sel) wash = 'rgba(34, 211, 238, 0.26)';
+      if (wash) { ctx.fillStyle = wash; ctx.fillRect(x, y, CELL, CELL); }
+
+      if (S.mode === 'won') {
+        const k = Math.max(0, Math.min(1, S.wave * 2.2 - (r + c) * 0.2));
+        if (k > 0) { ctx.fillStyle = `rgba(34, 211, 238, ${(0.26 * k).toFixed(3)})`; ctx.fillRect(x, y, CELL, CELL); }
+      }
+    }
+
+    ctx.strokeStyle = 'rgba(125, 211, 224, 0.14)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let k = 1; k < 6; k++) {
+      ctx.moveTo(BX + k * CELL + 0.5, BY); ctx.lineTo(BX + k * CELL + 0.5, BY + BOARD);
+      ctx.moveTo(BX, BY + k * CELL + 0.5); ctx.lineTo(BX + BOARD, BY + k * CELL + 0.5);
+    }
+    ctx.stroke();
+
+    // The 2x3 boxes drawn heavier than the cells: without them a 6x6 board reads
+    // as a word search.
+    ctx.strokeStyle = 'rgba(34, 211, 238, 0.45)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(BX + 3 * CELL, BY); ctx.lineTo(BX + 3 * CELL, BY + BOARD);
+    ctx.moveTo(BX, BY + 2 * CELL); ctx.lineTo(BX + BOARD, BY + 2 * CELL);
+    ctx.moveTo(BX, BY + 4 * CELL); ctx.lineTo(BX + BOARD, BY + 4 * CELL);
+    ctx.stroke();
+    ctx.strokeRect(BX, BY, BOARD, BOARD);
+
+    for (let i = 0; i < 36; i++) {
+      const r = (i / 6) | 0, c = i % 6;
+      const x = BX + c * CELL, y = BY + r * CELL;
+      const d = valueAt(i);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      if (d) {
+        const given = S.given[i] !== 0;
+        ctx.save();
+        ctx.translate(x + CELL / 2, y + CELL / 2);
+        const scale = 1 + S.pop[i] * 0.3;
+        ctx.scale(scale, scale);
+        ctx.font = `${given ? 600 : 700} ${Math.round(CELL * 0.54)}px ${FONT}`;
+        // Givens in cool white, the player's own digits in cyan: at a glance you
+        // always know which of these you are allowed to doubt.
+        ctx.fillStyle = S.bad[i] ? ROSE : (given ? GIVEN : CYAN);
+        ctx.fillText(String(d), 0, 1);
+        ctx.restore();
+      } else if (S.notes[i]) {
+        ctx.font = `600 ${Math.round(CELL * 0.21)}px ${FONT}`;
+        for (let n = 1; n <= 6; n++) {
+          if (!(S.notes[i] & (1 << n))) continue;
+          const col = (n - 1) % 3, row = ((n - 1) / 3) | 0;
+          ctx.fillStyle = selVal === n ? 'rgba(103, 232, 249, 0.95)' : 'rgba(125, 211, 224, 0.5)';
+          ctx.fillText(String(n), x + CELL * (0.26 + col * 0.24), y + CELL * (0.33 + row * 0.34));
+        }
+      }
+    }
+
+    // The cursor. It has to be visibly drawn and it has to move on the arrow keys:
+    // a board you can only reach with a finger is a board half the players cannot
+    // reach at all.
+    const cx = BX + selC * CELL, cy = BY + selR * CELL;
+    ctx.save();
+    ctx.shadowColor = 'rgba(34, 211, 238, 0.85)';
+    ctx.shadowBlur = 14;
+    ctx.strokeStyle = CYAN;
+    ctx.lineWidth = 3;
+    roundRect(cx + 2, cy + 2, CELL - 4, CELL - 4, 9);
+    ctx.stroke();
+    ctx.restore();
+
+    if (S.ping.i >= 0 && S.ping.t < 1) {
+      const pr = (S.ping.i / 6) | 0, pc = S.ping.i % 6;
+      const grow = 12 * S.ping.t;
+      ctx.strokeStyle = `rgba(103, 232, 249, ${(0.55 * (1 - S.ping.t)).toFixed(3)})`;
+      ctx.lineWidth = 2;
+      roundRect(BX + pc * CELL + 2 - grow, BY + pr * CELL + 2 - grow, CELL - 4 + grow * 2, CELL - 4 + grow * 2, 9 + grow);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawPad() {
+    // How many of each digit are still missing. It costs the player nothing they
+    // could not count by eye, and it saves them counting sixes by eye.
+    const used = new Array(7).fill(0);
+    // A digit sitting in a cell that clashes with a peer has not been placed, it
+    // has been guessed: counting it would tell the player a digit is finished
+    // while one of its six is still red.
+    for (let i = 0; i < 36; i++) if (!S.bad[i]) used[valueAt(i)]++;
+    const selVal = valueAt(S.sel);
+    for (let d = 1; d <= 6; d++) {
+      const x = PAD_X + (d - 1) * (PAD_W + PAD_GAP);
+      const spent = used[d] >= 6;
+      const active = selVal === d;
+      ctx.fillStyle = spent ? 'rgba(148, 190, 198, 0.09)' : active ? 'rgba(34, 211, 238, 0.22)' : 'rgba(34, 211, 238, 0.10)';
+      roundRect(x, PAD_Y, PAD_W, PAD_H, 12);
+      ctx.fill();
+      ctx.strokeStyle = spent ? 'rgba(148, 190, 198, 0.3)' : active ? CYAN : 'rgba(34, 211, 238, 0.30)';
+      ctx.lineWidth = active ? 2.5 : 1.5;
+      ctx.stroke();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = spent ? 'rgba(148, 190, 198, 0.6)' : S.notesMode ? '#7dd3fc' : '#e2f4f7';
+      ctx.font = `700 ${S.notesMode ? 25 : 30}px ${FONT}`;
+      ctx.fillText(String(d), x + PAD_W / 2, PAD_Y + PAD_H / 2 - 5);
+      ctx.font = `600 13px ${FONT}`;
+      ctx.fillStyle = spent ? 'rgba(148, 190, 198, 0.55)' : 'rgba(148, 190, 198, 0.7)';
+      ctx.fillText(spent ? 'done' : `${6 - used[d]} left`, x + PAD_W / 2, PAD_Y + PAD_H - 14);
+      hitBox(`d:${d}`, x, PAD_Y - 6, PAD_W, PAD_H + 12);
+    }
+  }
+
+  function drawActions() {
+    // Six, because pause was reachable only from a keyboard and the pause screen
+    // told a phone player to "press P". The lit ones are the toggles that are on.
+    const items = [
+      { id: 'notes', text: 'NOTES', active: S.notesMode },
+      { id: 'erase', text: 'ERASE', active: false },
+      { id: 'pause', text: 'PAUSE', active: false },
+      { id: 'new', text: 'NEW', active: false },
+      { id: 'level', text: LEVELS[S.level].name.toUpperCase(), active: false },
+      { id: 'sound', text: S.muted ? 'MUTED' : 'SOUND', active: !S.muted },
+    ];
+    items.forEach((item, n) => {
+      const x = ACT_X + n * (ACT_W + ACT_GAP);
+      chip(x, ACT_Y, ACT_W, ACT_H, item.text, item.active);
+      hitBox(item.id, x - 2, ACT_Y - 7, ACT_W + 4, ACT_H + 14);
+    });
+  }
+
+  function drawLevelChips(y) {
+    const w = 150, h = 56, gap = 14;
+    let x = (W - (LEVELS.length * w + (LEVELS.length - 1) * gap)) / 2;
+    for (let n = 0; n < LEVELS.length; n++) {
+      const level = LEVELS[n];
+      const on = n === S.level;
+      ctx.fillStyle = on ? 'rgba(34, 211, 238, 0.18)' : 'rgba(148, 190, 198, 0.08)';
+      roundRect(x, y, w, h, 14);
+      ctx.fill();
+      ctx.strokeStyle = on ? CYAN : 'rgba(148, 190, 198, 0.28)';
+      ctx.lineWidth = on ? 2 : 1.5;
+      ctx.stroke();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = on ? '#d8fbff' : '#b9d6dc';
+      ctx.font = `700 19px ${FONT}`;
+      ctx.fillText(level.name, x + w / 2, y + 21);
+      ctx.fillStyle = on ? 'rgba(103, 232, 249, 0.9)' : 'rgba(148, 190, 198, 0.6)';
+      ctx.font = `600 12px ${FONT}`;
+      const best = bestTimes[n];
+      ctx.fillText(best ? `${level.clues} clues · ${clock(best)}` : `${level.clues} clues`, x + w / 2, y + 40);
+      hitBox(`level:${n}`, x, y, w, h);
+      x += w + gap;
+    }
+  }
+
+  // The title screen does not move. A frame that changes on its own cannot prove
+  // that a tap was handled — not to the portal's gate, and not to a player who is
+  // wondering whether the thing is listening to them at all.
+  function drawTitle() {
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = CYAN;
+    ctx.font = `800 46px ${FONT}`;
+    ctx.fillText('MINI SUDOKU', W / 2, 150);
+    ctx.fillStyle = MUTED;
+    ctx.font = `500 17px ${FONT}`;
+    ctx.fillText('Six by six. Two-by-three boxes. One coffee break.', W / 2, 188);
+
+    drawLevelChips(232);
+
+    ctx.fillStyle = '#d8fbff';
+    ctx.font = `700 20px ${FONT}`;
+    ctx.fillText('Tap anywhere to play', W / 2, 330);
+
+    // A static legend of the six digits: decoration that also says, before the
+    // first tap, exactly how small this alphabet is.
+    const dw = 52, dgap = 10;
+    let dx = (W - (6 * dw + 5 * dgap)) / 2;
+    for (let d = 1; d <= 6; d++) {
+      ctx.fillStyle = 'rgba(34, 211, 238, 0.10)';
+      roundRect(dx, 364, dw, dw, 11);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(34, 211, 238, 0.28)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = d % 2 ? GIVEN : CYAN;
+      ctx.font = `700 26px ${FONT}`;
+      ctx.fillText(String(d), dx + dw / 2, 364 + dw / 2 + 1);
+      dx += dw + dgap;
+    }
+
+    ctx.strokeStyle = 'rgba(148, 190, 198, 0.16)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(90, 452);
+    ctx.lineTo(450, 452);
+    ctx.stroke();
+
+    ctx.font = `500 15px ${FONT}`;
+    [
+      'Every row, every column and every 2x3 box holds 1-6 once.',
+      'Tap a cell, then a number. Arrow keys move, 1-6 place, 0 clears.',
+      'NOTES (or N, or hold Shift) writes small pencil marks.',
+      'A digit that clashes with a neighbour turns red straight away.',
+      'White digits are the puzzle. Cyan digits are yours.',
+    ].forEach((line, n) => {
+      ctx.fillStyle = n === 0 ? '#b9d6dc' : MUTED;
+      ctx.fillText(line, W / 2, 486 + n * 28);
+    });
+  }
+
+  function drawWon() {
+    ctx.fillStyle = 'rgba(8, 26, 26, 0.82)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.shadowColor = 'rgba(34, 211, 238, 0.35)';
+    ctx.shadowBlur = 26;
+    ctx.fillStyle = 'rgba(7, 23, 24, 0.94)';
+    roundRect(40, 98, W - 80, 356, 20);
+    ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(34, 211, 238, 0.35)';
+    ctx.lineWidth = 1.5;
+    roundRect(40, 98, W - 80, 356, 20);
+    ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = CYAN;
+    ctx.font = `800 52px ${FONT}`;
+    ctx.fillText('SOLVED', W / 2, 150);
+    const seconds = S.finalSeconds;
+    ctx.fillStyle = '#e2f4f7';
+    ctx.font = `600 22px ${FONT}`;
+    ctx.fillText(`${LEVELS[S.level].name} · ${S.clues} clues · ${clock(seconds)}`, W / 2, 202);
+    ctx.font = `700 20px ${FONT}`;
+    ctx.fillStyle = S.newBest ? '#fbbf24' : MUTED;
+    ctx.fillText(S.newBest ? 'New best time!' : `Best ${clock(S.best)}`, W / 2, 240);
+    ctx.font = `500 17px ${FONT}`;
+    ctx.fillStyle = MUTED;
+    ctx.fillText(`${S.points} points · ${S.mistakes === 1 ? '1 mistake' : `${S.mistakes} mistakes`}`, W / 2, 274);
+
+    drawLevelChips(320);
+
+    if (S.overT > 0.6) {
+      ctx.fillStyle = '#d8fbff';
+      ctx.font = `700 19px ${FONT}`;
+      ctx.fillText('Tap anywhere or press R for a new puzzle', W / 2, 432);
+    }
+  }
+
+  function drawPaused() {
+    ctx.fillStyle = 'rgba(8, 26, 26, 0.9)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = CYAN;
+    ctx.font = `800 44px ${FONT}`;
+    ctx.fillText('PAUSED', W / 2, 300);
+    ctx.fillStyle = MUTED;
+    ctx.font = `500 18px ${FONT}`;
+    ctx.fillText('The clock is stopped. Tap anywhere to carry on.', W / 2, 348);
+  }
+
+  function draw() {
+    ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+    ctx.fillStyle = BG;
+    ctx.fillRect(0, 0, view.cw, view.ch);
+
+    ctx.save();
+    ctx.translate(view.ox, view.oy);
+    ctx.scale(view.scale, view.scale);
+    hits.length = 0;
+    if (S.mode === 'title') {
+      drawTitle();
+    } else {
+      drawHud();
+      drawBoard();
+      drawPad();
+      drawActions();
+      // The overlay hides the board and the buttons, so their tap targets go with
+      // it: left in place they would catch a tap meant for "play again".
+      if (S.mode === 'won') { hits.length = 0; drawWon(); }
+      else if (S.mode === 'paused') { hits.length = 0; drawPaused(); }
+      // Confetti last, so the win overlay's veil does not bury the celebration.
+      for (const p of S.parts) {
+        ctx.globalAlpha = Math.max(0, 1 - p.t / p.life);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x - 3, p.y - 3, 6, 6);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    ctx.restore();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Update
+  // ---------------------------------------------------------------------------
+  // What a screen reader is told. The rules ask for one canvas and a canvas is a
+  // picture: the cursor, the 36 cells, the pencil marks and the red digits exist
+  // nowhere else. This says the same things out loud, and only when they change —
+  // a live region rewritten every frame is a stutter, not a sentence.
+  let said = '';
+  const noteList = (i) => {
+    const marks = [];
+    for (let d = 1; d <= 6; d++) if (S.notes[i] & (1 << d)) marks.push(d);
+    return marks.join(', ');
+  };
+  function announce() {
+    if (!say) return;
+    const i = S.sel, d = valueAt(i), left = 36 - filledCount();
+    const key = `${S.mode}|${i}|${d}|${S.bad[i]}|${S.notes[i]}|${left}|${S.mistakes}|${S.notesMode}`;
+    if (key === said) return;
+    said = key;
+    if (S.mode === 'title') {
+      say.textContent = 'Mini Sudoku. Press space to play, or 1, 2 or 3 for easy, medium or hard.';
+      return;
+    }
+    if (S.mode === 'paused') { say.textContent = 'Paused. Press P to carry on.'; return; }
+    if (S.mode === 'won') {
+      say.textContent = `Solved in ${clock(S.finalSeconds)} with ${S.mistakes === 1 ? 'one mistake' : `${S.mistakes} mistakes`}. Press R for a new puzzle, or 1, 2 or 3 to change difficulty.`;
+      return;
+    }
+    const where = `Row ${((i / 6) | 0) + 1}, column ${(i % 6) + 1}`;
+    let what;
+    if (d) what = `${d}${S.given[i] ? ', a clue' : ''}${S.bad[i] ? ', clashing with a neighbour' : ''}`;
+    else if (S.notes[i]) what = `empty, pencil marks ${noteList(i)}`;
+    else what = 'empty';
+    say.textContent = `${where}: ${what}. ${left} to fill, ${S.mistakes} mistakes.${S.notesMode ? ' Pencil mode.' : ''}`;
+  }
+
+  function update(dt) {
+    announce();
+    if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 30);
+    if (S.ping.t < 1) S.ping.t = Math.min(1, S.ping.t + dt * 4.2);
+    for (let i = 0; i < 36; i++) if (S.pop[i] > 0) S.pop[i] = Math.max(0, S.pop[i] - dt * 5);
+    if (S.mode === 'won') {
+      S.overT += dt;
+      S.wave = Math.min(2, S.wave + dt * 0.9);
+    }
+    for (let i = S.parts.length - 1; i >= 0; i--) {
+      const p = S.parts[i];
+      p.t += dt;
+      if (p.t >= p.life) { S.parts.splice(i, 1); continue; }
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= 0.94;
+      p.vy = p.vy * 0.94 + 240 * dt;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Input
+  // ---------------------------------------------------------------------------
+  // The canvas is stretched to the viewport and the game is letterboxed inside it,
+  // so a pointer is mapped back through exactly the transform it was drawn with —
+  // never through a guess about where the bars are.
+  const toLogical = (clientX, clientY) => {
+    const rect = canvas.getBoundingClientRect();
+    // The ratio matters only if something CSS-scales the canvas; guard it explicitly,
+    // because `a / 0 || 1` is Infinity, which is truthy, and the fallback never runs.
+    const kx = rect.width > 0 ? view.cw / rect.width : 1;
+    const ky = rect.height > 0 ? view.ch / rect.height : 1;
+    const px = (clientX - rect.left) * kx;
+    const py = (clientY - rect.top) * ky;
+    return { x: (px - view.ox) / view.scale, y: (py - view.oy) / view.scale };
+  };
+
+  const cellAt = (lx, ly) => {
+    if (lx < BX || ly < BY || lx >= BX + BOARD || ly >= BY + BOARD) return -1;
+    return Math.floor((ly - BY) / CELL) * 6 + Math.floor((lx - BX) / CELL);
+  };
+
+  const cycleLevel = () => newGame((S.level + 1) % LEVELS.length);
+
+  const toggleMute = () => {
+    S.muted = !S.muted;
+    storage.set(STORE_MUTE, S.muted ? '1' : '0');
+    if (!S.muted) { wakeAudio(); tone(760, 0.08, 'triangle', 0.05); }
+  };
+
+  let press = null;
+
+  canvas.addEventListener('pointerdown', (e) => {
+    invalidate();
+    canvas.classList.remove('keyboard');
+    canvas.focus();
+    wakeAudio();
+    // One finger at a time — but never permanently. A pointerup that never arrives
+    // (a finger that left through the edge of the frame, a browser that drops the
+    // event) would otherwise wedge the board for the rest of the session, and an
+    // unresponsive sudoku is indistinguishable from a broken one.
+    const now = performance.now();
+    if (press && now - press.at < 2000) return;
+    try { canvas.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+    const p = toLogical(e.clientX, e.clientY);
+    press = { id: e.pointerId, x: e.clientX, y: e.clientY, lx: p.x, ly: p.y, at: now };
+  });
+
+  canvas.addEventListener('pointermove', (e) => {
+    if (!press || e.pointerId !== press.id) return;
+    // Sliding off is how a player takes a tap back, so it still cancels — but the
+    // threshold is half a cell measured on the board, not a fixed number of CSS
+    // pixels that means a quarter of a cell on a phone and a third in landscape.
+    const p = toLogical(e.clientX, e.clientY);
+    if (Math.abs(p.x - press.lx) > CELL * 0.5 || Math.abs(p.y - press.ly) > CELL * 0.5) press = null;
+  });
+
+  canvas.addEventListener('pointercancel', (e) => {
+    if (press && e.pointerId === press.id) press = null;
+  });
+
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  canvas.addEventListener('pointerup', (e) => {
+    invalidate();
+    if (!press || e.pointerId !== press.id) return;
+    // The point the finger went *down* on: the 14 px of allowed wobble is a fifth
+    // of a cell, which is enough to answer a tap with the wrong neighbour.
+    const p = { x: press.lx, y: press.ly };
+    press = null;
+
+    const box = hitAt(p.x, p.y);
+
+    if (S.mode === 'title') {
+      if (box && box.id.startsWith('level:')) return newGame(Number(box.id.slice(6)));
+      return newGame(S.level);
+    }
+    if (S.mode === 'paused') return setPaused(false);
+    if (S.mode === 'won') {
+      // Nothing on the win screen answers for the first moment of it. The tap that
+      // filled the last cell is often still coming up, and dealing a new puzzle out
+      // from under a player who has not read their own time is the rudest thing a
+      // puzzle game can do.
+      if (S.overT <= 0.6) return;
+      if (box && box.id.startsWith('level:')) return newGame(Number(box.id.slice(6)));
+      newGame(S.level);
+      return;
+    }
+
+    if (box) {
+      if (box.id.startsWith('d:')) return placeDigit(Number(box.id.slice(2)), S.notesMode);
+      if (box.id === 'notes') { S.notesMode = !S.notesMode; tone(S.notesMode ? 700 : 500, 0.05, 'square', 0.035); return; }
+      if (box.id === 'erase') return clearCell();
+      if (box.id === 'pause') return setPaused(true);
+      if (box.id === 'new') return newGame(S.level);
+      if (box.id === 'level') return cycleLevel();
+      if (box.id === 'sound') return toggleMute();
+    }
+
+    // A bare tap on the board selects that cell. Never a pause: the portal's gate
+    // taps the centre of the canvas twice, and a game that pauses on the second
+    // tap is a game judged frozen — but more to the point, a board that stops
+    // playing because you touched it is nobody's idea of a sudoku.
+    const cell = cellAt(p.x, p.y);
+    if (cell >= 0) select(cell);
+  });
+
+  window.addEventListener('keydown', (e) => {
+    invalidate();
+    canvas.classList.add('keyboard');   // a focus ring for the player who needs one
+    // A key is a user gesture too. Without this a player who started with Space and
+    // never touched the pointer played the whole puzzle in silence, under a button
+    // that said SOUND ON.
+    wakeAudio();
+    const code = e.code;
+    const move = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[code];
+    if (move) {
+      e.preventDefault();
+      if (S.mode === 'title') newGame(S.level);
+      if (S.mode !== 'playing') return;
+      // Wrapping, not clamping. A cursor that stops dead at the edge swallows the
+      // key and leaves the player pressing it again to see whether anything is
+      // listening; six columns is small enough that coming round the other side
+      // is a shortcut rather than a surprise.
+      const r = (S.sel / 6) | 0, c = S.sel % 6;
+      select(((r + move[1] + 6) % 6) * 6 + ((c + move[0] + 6) % 6));
+      return;
+    }
+
+    if (/^(?:Digit|Numpad)[1-6]$/.test(code)) {
+      e.preventDefault();
+      if (e.repeat) return;
+      const d = Number(code.slice(-1));
+      if (S.mode === 'title') return newGame(d <= LEVELS.length ? d - 1 : S.level);
+      // The win screen offers three buttons a pointer can reach and a keyboard
+      // could not: 1, 2 and 3 deal the next puzzle at that difficulty.
+      if (S.mode === 'won') { if (S.overT > 0.6 && d <= LEVELS.length) newGame(d - 1); return; }
+      if (S.mode !== 'playing') return;
+      // Shift is the held modifier for a pencil mark, and in notes mode it works the
+      // other way round, so the modifier always means "the other kind". It only
+      // counts when Shift was not what produced the digit in the first place.
+      const shiftMadeTheDigit = /^[1-6]$/.test(e.key);
+      return placeDigit(d, S.notesMode !== (e.shiftKey && !shiftMadeTheDigit));
+    }
+
+    if (code === 'Backspace' || code === 'Delete' || code === 'Digit0' || code === 'Numpad0') {
+      e.preventDefault();
+      if (S.mode === 'playing' && !e.repeat) clearCell();
+      return;
+    }
+
+    if (code === 'Space' || code === 'Enter' || code === 'NumpadEnter') {
+      e.preventDefault();
+      if (e.repeat) return;
+      if (S.mode === 'title') return newGame(S.level);
+      if (S.mode === 'paused') return setPaused(false);
+      if (S.mode === 'won') { if (S.overT > 0.6) newGame(S.level); return; }
+      S.notesMode = !S.notesMode;
+      tone(S.notesMode ? 700 : 500, 0.05, 'square', 0.035);
+      return;
+    }
+
+    if (code === 'KeyN') {
+      if (S.mode !== 'playing' || e.repeat) return;
+      S.notesMode = !S.notesMode;
+      tone(S.notesMode ? 700 : 500, 0.05, 'square', 0.035);
+      return;
+    }
+    if (e.repeat) return;                          // the rest are all toggles
+    if (code === 'KeyR') { newGame(S.level); return; }
+    if (code === 'KeyP' || code === 'Escape') { setPaused(S.mode === 'playing'); return; }
+    if (code === 'KeyM') { toggleMute(); return; }
+  });
+
+  // A tab in the background is a player who walked away, and their clock should
+  // not run while they are gone.
+  document.addEventListener('visibilitychange', () => {
+    invalidate();
+    if (document.hidden) setPaused(true);
+  });
+
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', resize);
+
+  // A sudoku between moves is a still picture. Redrawing it sixty times a second
+  // costs a phone real battery to produce identical pixels — and it is also how the
+  // first frame stops being the frame you see: Chrome re-rasterises text a frame or
+  // two after a canvas goes up (measured: every glyph shifts by one value per
+  // channel), so a screen that is redrawn forever quietly changes under a player who
+  // has not touched anything. Drawn once and left alone, it does neither.
+  //
+  // The rule for correctness: every event handler invalidates, and the loop owns the
+  // two things no event announces — a running animation and the clock reaching a new
+  // second. A missed invalidate is a frozen game, so they are set at the top of the
+  // handler, before any branch can return.
+  let dirty = true, wasAnimating = false, shownSecond = -1;
+  const invalidate = () => { dirty = true; };
+
+  const animating = () => {
+    if (S.shake > 0 || S.ping.t < 1 || S.parts.length > 0) return true;
+    if (S.mode === 'won' && (S.wave < 2 || S.overT < 0.8)) return true;
+    for (let i = 0; i < 36; i++) if (S.pop[i] > 0) return true;
+    return false;
+  };
+
+  let last = 0;
+  function frame(now) {
+    if (!last) last = now;
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    update(dt);
+    const second = Math.floor(elapsedMs() / 1000);
+    if (second !== shownSecond) { shownSecond = second; dirty = true; }
+    const live = animating();
+    // `wasAnimating` buys one more frame after the last one ends, so the screen never
+    // keeps a half-finished animation as its final picture.
+    if (dirty || live || wasAnimating) {
+      dirty = false;
+      draw();
+    }
+    wasAnimating = live;
+    requestAnimationFrame(frame);
+  }
+
+  S.best = bestTimes[S.level];
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

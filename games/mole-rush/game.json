@@ -1,0 +1,18 @@
+{
+  "slug": "mole-rush",
+  "title": "Mole Rush",
+  "tagline": "Sixty seconds, nine burrows, no mercy",
+  "description": "Moles rise out of a field of nine burrows, stay up for a window that keeps shrinking, and duck straight back. Bonk them before they vanish. Consecutive hits build a multiplier that decays while you hesitate and breaks the moment one escapes, gold moles pay a hundred a piece, and a bomb mole costs you three seconds of a sixty-second run.",
+  "categories": ["Arcade", "Family"],
+  "controls": "Keyboard, touch & mouse",
+  "instructions": [
+    "Tap anywhere or press Space to start the sixty-second run.",
+    "Tap a mole to bonk it, or press its burrow's number in numpad layout: 7-8-9 across the top row, 4-5-6 across the middle, 1-2-3 across the bottom.",
+    "The arrow keys move a bright ring between burrows and Space or Enter swings at the selected one.",
+    "Hit moles back to back to raise the multiplier, grab the gold ones for a big bonus, and leave the bombs alone because hitting one costs three seconds.",
+    "Press P to pause and M for sound; your best score and longest chain are kept on this device."
+  ],
+  "palette": ["#1a1108", "#fbbf24"],
+  "added": "2026-09-16",
+  "updated": "2026-09-16"
+}

@@ -1,0 +1,1302 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="color-scheme" content="dark">
+<title>Mole Rush — Arkai</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0d0804; overflow: hidden; }
+  body { -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+  canvas { display: block; width: 100vw; height: 100vh; touch-action: none; outline: none; cursor: pointer; }
+</style>
+</head>
+<body>
+<canvas id="game" tabindex="0" aria-label="Mole Rush. Sixty seconds, nine burrows. Tap a mole to bonk it, or press keys 1 to 9 in numpad layout, or move the ring with the arrow keys and swing with Space. Gold moles pay a bonus, bombs cost three seconds."></canvas>
+<script>
+(() => {
+  'use strict';
+
+  // =====================================================================
+  // Mole Rush — a sixty-second reflex run over a 3x3 field of burrows.
+  //
+  // One file, no assets: every mound, mole, spark and letter of the HUD is a
+  // canvas path, and every sound is built out of oscillators at the moment it
+  // is heard. Nothing is loaded and nothing is sent.
+  // =====================================================================
+
+  const W = 540, H = 720;              // logical stage — all coordinates below are in these units
+  const TAU = Math.PI * 2;
+  const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+
+  // ---- the difficulty curve, as three named pairs ----------------------
+  // Each pair is [how it feels at 1:00, how it feels at 0:00]. These three
+  // numbers are the whole curve: "still too easy at 0:40" is one edit here and
+  // not a hunt through the update loop.
+  const RUN_SECONDS  = 60;
+  const UP_WINDOW    = [1.30, 0.58];   // seconds a mole is actually worth swinging at
+  const CONCURRENT   = [1.10, 2.70];   // how many burrows are busy at the same time
+  const DUCK_SECONDS = [0.30, 0.12];   // seconds it takes to vanish once its window closes
+
+  // ---- everything else the balance rests on ----------------------------
+  const RISE_SECONDS = 0.15;           // the pop out of the ground is always snappy
+  const HIT_REACT = 0.11, HIT_DROP = 0.17;  // it reacts first, *then* it drops
+  const BURROW_COOLDOWN = 0.30;        // a burrow never re-fires in the same breath
+  const HIT_POINTS = 10, GOLD_POINTS = 100, MISS_PENALTY = 15;
+  const COMBO_STEP = 3, COMBO_MAX = 8, COMBO_HOLD = 2.6;  // one more multiplier every 3 hits
+  const GOLD_CHANCE = 0.06, GOLD_WINDOW = 0.55;           // rare, and up for barely half a window
+  const BOMB_CHANCE = [0.04, 0.18];    // the tension in the last ten seconds is this line
+  const BOMB_TIME_COST = 3, BOMB_WINDOW = 1.30;
+  const TICK_FROM = 5;                 // the clock starts ticking out loud here
+
+  // ---- field geometry ---------------------------------------------------
+  const HUD_H = 96;
+  const COL_X = [110, 270, 430];
+  const ROW_Y = [268, 428, 588];
+  // The tap grid is contiguous and starts at the crown of a fully risen mole, not
+  // at its mound: the head of a top-row mole reaches y=179, and a tap on a head
+  // that answered with nothing read as a dropped input rather than a miss.
+  const GRID_X = 30, GRID_Y = 172, CELL = 160;
+  const HOLE_RX = 60, HOLE_RY = 21;
+  const MOUND_RX = 78, MOUND_RY = 34;
+  const BODY_H = 104, MOLE_LIFT = 106;           // a fully risen mole clears the rim by ~96px
+
+  // The 3x3 field is laid out like a numpad, because that is the layout a hand
+  // already knows: 7-8-9 across the top, 1-2-3 across the bottom.
+  const KEY_OF = [7, 8, 9, 4, 5, 6, 1, 2, 3];
+  const INDEX_OF = { 7: 0, 8: 1, 9: 2, 4: 3, 5: 4, 6: 5, 1: 6, 2: 7, 3: 8 };
+
+  const STORE_BEST = 'arkai:mole-rush:best';
+  const STORE_CHAIN = 'arkai:mole-rush:chain';
+  const STORE_MUTE = 'arkai:mole-rush:muted';
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  // Without a context every draw call throws, once per frame, forever. Bail out
+  // of setting the game up at all rather than flood the console.
+  if (!ctx) return;
+
+  // Private mode throws on the first read, and an uncaught throw here is a blank
+  // page rather than a game without a high score.
+  const storage = {
+    get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+    set(key, value) { try { localStorage.setItem(key, value); return true; } catch { return false; } },
+  };
+
+  const BTN = {
+    sound: { x: 22, y: 676, w: 34, h: 34 },
+    pause: { x: 66, y: 676, w: 34, h: 34 },
+  };
+
+  const S = {
+    mode: 'title',                 // title | playing | paused | gameover
+    clock: 0, time: RUN_SECONDS, overT: 0, tickAt: RUN_SECONDS,
+    score: 0, best: Number(storage.get(STORE_BEST)) || 0, newBest: false,
+    combo: 0, comboT: 0, comboPop: 0, chain: 0,
+    bestChain: Number(storage.get(STORE_CHAIN)) || 0,
+    hits: 0, misses: 0,
+    burrows: [], spawnIn: 0.5,
+    cursor: 4, cursorPop: 0,
+    muted: storage.get(STORE_MUTE) === '1',
+    shake: 0, flashMiss: 0, flashBomb: 0, flashGold: 0,
+    parts: [], floats: [], rings: [],
+  };
+
+  for (let i = 0; i < 9; i++) {
+    S.burrows.push({ i, state: 'empty', kind: 'mole', t: 0, hold: 0, duck: 0.3, rise: 0, riseAtHit: 0, wait: 0, face: 1, seed: Math.random() * 10 });
+  }
+
+  // Dust hanging in the air. It is decoration, but it is also the reason the
+  // screen is never byte-identical two frames running: a still frame in a game
+  // with a running clock is indistinguishable from a crash.
+  const MOTES = [];
+  for (let i = 0; i < 44; i++) {
+    MOTES.push({ x: Math.random() * W, y: Math.random() * (H + 40), r: 0.7 + Math.random() * 1.8, s: 5 + Math.random() * 16, w: 0.4 + Math.random() * 1.1, p: Math.random() * TAU, a: 0.10 + Math.random() * 0.22 });
+  }
+
+  // ---- the one channel to the portal ------------------------------------
+  const emit = (event, data) => {
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: 'game-event', event, data: data || {} }, location.origin);
+      }
+    } catch { /* not embedded */ }
+  };
+
+  // ---- sound, synthesised ------------------------------------------------
+  let audio = null, noiseBuf = null;
+  const ensureAudio = () => {
+    if (audio || S.muted) return;
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      audio = new Ctx();
+      // A third of a second of white noise is all the percussion in this game:
+      // a thud is that noise slapped through a lowpass, a whiff is the same
+      // noise swept through a bandpass. One buffer, two very different hits.
+      const n = Math.floor(audio.sampleRate * 0.35);
+      noiseBuf = audio.createBuffer(1, n, audio.sampleRate);
+      const ch = noiseBuf.getChannelData(0);
+      for (let i = 0; i < n; i++) ch[i] = Math.random() * 2 - 1;
+    } catch { audio = null; noiseBuf = null; }
+  };
+  const wake = () => {
+    ensureAudio();
+    // 'interrupted' is iOS after a phone call: a context stuck there is silent
+    // until something resumes it, and nothing else ever will.
+    try { if (audio && (audio.state === 'suspended' || audio.state === 'interrupted')) audio.resume().catch(() => {}); } catch { /* ignore */ }
+  };
+  // Not `state === 'running'`: resume() is asynchronous, so the jingle fired on
+  // the same tick as the first gesture was dropped every single time. Nodes
+  // scheduled on a context that is still waking up play when it wakes.
+  const live = () => !S.muted && audio && audio.state !== 'closed';
+
+  function tone(freq, dur, type, vol, delay, endFreq) {
+    if (!live()) return;
+    try {
+      const t = audio.currentTime + (delay || 0);
+      const osc = audio.createOscillator(), gain = audio.createGain();
+      osc.type = type || 'sine';
+      osc.frequency.setValueAtTime(freq, t);
+      if (endFreq) osc.frequency.exponentialRampToValueAtTime(Math.max(24, endFreq), t + dur);
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.linearRampToValueAtTime(vol, t + 0.006);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      osc.connect(gain); gain.connect(audio.destination);
+      osc.start(t); osc.stop(t + dur + 0.03);
+    } catch { /* an audio device that vanished must never break the game */ }
+  }
+
+  function noise(dur, vol, filter, f0, f1, delay) {
+    if (!live() || !noiseBuf) return;
+    try {
+      const t = audio.currentTime + (delay || 0);
+      const src = audio.createBufferSource(); src.buffer = noiseBuf;
+      const biq = audio.createBiquadFilter();
+      biq.type = filter;
+      biq.Q.value = filter === 'bandpass' ? 1.7 : 0.8;
+      biq.frequency.setValueAtTime(f0, t);
+      if (f1) biq.frequency.exponentialRampToValueAtTime(Math.max(40, f1), t + dur);
+      const gain = audio.createGain();
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.linearRampToValueAtTime(vol, t + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      src.connect(biq); biq.connect(gain); gain.connect(audio.destination);
+      src.start(t); src.stop(t + dur + 0.03);
+    } catch { /* same */ }
+  }
+
+  const sfx = {
+    // A bonk is a body blow: a noise slap over a pitch that falls. It climbs a
+    // little with the combo so a long chain audibly tightens.
+    hit(combo) {
+      noise(0.09, 0.15, 'lowpass', 1500, 320);
+      tone(180 + Math.min(10, combo) * 16, 0.13, 'sine', 0.13, 0, 66);
+      tone(520 + Math.min(12, combo) * 28, 0.06, 'triangle', 0.045, 0.012);
+    },
+    whiff() { noise(0.13, 0.075, 'bandpass', 2300, 520); },
+    escape() { tone(300, 0.17, 'sawtooth', 0.06, 0, 118); noise(0.12, 0.05, 'lowpass', 900, 220); },
+    chime() {
+      tone(880, 0.12, 'triangle', 0.08);
+      tone(1320, 0.14, 'triangle', 0.07, 0.07);
+      tone(1760, 0.24, 'triangle', 0.06, 0.14);
+    },
+    shimmer() { tone(1150, 0.11, 'sine', 0.035, 0, 1850); },
+    boom() { tone(120, 0.34, 'sawtooth', 0.14, 0, 42); noise(0.30, 0.16, 'lowpass', 760, 110); },
+    tick() { tone(1180, 0.05, 'square', 0.06); },
+    move() { tone(760, 0.035, 'sine', 0.022); },
+    begin() { tone(330, 0.09, 'triangle', 0.07); tone(494, 0.10, 'triangle', 0.07, 0.08); tone(660, 0.18, 'triangle', 0.07, 0.17); },
+    over() { tone(440, 0.16, 'sawtooth', 0.075); tone(330, 0.20, 'sawtooth', 0.075, 0.15); tone(220, 0.36, 'sawtooth', 0.075, 0.32); },
+  };
+
+  // ---- small helpers -----------------------------------------------------
+  const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+  const pick = (list) => list[(Math.random() * list.length) | 0];
+
+  // Squared in front, linear behind: the first ten seconds stay gentle enough to
+  // learn the reach of your own hand, and the last ten arrive fast enough to hurt.
+  const heat = () => {
+    if (S.mode !== 'playing') return 0;
+    const p = clamp(1 - S.time / RUN_SECONDS, 0, 1);
+    return p * p * 0.45 + p * 0.55;
+  };
+  const curve = (pair) => pair[0] + (pair[1] - pair[0]) * heat();
+  const mult = () => Math.min(COMBO_MAX, 1 + Math.floor(S.combo / COMBO_STEP));
+  const colOf = (i) => COL_X[i % 3];
+  const rowOf = (i) => ROW_Y[(i / 3) | 0];
+
+  function burst(x, y, colors, count, speed, gravity) {
+    for (let k = 0; k < count; k++) {
+      const a = Math.random() * TAU, s = speed * (0.25 + Math.random() * 0.75);
+      S.parts.push({
+        x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 70, g: gravity === undefined ? 640 : gravity,
+        life: 0.38 + Math.random() * 0.55, t: 0, r: 1.8 + Math.random() * 3.2, c: pick(colors),
+      });
+    }
+  }
+  const puff = (x, y, count) => burst(x, y, ['rgba(146,108,66,0.9)', 'rgba(110,78,44,0.85)', 'rgba(74,44,20,0.9)'], count, 130, 300);
+  const float = (x, y, text, color, size) => S.floats.push({ x, y, text, color, size: size || 22, t: 0 });
+
+  // ---- flow --------------------------------------------------------------
+  function reset() {
+    S.time = RUN_SECONDS; S.tickAt = Math.ceil(RUN_SECONDS);
+    S.score = 0; S.combo = 0; S.comboT = 0; S.comboPop = 0; S.chain = 0;
+    S.hits = 0; S.misses = 0; S.newBest = false; S.overT = 0;
+    S.shake = 0; S.flashMiss = 0; S.flashBomb = 0; S.flashGold = 0;
+    S.parts = []; S.floats = []; S.rings = [];
+    S.cursor = 4; S.cursorPop = 0;
+    for (const b of S.burrows) { b.state = 'empty'; b.rise = 0; b.t = 0; b.wait = 0.2 + Math.random() * 0.4; }
+    S.spawnIn = 0.4;
+  }
+
+  function begin() {
+    reset();
+    S.mode = 'playing';
+    wake();
+    sfx.begin();
+    emit('start', { game: 'mole-rush', seconds: RUN_SECONDS });
+  }
+
+  function endRun() {
+    S.mode = 'gameover';
+    S.time = 0; S.overT = 0;
+    S.shake = 14;
+    S.combo = 0; S.comboT = 0;        // or the results screen shows a live chain that is over
+    S.newBest = S.score > S.best;
+    if (S.newBest) { S.best = S.score; storage.set(STORE_BEST, String(S.best)); }
+    if (S.chain > S.bestChain) { S.bestChain = S.chain; storage.set(STORE_CHAIN, String(S.bestChain)); }
+    for (const b of S.burrows) {
+      if (b.state !== 'empty') puff(colOf(b.i), rowOf(b.i) - 6, 6);
+      b.state = 'empty'; b.rise = 0; b.wait = 0.3 + Math.random() * 0.6;
+    }
+    sfx.over();
+    emit('gameover', { score: S.score, best: S.best, chain: S.chain, hits: S.hits });
+  }
+
+  function togglePause() {
+    if (S.mode === 'playing') S.mode = 'paused';
+    else if (S.mode === 'paused') { S.mode = 'playing'; wake(); }
+  }
+
+  function toggleMute() {
+    S.muted = !S.muted;
+    storage.set(STORE_MUTE, S.muted ? '1' : '0');
+    if (!S.muted) { wake(); sfx.move(); }
+  }
+
+  // ---- burrows -----------------------------------------------------------
+  function activeCount() {
+    let n = 0;
+    // A mole already being bonked is leaving, not occupying a burrow. Counting
+    // it meant every clean hit throttled the next spawn for a quarter of a
+    // second: the better you played, the fewer moles the game gave you.
+    for (const b of S.burrows) if (b.state !== 'empty' && b.state !== 'hit') n++;
+    return n;
+  }
+  function goldUp() {
+    for (const b of S.burrows) if (b.state !== 'empty' && b.state !== 'hit' && b.kind === 'gold') return true;
+    return false;
+  }
+
+  function scheduleSpawn() {
+    // One mole every window/busy seconds keeps `busy` burrows occupied on
+    // average. The jitter is what stops the field turning into a metronome you
+    // can play with your eyes shut.
+    const gap = (curve(UP_WINDOW) / Math.max(0.6, curve(CONCURRENT))) * (0.7 + Math.random() * 0.65);
+    S.spawnIn = Math.max(0.11, gap);
+  }
+
+  function trySpawn() {
+    const free = [];
+    for (const b of S.burrows) if (b.state === 'empty' && b.wait <= 0) free.push(b);
+    if (!free.length) return;
+    if (activeCount() >= Math.max(1, Math.round(curve(CONCURRENT)))) return;
+
+    const b = pick(free);
+    const upFor = curve(UP_WINDOW);
+    const roll = Math.random();
+    let kind = 'mole';
+    // Gold first, and never two at once: a bonus you can miss because another
+    // bonus was also on screen is a bonus that feels arbitrary. The bomb gets its
+    // own roll — sharing one meant every roll the gold rule rejected fell through
+    // into the bomb branch, quietly running bombs at GOLD_CHANCE + BOMB_CHANCE
+    // whenever gold was blocked, which is 2.5x the intended rate at the opening.
+    if (roll < GOLD_CHANCE && !goldUp() && (S.mode !== 'playing' || S.time < RUN_SECONDS - 3)) kind = 'gold';
+    else if (Math.random() < curve(BOMB_CHANCE)) kind = 'bomb';
+
+    b.kind = kind;
+    b.state = 'rising';
+    b.rise = 0; b.t = 0;
+    b.face = Math.random() < 0.5 ? -1 : 1;
+    b.seed = Math.random() * 10;
+    b.hold = upFor * (kind === 'gold' ? GOLD_WINDOW : kind === 'bomb' ? BOMB_WINDOW : 0.85 + Math.random() * 0.35);
+    b.duck = curve(DUCK_SECONDS) * (kind === 'bomb' ? 1.3 : 1);
+    puff(colOf(b.i), rowOf(b.i) - 2, 5);
+    if (kind === 'gold' && S.mode === 'playing') sfx.shimmer();   // the attract field is seen, not heard
+  }
+
+  function updateBurrow(b, dt) {
+    b.t += dt;
+    if (b.state === 'empty') { if (b.wait > 0) b.wait -= dt; return; }
+    if (b.state === 'rising') {
+      b.rise = Math.min(1, b.rise + dt / RISE_SECONDS);
+      if (b.rise >= 1) { b.state = 'up'; b.t = 0; }
+      return;
+    }
+    if (b.state === 'up') {
+      if (b.t >= b.hold) { b.state = 'ducking'; b.t = 0; }
+      return;
+    }
+    if (b.state === 'ducking') {
+      b.rise = Math.max(0, b.rise - dt / Math.max(0.05, b.duck));
+      if (b.rise <= 0) escaped(b);
+      return;
+    }
+    if (b.state === 'hit') {
+      // It reacts first — squashed, eyes crossed — and only then drops. A mole
+      // that disappears on the same frame as the tap reads as a bug, not a hit.
+      if (b.t >= HIT_REACT) b.rise = Math.max(0, b.riseAtHit * (1 - (b.t - HIT_REACT) / HIT_DROP));
+      if (b.t >= HIT_REACT + HIT_DROP) { b.state = 'empty'; b.rise = 0; b.wait = BURROW_COOLDOWN; }
+    }
+  }
+
+  function escaped(b) {
+    const kind = b.kind;
+    b.state = 'empty'; b.rise = 0; b.wait = BURROW_COOLDOWN;
+    if (S.mode !== 'playing') return;
+    if (kind === 'bomb') return;            // a bomb that leaves on its own is a bullet dodged
+    breakChain(b.i);
+  }
+
+  function breakChain(i) {
+    const had = S.combo;
+    S.combo = 0; S.comboT = 0;
+    S.misses++;
+    S.flashMiss = 0.32;
+    S.shake = Math.max(S.shake, had >= COMBO_STEP ? 9 : 4);
+    const cx = colOf(i), cy = rowOf(i);
+    puff(cx, cy - 6, 9);
+    if (had >= COMBO_STEP) {
+      // The penalty only bites once a chain was worth something. Docking the
+      // first miss of a run teaches nothing and just sours the opening.
+      S.score = Math.max(0, S.score - MISS_PENALTY);
+      float(cx, cy - 54, '-' + MISS_PENALTY, '#f87171', 24);
+      float(cx, cy - 24, 'CHAIN LOST', 'rgba(248,113,113,0.9)', 14);
+    }
+    sfx.escape();
+  }
+
+  function swing(i) {
+    if (S.mode !== 'playing') return;
+    const b = S.burrows[i];
+    // A mole already being bonked is neither a target nor a miss: a second tap
+    // inside its 0.28 s reaction is an ordinary double tap, and answering it with
+    // a whiff punished the most natural thing a player does.
+    if (b.state === 'hit') return;
+    S.cursor = i;                     // the keyboard ring follows the hand, however you swung
+    S.cursorPop = 1;
+    const cx = colOf(i), cy = rowOf(i);
+    // Rising counts from the moment it is genuinely visible: a hit you could not
+    // possibly have aimed is as unfair as a hit that does not register.
+    const reachable = (b.state === 'rising' || b.state === 'up' || b.state === 'ducking') && b.rise > 0.22;
+
+    if (!reachable) {
+      S.rings.push({ i, t: 0, ok: false });
+      puff(cx, cy - 4, 4);
+      // Air does not break the chain, but it costs half of what is left of it.
+      // Without that, hammering all nine burrows in rotation beats aiming — every
+      // mole dies before it can escape, nothing ever breaks, and the combo stops
+      // being a skill and starts being stamina.
+      if (S.combo > 0) S.comboT *= 0.5;
+      sfx.whiff();
+      return;
+    }
+
+    S.rings.push({ i, t: 0, ok: true });
+    b.state = 'hit'; b.riseAtHit = b.rise; b.t = 0;
+    const apex = cy - b.rise * MOLE_LIFT + 20;
+
+    if (b.kind === 'bomb') {
+      // Three seconds off a sixty-second run is a tenth of what is left at 0:30
+      // and a third of what is left at 0:09 — the same penalty gets sharper as
+      // the clock runs down, which is exactly when panic makes you swing wild.
+      S.time = Math.max(0.001, S.time - BOMB_TIME_COST);
+      S.combo = 0; S.comboT = 0;
+      S.flashBomb = 0.5; S.shake = 24;
+      burst(cx, apex, ['#f87171', '#fca5a5', '#fbbf24', '#fde68a'], 34, 330);
+      float(cx, apex - 24, '-' + BOMB_TIME_COST + 's', '#f87171', 28);
+      sfx.boom();
+      return;
+    }
+
+    S.combo++;
+    S.comboT = COMBO_HOLD;
+    S.comboPop = 1;
+    if (S.combo > S.chain) S.chain = S.combo;
+    const m = mult();
+    const gain = (b.kind === 'gold' ? GOLD_POINTS : HIT_POINTS) * m;
+    S.score += gain;
+    S.hits++;
+    // Shake scaled to the chain: a first hit is a tap, a twelfth is an earthquake.
+    S.shake = Math.max(S.shake, 4 + Math.min(15, S.combo * 1.7));
+
+    if (b.kind === 'gold') {
+      S.flashGold = 0.4;
+      burst(cx, apex, ['#fbbf24', '#fde68a', '#fef3c7', '#f59e0b'], 32, 300);
+      float(cx, apex - 26, '+' + gain, '#fde68a', 30);
+      sfx.chime();
+    } else {
+      burst(cx, apex, ['#c08a4e', '#8b5a2b', '#4ade80', '#e7c9a3'], 16, 230);
+      float(cx, apex - 22, '+' + gain, '#fdf6e8', 23);
+      sfx.hit(S.combo);
+    }
+    if (m > 1) float(cx + 34, apex - 2, '×' + m, '#fbbf24', 18);
+  }
+
+  // ---- update ------------------------------------------------------------
+  function update(dt) {
+    S.clock += dt;
+    if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 44);
+    S.flashMiss = Math.max(0, S.flashMiss - dt * 2.2);
+    S.flashBomb = Math.max(0, S.flashBomb - dt * 1.9);
+    S.flashGold = Math.max(0, S.flashGold - dt * 2.4);
+    S.comboPop = Math.max(0, S.comboPop - dt * 3.4);
+    S.cursorPop = Math.max(0, S.cursorPop - dt * 4.2);
+
+    if (S.mode === 'paused') return;
+    if (S.mode === 'gameover') S.overT += dt;
+
+    // Below the pause return, because an explosion that keeps expanding over a
+    // frozen field is a pause that did not pause. The ambient clock above it
+    // still runs, which is what keeps the paused screen alive rather than stuck.
+    for (let k = S.parts.length - 1; k >= 0; k--) {
+      const p = S.parts[k];
+      p.t += dt;
+      if (p.t >= p.life) { S.parts.splice(k, 1); continue; }
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vx *= 0.985; p.vy += p.g * dt;
+    }
+    for (let k = S.floats.length - 1; k >= 0; k--) {
+      S.floats[k].t += dt;
+      if (S.floats[k].t > 0.95) S.floats.splice(k, 1);
+    }
+    for (let k = S.rings.length - 1; k >= 0; k--) {
+      S.rings[k].t += dt;
+      if (S.rings[k].t > 0.35) S.rings.splice(k, 1);
+    }
+
+    // Burrows keep working on the title and game-over screens: the field behind
+    // the panel is the trailer for the game, and it costs nothing to run.
+    for (const b of S.burrows) updateBurrow(b, dt);
+    S.spawnIn -= dt;
+    if (S.spawnIn <= 0) { trySpawn(); scheduleSpawn(); }
+
+    if (S.mode !== 'playing') return;
+
+    if (S.combo > 0) {
+      S.comboT -= dt;
+      if (S.comboT <= 0) { S.combo = 0; S.comboT = 0; }   // decay, not a punishment
+    }
+
+    S.time -= dt;
+    const whole = Math.ceil(S.time);
+    if (whole < S.tickAt) {
+      S.tickAt = whole;
+      if (whole > 0 && whole <= TICK_FROM) sfx.tick();
+    }
+    if (S.time <= 0) endRun();
+  }
+
+  // ---- view --------------------------------------------------------------
+  const view = { scale: 1, ox: 0, oy: 0, dpr: 1, cw: W, ch: H };
+
+  function resize() {
+    // Backing store = CSS size x device ratio, capped at 2. A canvas left at its
+    // CSS size is measurably soft on every phone; past 2 it is four times the
+    // pixels for nothing the eye can find.
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const cw = canvas.clientWidth || window.innerWidth;
+    const ch = canvas.clientHeight || window.innerHeight;
+    // A frame mounted in display:none measures zero. Writing that through would
+    // leave a 0x0 backing store and a scale of 0 — a black screen and dead input
+    // with nothing in the console. Keep the last good view and try again later.
+    if (!cw || !ch) return;
+    view.dpr = dpr; view.cw = cw; view.ch = ch;
+    view.scale = Math.min(cw / W, ch / H);
+    view.ox = (cw - W * view.scale) / 2;
+    view.oy = (ch - H * view.scale) / 2;
+    canvas.width = Math.round(cw * dpr);
+    canvas.height = Math.round(ch * dpr);
+  }
+
+  // A window dragged to a monitor with a different pixel ratio fires no resize,
+  // and neither does a frame that was display:none when the game loaded. Three
+  // integer comparisons a frame is cheaper than being wrong about either.
+  function checkView() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const cw = canvas.clientWidth || window.innerWidth;
+    const ch = canvas.clientHeight || window.innerHeight;
+    if (cw && ch && (cw !== view.cw || ch !== view.ch || dpr !== view.dpr)) resize();
+  }
+
+  // ---- drawing primitives -------------------------------------------------
+  function roundRect(x, y, w, h, r) {
+    const rr = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + rr, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rr);
+    ctx.arcTo(x + w, y + h, x, y + h, rr);
+    ctx.arcTo(x, y + h, x, y, rr);
+    ctx.arcTo(x, y, x + w, y, rr);
+    ctx.closePath();
+  }
+  const ell = (x, y, rx, ry) => { ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, TAU); };
+  const text = (str, x, y, size, color, weight, align) => {
+    ctx.font = (weight || 600) + ' ' + size + 'px ' + FONT;
+    ctx.fillStyle = color;
+    ctx.textAlign = align || 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(str, x, y);
+  };
+
+  // ---- the field ----------------------------------------------------------
+  function drawField() {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#241708');
+    g.addColorStop(0.36, '#1a1108');
+    g.addColorStop(1, '#0d0804');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    // Turned earth behind the burrows, with a soft crest so the grid sits on
+    // ground rather than on a flat colour.
+    ctx.fillStyle = 'rgba(74, 46, 20, 0.45)';
+    ctx.beginPath();
+    ctx.moveTo(0, 206);
+    for (let x = 0; x <= W; x += 30) ctx.lineTo(x, 200 + Math.sin(x * 0.021 + 0.7) * 7 + Math.sin(x * 0.007) * 4);
+    ctx.lineTo(W, H); ctx.lineTo(0, H);
+    ctx.closePath();
+    ctx.fill();
+
+    // A fringe of grass along that crest — the only green above the mounds.
+    ctx.strokeStyle = 'rgba(74, 222, 128, 0.30)';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (let x = 6; x < W; x += 13) {
+      const base = 200 + Math.sin(x * 0.021 + 0.7) * 7 + Math.sin(x * 0.007) * 4;
+      const sway = Math.sin(S.clock * 1.1 + x * 0.05) * 3;
+      ctx.moveTo(x, base + 2);
+      ctx.lineTo(x + sway, base - 7 - (x % 3) * 2);
+    }
+    ctx.stroke();
+
+    // Horizontal striations: cheap soil texture that also breaks up the flat band.
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.14)';
+    ctx.lineWidth = 1;
+    for (let y = 226; y < H; y += 26) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      for (let x = 0; x <= W; x += 36) ctx.lineTo(x, y + Math.sin(x * 0.03 + y) * 2.2);
+      ctx.stroke();
+    }
+
+    for (const m of MOTES) {
+      const span = H + 40;
+      const y = (((m.y - S.clock * m.s) % span) + span) % span - 20;
+      const x = m.x + Math.sin(S.clock * m.w + m.p) * 12;
+      ctx.globalAlpha = m.a * (0.45 + 0.55 * Math.sin(S.clock * 1.5 + m.p) * 0.5 + 0.275);
+      ctx.fillStyle = '#d9b27a';
+      ctx.beginPath(); ctx.arc(x, y, m.r, 0, TAU); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // The multiplier, drawn as big as the field allows. It sits behind the mounds
+  // so it can be enormous without ever hiding a mole.
+  function drawComboWatermark() {
+    if (S.combo < COMBO_STEP) return;
+    const m = mult();
+    const left = clamp(S.comboT / COMBO_HOLD, 0, 1);
+    const pop = 1 + S.comboPop * 0.16;
+    ctx.save();
+    ctx.translate(270, 426);
+    ctx.scale(pop, pop);
+    ctx.globalAlpha = 0.07 + left * 0.055;
+    text('×' + m, 0, 0, 216, '#fbbf24', 900);
+    ctx.restore();
+  }
+
+  function drawMole(b, cx, cy) {
+    if (b.rise <= 0.002) return;
+    const lift = b.rise * MOLE_LIFT;
+    const baseY = cy + BODY_H + 10 - lift;
+    const gold = b.kind === 'gold', bomb = b.kind === 'bomb';
+
+    ctx.save();
+    // Clipped to the width of its own mound and to the rim of its own hole: a
+    // mole is always *inside* the ground it is climbing out of.
+    ctx.beginPath();
+    ctx.rect(cx - MOUND_RX, 0, MOUND_RX * 2, cy + HOLE_RY);
+    ctx.clip();
+    ctx.translate(cx, baseY);
+
+    // Squash and stretch — stretched while it shoots up, flattened when bonked.
+    let sx = 1, sy = 1;
+    if (b.state === 'rising') { sy = 1 + (1 - b.rise) * 0.20; sx = 1 - (1 - b.rise) * 0.13; }
+    if (b.state === 'hit') {
+      const k = clamp(b.t / HIT_REACT, 0, 1);
+      sy = 1 - 0.36 * Math.sin(k * Math.PI);
+      sx = 1 + 0.32 * Math.sin(k * Math.PI);
+    }
+    ctx.scale(sx, sy);
+
+    // A gold mole lights the burrow it is in; a bomb pulses red. Both have to be
+    // readable in the corner of the eye at 0:08, so they glow rather than merely
+    // wear a different brown.
+    if (gold) { ctx.shadowColor = 'rgba(251, 191, 36, 0.95)'; ctx.shadowBlur = 26 + Math.sin(S.clock * 9) * 8; }
+    if (bomb) { ctx.shadowColor = 'rgba(239, 68, 68, 0.9)'; ctx.shadowBlur = 18 + Math.sin(S.clock * 12) * 8; }
+
+    const fur = gold ? ['#fef3c7', '#f0a020', '#8a4b08']
+      : bomb ? ['#8b8b96', '#44444d', '#17171c']
+        : ['#b8814a', '#7a4f26', '#3f240f'];
+    const body = ctx.createLinearGradient(0, -BODY_H, 0, 6);
+    body.addColorStop(0, fur[0]);
+    body.addColorStop(0.55, fur[1]);
+    body.addColorStop(1, fur[2]);
+
+    // ears, behind the head
+    ctx.fillStyle = fur[2];
+    ell(-30, -80, 9, 10); ctx.fill();
+    ell(30, -80, 9, 10); ctx.fill();
+
+    // body: one pear-shaped path, wider at the shoulders than at the crown
+    ctx.fillStyle = body;
+    ctx.beginPath();
+    ctx.moveTo(-41, 6);
+    ctx.bezierCurveTo(-55, -16, -51, -62, -30, -85);
+    ctx.bezierCurveTo(-16, -101, 16, -101, 30, -85);
+    ctx.bezierCurveTo(51, -62, 55, -16, 41, 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // belly
+    ctx.fillStyle = gold ? 'rgba(255, 249, 219, 0.55)' : bomb ? 'rgba(212, 212, 216, 0.22)' : 'rgba(226, 190, 145, 0.45)';
+    ell(0, -28, 27, 30); ctx.fill();
+
+    if (bomb) {
+      // Hazard band: two stripes across the belly, the universal "do not touch".
+      ctx.save();
+      ctx.beginPath(); ctx.ellipse(0, -28, 27, 30, 0, 0, TAU); ctx.clip();
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = 9;
+      for (let k = -2; k <= 2; k++) {
+        ctx.beginPath();
+        ctx.moveTo(-34 + k * 18, 6);
+        ctx.lineTo(4 + k * 18, -62);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // paws
+    ctx.fillStyle = gold ? '#fde68a' : bomb ? '#6b6b75' : '#d9a86f';
+    ell(-35, -12, 13, 10); ctx.fill();
+    ell(35, -12, 13, 10); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.30)';
+    for (let k = -1; k <= 1; k++) {
+      ell(-35 + k * 5, -16, 1.6, 3); ctx.fill();
+      ell(35 + k * 5, -16, 1.6, 3); ctx.fill();
+    }
+
+    // snout + nose + buck teeth: the three shapes that stop it being a blob
+    ctx.fillStyle = gold ? '#fff7dc' : bomb ? '#9a9aa4' : '#f0c3ae';
+    ell(0, -45, 23, 17); ctx.fill();
+    ctx.fillStyle = '#fdf6e8';
+    ctx.fillRect(-7.5, -34, 6, 9);
+    ctx.fillRect(1.5, -34, 6, 9);
+    ctx.fillStyle = bomb ? '#18181b' : '#2b1410';
+    ell(0, -53, 7.5, 5.5); ctx.fill();
+
+    // whiskers
+    ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+    ctx.lineWidth = 1.4;
+    const droop = b.state === 'hit' ? 6 : Math.sin(S.clock * 5 + b.seed) * 1.6;
+    for (let k = 0; k < 3; k++) {
+      const wy = -50 + k * 6;
+      ctx.beginPath();
+      ctx.moveTo(-9, wy);
+      ctx.quadraticCurveTo(-24, wy - 3 + droop, -40, wy + 2 + k * 2 + droop);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(9, wy);
+      ctx.quadraticCurveTo(24, wy - 3 + droop, 40, wy + 2 + k * 2 + droop);
+      ctx.stroke();
+    }
+
+    // eyes — the fastest read of all. Crossed when bonked, half shut on the way
+    // down, and a hostile red when it is a bomb.
+    const ex = 14.5, ey = -67;
+    if (b.state === 'hit') {
+      ctx.strokeStyle = '#1b0f06';
+      ctx.lineWidth = 3;
+      for (const s of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(s * ex - 6, ey - 6); ctx.lineTo(s * ex + 6, ey + 6);
+        ctx.moveTo(s * ex + 6, ey - 6); ctx.lineTo(s * ex - 6, ey + 6);
+        ctx.stroke();
+      }
+    } else if (b.state === 'ducking') {
+      ctx.strokeStyle = '#1b0f06';
+      ctx.lineWidth = 3;
+      for (const s of [-1, 1]) {
+        ctx.beginPath();
+        ctx.arc(s * ex, ey, 7, 0.15 * Math.PI, 0.85 * Math.PI);
+        ctx.stroke();
+      }
+    } else {
+      for (const s of [-1, 1]) {
+        ctx.fillStyle = bomb ? '#450a0a' : '#fdf6e8';
+        ell(s * ex, ey, 7.5, 8.5); ctx.fill();
+        ctx.fillStyle = bomb ? '#ef4444' : '#1b0f06';
+        const look = b.face * 1.8 + Math.sin(S.clock * 2.2 + b.seed) * 1.2;
+        ell(s * ex + look, ey + 1, bomb ? 4.6 : 4, bomb ? 4.6 : 4.4); ctx.fill();
+        if (!bomb) {
+          ctx.fillStyle = 'rgba(255,255,255,0.85)';
+          ell(s * ex + look + 1.6, ey - 1.6, 1.5, 1.5); ctx.fill();
+        }
+      }
+    }
+
+    if (gold) {
+      // A sheen across the crown and a spark above it: "this one is worth running for".
+      ctx.strokeStyle = 'rgba(255, 253, 235, 0.55)';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(0, -70, 26, Math.PI * 1.12, Math.PI * 1.62);
+      ctx.stroke();
+      const sp = 1 + Math.sin(S.clock * 7) * 0.25;
+      ctx.fillStyle = '#fff7dc';
+      ctx.save();
+      ctx.translate(0, -108);
+      ctx.scale(sp, sp);
+      ctx.beginPath();
+      for (let k = 0; k < 8; k++) {
+        const a = (Math.PI / 4) * k - Math.PI / 2;
+        const rr = k % 2 === 0 ? 9 : 3.4;
+        ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    if (bomb) {
+      // Lit fuse: a curl of cord and a spark that jitters every frame.
+      ctx.strokeStyle = '#3f3f46';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(10, -96);
+      ctx.quadraticCurveTo(28, -112, 20, -126);
+      ctx.stroke();
+      const j = Math.sin(S.clock * 27 + b.seed) * 1.8;
+      ctx.fillStyle = '#fde68a';
+      ctx.shadowColor = '#f97316';
+      ctx.shadowBlur = 16;
+      ctx.beginPath();
+      ctx.arc(20 + j, -128 + j * 0.6, 4.5 + Math.sin(S.clock * 19) * 1.4, 0, TAU);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    ctx.restore();
+  }
+
+  function drawBurrow(i) {
+    const cx = colOf(i), cy = rowOf(i);
+    const b = S.burrows[i];
+    const selected = S.mode === 'playing' && S.cursor === i;
+
+    // 1. the mound of soil, with a green crown
+    const mg = ctx.createRadialGradient(cx - 18, cy - 12, 6, cx, cy + 6, MOUND_RX + 14);
+    mg.addColorStop(0, '#6b4423');
+    mg.addColorStop(0.55, '#4b2e14');
+    mg.addColorStop(1, '#2a180a');
+    ctx.fillStyle = mg;
+    ell(cx, cy + 6, MOUND_RX, MOUND_RY); ctx.fill();
+
+    if (selected) {
+      ctx.save();
+      ctx.globalAlpha = 0.20 + Math.sin(S.clock * 4) * 0.06;
+      ctx.fillStyle = '#fbbf24';
+      ell(cx, cy + 6, MOUND_RX + 4, MOUND_RY + 4); ctx.fill();
+      ctx.restore();
+    }
+
+    ctx.strokeStyle = 'rgba(74, 222, 128, 0.55)';
+    ctx.lineWidth = 2.4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (let k = 0; k <= 12; k++) {
+      const a = Math.PI + (Math.PI / 12) * k;
+      const bx = cx + Math.cos(a) * MOUND_RX * 0.96;
+      const by = cy + 6 + Math.sin(a) * MOUND_RY * 0.96;
+      const sway = Math.sin(S.clock * 1.3 + k + i) * 2.4;
+      ctx.moveTo(bx, by);
+      ctx.lineTo(bx + sway, by - 6 - (k % 3) * 2.5);
+    }
+    ctx.stroke();
+
+    // 2. the hole: a dark opening with a rim of loose earth
+    const hg = ctx.createRadialGradient(cx, cy - 4, 3, cx, cy, HOLE_RX);
+    hg.addColorStop(0, '#000000');
+    hg.addColorStop(0.7, '#0c0703');
+    hg.addColorStop(1, '#1d1108');
+    ctx.fillStyle = hg;
+    ell(cx, cy, HOLE_RX, HOLE_RY); ctx.fill();
+
+    // 3. the mole, clipped to the ground it is climbing out of
+    drawMole(b, cx, cy);
+
+    // 4. the near rim, drawn over the mole so it is genuinely inside the hole
+    const lip = ctx.createLinearGradient(cx, cy, cx, cy + HOLE_RY + 8);
+    lip.addColorStop(0, '#3a2210');
+    lip.addColorStop(1, '#5c3a1b');
+    ctx.fillStyle = lip;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, HOLE_RX, HOLE_RY, 0, 0, Math.PI);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(74, 222, 128, 0.38)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, HOLE_RX, HOLE_RY, 0, 0.05 * Math.PI, 0.95 * Math.PI);
+    ctx.stroke();
+
+    // 5. the key hint, so 1-9 is discoverable without reading a manual
+    ctx.globalAlpha = selected ? 0.85 : 0.30;
+    text(String(KEY_OF[i]), cx, cy + MOUND_RY + 2, 13, selected ? '#fbbf24' : '#e7c9a3', 700);
+    ctx.globalAlpha = 1;
+
+    // 6. the selection ring: twelve beads orbiting the mound. Bright, obviously
+    //    "this one", and moving on every frame so a keyboard player can find it.
+    if (selected) {
+      const pop = 1 + S.cursorPop * 0.10;
+      ctx.strokeStyle = 'rgba(251, 191, 36, 0.85)';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy + 6, (MOUND_RX + 11) * pop, (MOUND_RY + 11) * pop, 0, 0, TAU);
+      ctx.stroke();
+      ctx.fillStyle = '#fde68a';
+      for (let k = 0; k < 12; k++) {
+        const a = S.clock * 1.5 + (k * TAU) / 12;
+        ctx.beginPath();
+        ctx.arc(cx + Math.cos(a) * (MOUND_RX + 11) * pop, cy + 6 + Math.sin(a) * (MOUND_RY + 11) * pop, 3.1, 0, TAU);
+        ctx.fill();
+      }
+    }
+
+    // 7. the swing: an expanding ring where the hand landed, white for a bonk
+    //    and grey for air.
+    for (const r of S.rings) {
+      if (r.i !== i) continue;
+      const k = r.t / 0.35;
+      ctx.globalAlpha = (1 - k) * (r.ok ? 0.85 : 0.5);
+      ctx.strokeStyle = r.ok ? '#fdf6e8' : 'rgba(200, 180, 150, 0.9)';
+      ctx.lineWidth = r.ok ? 5 * (1 - k) + 1.5 : 2.5;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy - 12, 20 + k * 66, 12 + k * 40, 0, 0, TAU);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function drawParticles() {
+    for (const p of S.parts) {
+      const k = 1 - p.t / p.life;
+      ctx.globalAlpha = Math.max(0, k);
+      ctx.fillStyle = p.c;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r * (0.4 + k * 0.6), 0, TAU);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawFloats() {
+    for (const f of S.floats) {
+      const k = f.t / 0.95;
+      ctx.globalAlpha = Math.max(0, 1 - k * k);
+      ctx.save();
+      ctx.shadowColor = 'rgba(0,0,0,0.6)';
+      ctx.shadowBlur = 6;
+      text(f.text, f.x, f.y - k * 46, f.size * (1 + (1 - k) * 0.12), f.color, 800);
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawFlashes() {
+    if (S.flashBomb > 0) { ctx.fillStyle = 'rgba(239, 68, 68, ' + (S.flashBomb * 0.42) + ')'; ctx.fillRect(0, 0, W, H); }
+    if (S.flashMiss > 0) { ctx.fillStyle = 'rgba(180, 60, 60, ' + (S.flashMiss * 0.22) + ')'; ctx.fillRect(0, 0, W, H); }
+    if (S.flashGold > 0) { ctx.fillStyle = 'rgba(251, 191, 36, ' + (S.flashGold * 0.24) + ')'; ctx.fillRect(0, 0, W, H); }
+    // Vignette: the corners of a night field are not as lit as the middle.
+    const v = ctx.createRadialGradient(W / 2, H * 0.52, H * 0.28, W / 2, H * 0.52, H * 0.78);
+    v.addColorStop(0, 'rgba(0,0,0,0)');
+    v.addColorStop(1, 'rgba(0,0,0,0.45)');
+    ctx.fillStyle = v;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  function clockText(t) {
+    const s = Math.max(0, Math.ceil(t));
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  }
+
+  function drawHud() {
+    const panel = ctx.createLinearGradient(0, 0, 0, HUD_H);
+    panel.addColorStop(0, 'rgba(12, 8, 4, 0.95)');
+    panel.addColorStop(1, 'rgba(26, 17, 8, 0.78)');
+    ctx.fillStyle = panel;
+    ctx.fillRect(0, 0, W, HUD_H);
+    ctx.strokeStyle = 'rgba(251, 191, 36, 0.28)';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, HUD_H); ctx.lineTo(W, HUD_H); ctx.stroke();
+
+    text('SCORE', 20, 24, 13, 'rgba(251, 191, 36, 0.8)', 700, 'left');
+    text(String(S.score), 20, 54, 30, '#fdf6e8', 800, 'left');
+
+    text('BEST', W - 20, 24, 13, 'rgba(251, 191, 36, 0.8)', 700, 'right');
+    text(String(S.best), W - 20, 54, 30, S.newBest ? '#fbbf24' : 'rgba(253, 246, 232, 0.85)', 800, 'right');
+
+    const low = S.mode === 'playing' && S.time <= TICK_FROM;
+    const pulse = low ? 1 + Math.sin(S.clock * 9) * 0.07 : 1;
+    ctx.save();
+    ctx.translate(270, 40);
+    ctx.scale(pulse, pulse);
+    text(clockText(S.time), 0, 0, 34, low ? '#f87171' : '#fdf6e8', 800);
+    ctx.restore();
+
+    // The clock as a bar as well as a number: at a glance you read the bar, and
+    // only when it is nearly gone do you look at the digits.
+    const bx = 165, bw = 210, by = 70, bh = 9;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    roundRect(bx, by, bw, bh, 4.5); ctx.fill();
+    const left = clamp(S.time / RUN_SECONDS, 0, 1);
+    const bar = ctx.createLinearGradient(bx, 0, bx + bw, 0);
+    bar.addColorStop(0, low ? '#f87171' : '#4ade80');
+    bar.addColorStop(1, low ? '#fca5a5' : '#fbbf24');
+    ctx.fillStyle = bar;
+    if (left > 0) { roundRect(bx, by, Math.max(3, bw * left), bh, 4.5); ctx.fill(); }
+  }
+
+  function drawComboChip() {
+    const m = mult();
+    const on = S.combo > 0;
+    const left = clamp(S.comboT / COMBO_HOLD, 0, 1);
+    const cx = 270, y = 100, h = 50, w = 244;
+    const pop = 1 + S.comboPop * 0.09;
+
+    ctx.save();
+    ctx.translate(cx, y + h / 2);
+    ctx.scale(pop, pop);
+    ctx.translate(-cx, -(y + h / 2));
+
+    ctx.fillStyle = on ? 'rgba(45, 28, 8, 0.9)' : 'rgba(26, 17, 8, 0.6)';
+    roundRect(cx - w / 2, y, w, h, 14); ctx.fill();
+    ctx.strokeStyle = on ? 'rgba(251, 191, 36, ' + (0.35 + left * 0.5) + ')' : 'rgba(253, 246, 232, 0.14)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    text('×' + m, cx - 62, y + 22, 34, on ? '#fbbf24' : 'rgba(253, 246, 232, 0.35)', 900);
+    text(on ? S.combo + ' IN A ROW' : 'CHAIN YOUR HITS', cx + 38, y + 20, 14, on ? 'rgba(253, 246, 232, 0.85)' : 'rgba(253, 246, 232, 0.35)', 700);
+
+    // The decay bar is the whole point of the chip: the chain visibly runs out,
+    // so pausing to admire the score costs you the multiplier and you can see it.
+    const dx = cx - w / 2 + 16, dw = w - 32, dy = y + h - 13;
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    roundRect(dx, dy, dw, 6, 3); ctx.fill();
+    if (on) {
+      ctx.fillStyle = left > 0.35 ? '#fbbf24' : '#f87171';
+      roundRect(dx, dy, Math.max(2, dw * left), 6, 3); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawButton(btn, kind) {
+    ctx.fillStyle = 'rgba(26, 17, 8, 0.85)';
+    roundRect(btn.x, btn.y, btn.w, btn.h, 9); ctx.fill();
+    ctx.strokeStyle = 'rgba(251, 191, 36, 0.35)';
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    const cx = btn.x + btn.w / 2, cy = btn.y + btn.h / 2;
+    ctx.fillStyle = '#fdf6e8';
+    ctx.strokeStyle = '#fdf6e8';
+    ctx.lineWidth = 2;
+    if (kind === 'sound') {
+      ctx.beginPath();
+      ctx.moveTo(cx - 8, cy - 4); ctx.lineTo(cx - 4, cy - 4); ctx.lineTo(cx + 1, cy - 9);
+      ctx.lineTo(cx + 1, cy + 9); ctx.lineTo(cx - 4, cy + 4); ctx.lineTo(cx - 8, cy + 4);
+      ctx.closePath(); ctx.fill();
+      if (S.muted) {
+        ctx.strokeStyle = '#f87171';
+        ctx.beginPath();
+        ctx.moveTo(cx + 4, cy - 6); ctx.lineTo(cx + 12, cy + 6);
+        ctx.moveTo(cx + 12, cy - 6); ctx.lineTo(cx + 4, cy + 6);
+        ctx.stroke();
+      } else {
+        ctx.beginPath();
+        ctx.arc(cx + 3, cy, 6, -0.7, 0.7);
+        ctx.moveTo(cx + 11, cy - 6);
+        ctx.arc(cx + 3, cy, 10, -0.7, 0.7);
+        ctx.stroke();
+      }
+    } else if (S.mode === 'paused') {
+      ctx.beginPath();
+      ctx.moveTo(cx - 5, cy - 8); ctx.lineTo(cx + 9, cy); ctx.lineTo(cx - 5, cy + 8);
+      ctx.closePath(); ctx.fill();
+    } else {
+      ctx.fillRect(cx - 7, cy - 8, 5, 16);
+      ctx.fillRect(cx + 2, cy - 8, 5, 16);
+    }
+  }
+
+  function drawBottom() {
+    drawButton(BTN.sound, 'sound');
+    drawButton(BTN.pause, 'pause');
+    text('1-9  ·  arrows + space  ·  P pause  ·  M sound', W - 20, 693, 12.5, 'rgba(253, 246, 232, 0.45)', 600, 'right');
+  }
+
+  function dim(alpha) {
+    ctx.fillStyle = 'rgba(13, 8, 4, ' + alpha + ')';
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  function drawOverlays() {
+    if (S.mode === 'title') {
+      dim(0.66);
+      ctx.save();
+      ctx.shadowColor = 'rgba(251, 191, 36, 0.55)';
+      ctx.shadowBlur = 28;
+      text('MOLE RUSH', 270, 206, 58, '#fbbf24', 900);
+      ctx.restore();
+      text('Sixty seconds. Nine burrows. No mercy.', 270, 252, 17, 'rgba(253, 246, 232, 0.8)', 600);
+
+      text('Bonk every mole before it ducks back.', 270, 326, 16, '#fdf6e8', 600);
+      text('Chain hits to raise the multiplier.', 270, 358, 16, 'rgba(253, 246, 232, 0.75)', 600);
+      text('Gold moles pay big. Bombs cost you ' + BOMB_TIME_COST + ' seconds.', 270, 390, 16, 'rgba(253, 246, 232, 0.75)', 600);
+      text('Tap a burrow, press 1-9, or steer the ring with the arrows.', 270, 422, 14.5, 'rgba(253, 246, 232, 0.55)', 600);
+
+      if (S.best > 0) text('Best ' + S.best + '   ·   longest chain ' + S.bestChain, 270, 476, 17, '#fbbf24', 700);
+
+      const pulse = 0.65 + Math.sin(S.clock * 3.4) * 0.35;
+      ctx.globalAlpha = pulse;
+      text('Tap anywhere or press Space to play', 270, 534, 20, '#4ade80', 800);
+      ctx.globalAlpha = 1;
+    } else if (S.mode === 'paused') {
+      dim(0.76);
+      text('PAUSED', 270, 320, 54, '#fbbf24', 900);
+      const pulse = 0.6 + Math.sin(S.clock * 3.4) * 0.4;
+      ctx.globalAlpha = pulse;
+      text('Tap anywhere, or press P or Space, to continue', 270, 378, 17, '#fdf6e8', 600);
+      ctx.globalAlpha = 1;
+    } else if (S.mode === 'gameover') {
+      dim(0.8);
+      ctx.save();
+      ctx.shadowColor = S.newBest ? 'rgba(251, 191, 36, 0.6)' : 'rgba(248, 113, 113, 0.5)';
+      ctx.shadowBlur = 26;
+      text("TIME'S UP", 270, 232, 56, S.newBest ? '#fbbf24' : '#f87171', 900);
+      ctx.restore();
+
+      text('SCORE', 270, 300, 14, 'rgba(251, 191, 36, 0.8)', 700);
+      text(String(S.score), 270, 340, 50, '#fdf6e8', 900);
+      text(S.newBest ? 'New personal best!' : 'Best ' + S.best, 270, 392, 19, S.newBest ? '#4ade80' : 'rgba(253, 246, 232, 0.75)', 700);
+      text('Longest chain ' + S.chain + '   ·   ' + S.hits + ' bonked   ·   ' + S.misses + ' escaped', 270, 428, 15.5, 'rgba(253, 246, 232, 0.6)', 600);
+
+      if (S.overT > 0.6) {
+        const pulse = 0.6 + Math.sin(S.clock * 3.4) * 0.4;
+        ctx.globalAlpha = pulse;
+        text('Tap anywhere or press Space to run again', 270, 500, 19, '#4ade80', 800);
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  function draw() {
+    const d = view.dpr;
+    ctx.setTransform(d, 0, 0, d, 0, 0);
+    ctx.fillStyle = '#080502';
+    ctx.fillRect(0, 0, view.cw, view.ch);
+
+    ctx.save();
+    ctx.translate(view.ox, view.oy);
+    ctx.scale(view.scale, view.scale);
+    ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
+    if (S.shake > 0.05) ctx.translate((Math.random() - 0.5) * S.shake, (Math.random() - 0.5) * S.shake);
+
+    drawField();
+    drawComboWatermark();
+    for (let i = 0; i < 9; i++) drawBurrow(i);   // top row first, so lower mounds overlap higher ones
+    drawParticles();
+    drawFloats();
+    drawFlashes();
+    drawHud();
+    drawComboChip();
+    drawBottom();
+    drawOverlays();
+
+    ctx.restore();
+  }
+
+  // ---- input --------------------------------------------------------------
+  // Client pixels back to logical stage pixels, through exactly the transform
+  // `resize` built. The canvas box is measured rather than assumed: it is flush
+  // with the viewport today, but an inset, a border or a scaled frame around the
+  // game would otherwise send every tap to the wrong burrow — silently, with no
+  // console error and nothing on screen to show for it.
+  function toLogical(clientX, clientY) {
+    if (!view.scale) return { x: -1, y: -1 };
+    const rect = canvas.getBoundingClientRect();
+    const kx = rect.width ? view.cw / rect.width : 1;
+    const ky = rect.height ? view.ch / rect.height : 1;
+    return {
+      x: ((clientX - rect.left) * kx - view.ox) / view.scale,
+      y: ((clientY - rect.top) * ky - view.oy) / view.scale,
+    };
+  }
+  const inButton = (p, btn) => p.x >= btn.x - 8 && p.x <= btn.x + btn.w + 8 && p.y >= btn.y - 8 && p.y <= btn.y + btn.h + 8;
+
+  // The tap grid is contiguous: every pixel between the first and last burrow
+  // belongs to exactly one of them, so a swing that lands near a mole is a swing
+  // at that mole rather than at nothing.
+  function burrowAt(p) {
+    if (p.x < GRID_X || p.x >= GRID_X + CELL * 3) return -1;
+    if (p.y < GRID_Y || p.y >= GRID_Y + CELL * 3) return -1;
+    const c = clamp(Math.floor((p.x - GRID_X) / CELL), 0, 2);
+    const r = clamp(Math.floor((p.y - GRID_Y) / CELL), 0, 2);
+    return r * 3 + c;
+  }
+
+  function primary() {
+    if (S.mode === 'title') { begin(); return true; }
+    if (S.mode === 'paused') { S.mode = 'playing'; wake(); return true; }
+    if (S.mode === 'gameover') { if (S.overT <= 0.6) return false; begin(); return true; }
+    return false;
+  }
+
+  function moveCursor(dx, dy) {
+    const c = S.cursor % 3, r = (S.cursor / 3) | 0;
+    const next = clamp(r + dy, 0, 2) * 3 + clamp(c + dx, 0, 2);
+    if (next === S.cursor) return;    // pressed into the edge: a ring that pulses anyway claims a move it did not make
+    S.cursor = next;
+    S.cursorPop = 1;
+    sfx.move();
+  }
+
+  const ARROWS = {
+    ArrowUp: [0, -1], KeyW: [0, -1],
+    ArrowDown: [0, 1], KeyS: [0, 1],
+    ArrowLeft: [-1, 0], KeyA: [-1, 0],
+    ArrowRight: [1, 0], KeyD: [1, 0],
+  };
+
+  window.addEventListener('keydown', (e) => {
+    // Cmd+P must still print and Cmd+M must still minimise: a game inside a
+    // portal frame does not get to eat the shortcuts of the page around it.
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const arrow = ARROWS[e.code];
+    // Held keys repeat only where repeating means something. Listing the four
+    // arrows by name left WASD out of the exemption they obviously belonged in.
+    if (e.repeat && !arrow) return;
+    if (arrow) {
+      e.preventDefault();
+      // An arrow on the title screen starts the run *and* moves the ring: making
+      // the player press it twice reads as a dropped key. Only a fresh press,
+      // though — a key still held when the clock ran out would otherwise let
+      // autorepeat wipe the results screen and start a run nobody asked for.
+      if (!e.repeat && (S.mode === 'title' || (S.mode === 'gameover' && S.overT > 0.6))) primary();
+      moveCursor(arrow[0], arrow[1]);
+      return;
+    }
+    const digit = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
+    if (digit) {
+      e.preventDefault();
+      if (S.mode !== 'playing') { primary(); return; }
+      swing(INDEX_OF[Number(digit[1])]);
+      return;
+    }
+    if (e.code === 'Space' || e.code === 'Enter' || e.code === 'NumpadEnter') {
+      e.preventDefault();
+      wake();
+      if (S.mode === 'playing') swing(S.cursor);
+      else primary();
+      return;
+    }
+    if (e.code === 'KeyP' || e.code === 'Escape') {
+      e.preventDefault();
+      togglePause();
+      return;
+    }
+    if (e.code === 'KeyM') {
+      e.preventDefault();
+      toggleMute();
+    }
+  });
+
+  canvas.addEventListener('pointerdown', (e) => {
+    if (e.button !== undefined && e.button !== 0) return;   // contextmenu is suppressed, so a right click would land as a free hit
+    e.preventDefault();
+    try { canvas.focus({ preventScroll: true }); } catch { /* focus is a nicety, never a requirement */ }
+    wake();
+    const p = toLogical(e.clientX, e.clientY);
+    if (inButton(p, BTN.sound)) { toggleMute(); return; }
+    if (inButton(p, BTN.pause)) { togglePause(); return; }
+    // Pause is the P key and that button, never a bare tap on the field: a game
+    // that pauses when you touch the playfield looks frozen to anything watching.
+    if (S.mode !== 'playing') { primary(); return; }
+    const i = burrowAt(p);
+    if (i >= 0) swing(i);
+  });
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  // A sixty-second clock that keeps running in a hidden tab steals the run.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && S.mode === 'playing') S.mode = 'paused';
+  });
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', resize);
+
+  // ---- loop ---------------------------------------------------------------
+  let last = 0;
+  function frame(now) {
+    if (!last) last = now;
+    // Clamped, but at a quarter of a second rather than a twentieth. The tight
+    // clamp meant a frame slower than 20 fps advanced the round clock by 50 ms
+    // however long it really took: at 10 fps a sixty-second run lasted two
+    // minutes, which is a slower machine quietly buying a better score. The
+    // clamp still exists for the one case it is for — a tab that was throttled
+    // while hidden coming back — and that case is already paused, so nothing is
+    // fast-forwarded either way.
+    const dt = Math.min(0.25, (now - last) / 1000);
+    last = now;
+    // The next frame is scheduled in a finally: a single throw anywhere in
+    // update or draw would otherwise stop the loop for good, leaving the last
+    // frame on screen and the game looking frozen rather than broken.
+    try {
+      checkView();
+      update(dt);
+      draw();
+    } finally {
+      requestAnimationFrame(frame);
+    }
+  }
+
+  reset();
+  S.mode = 'title';
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
