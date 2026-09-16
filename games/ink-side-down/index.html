@@ -742,6 +742,8 @@
     S.demo = null;
     S.stamps.clear();
     S.floats = [];
+    S.parts = [];
+    S.flash = 0;
     const state = replay(puzzle(), run().inputs);
     run().inputs = state.inputs;
     if (run().solved) placeSolved();
@@ -968,7 +970,7 @@
       touchTier();
       writeStore();
       if (run().solved) return; // solved in another tab meanwhile; the save said so
-      toast(run().moves ? `Back to the start. The ${run().moves} rolls so far still count.` : 'Back to the start.');
+      toast(run().moves ? `Back to the start. The ${run().moves} ${run().moves === 1 ? 'roll' : 'rolls'} so far still count.` : 'Back to the start.');
     }
     const was = S.cube;
     placeCube(replay(p, []));
@@ -1688,13 +1690,16 @@
       ctx.fillRect(x0 + i * size, y0, size, size);
     }
     const markX = x0 + 2 * size + size / 2, midY = y0 + size / 2;
-    if (at >= 2) drawSeal(markX, midY, size, 7);
-    else drawMark(markX, midY, size);
     const rolling = whole < steps && part > 0;
     const k = rolling ? ease(Math.min(1, part * 1.8)) : 0;
+    // Everything follows where the cube is, not the beat: a roll lands in the
+    // first half of its beat and the cube then rests there, printed.
+    const pos = whole + k;
+    if (pos >= 2) drawSeal(markX, midY, size, 7);
+    else drawMark(markX, midY, size);
     const ink = LANE_INK[rolling && k >= 0.5 ? whole + 1 : whole];
-    drawCube(x0 + size / 2 + (whole + k) * size, midY, size, ink, rolling && k < 1 ? 1 : -1, rolling && k < 1 ? Math.sin(k * Math.PI) : 0, !rolling && whole === 2 ? 'printed' : '');
-    label(at >= 2 ? 'face down on the mark: printed' : 'the red side is inked', W / 2, y0 + size + 26, 16, at >= 2 ? C.inkHi : C.muted, 'center', '700');
+    drawCube(x0 + size / 2 + pos * size, midY, size, ink, rolling && k < 1 ? 1 : -1, rolling && k < 1 ? Math.sin(k * Math.PI) : 0, pos === 2 ? 'printed' : '');
+    label(pos >= 2 ? 'face down on the mark: printed' : 'the red side is inked', W / 2, y0 + size + 26, 16, pos >= 2 ? C.inkHi : C.muted, 'center', '700');
   }
 
   function drawTitle() {
