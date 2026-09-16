@@ -441,7 +441,9 @@
   const ROLL_TIME = 0.17, PRINT_TIME = 0.35, DEMO_STEP = 0.42;
   const COLS_NAMES = 'ABCDEF';
   const DIR_NAMES = ['up', 'right', 'down', 'left'];
-  const INK_NAMES = ['facing up', 'facing right', 'facing down', 'facing left', 'on top', 'underneath'];
+  // Never "facing down" for a side: the rules say "face down" for the bottom,
+  // and a player who only hears the board must not mistake one for the other.
+  const INK_NAMES = ['on the side toward the top edge', 'on the side toward the right edge', 'on the side toward the bottom edge', 'on the side toward the left edge', 'on top', 'underneath, on the paper'];
 
   const C = {
     bg: '#14111c', paper: '#efe6d3', paperAlt: '#e8dec9', grid: 'rgba(70, 48, 30, 0.10)', frame: '#2a2437',
@@ -597,7 +599,9 @@
     const ahead = previews(p.board, at.cube, at.ink);
     const prints = ahead.map((r, dir) => (r.printed >= 0 ? `rolling ${DIR_NAMES[dir]} prints ${cellName(r.printed)}` : '')).filter(Boolean);
     const refused = ahead.map((r, dir) => (r.blocked === 'ink' ? DIR_NAMES[dir] : '')).filter(Boolean);
-    return `Cube ${cellName(at.cube)}, inked side ${INK_NAMES[at.ink]}. ` +
+    const walled = ahead.map((r, dir) => (r.blocked === 'wall' || r.blocked === 'edge' ? DIR_NAMES[dir] : '')).filter(Boolean);
+    const under = p.board[at.cube] === MARK ? ` It stands on ${at.printed.has(at.cube) ? 'a printed' : 'a bare'} mark.` : '';
+    return `Cube ${cellName(at.cube)}, ink ${INK_NAMES[at.ink]}.${under} ${walled.length ? `Walls or the edge block ${walled.join(' and ')}. ` : ''}` +
       `${marks.length - left.length} of ${marks.length} marks printed${left.length ? `; still bare: ${left.map(cellName).join(', ')}` : ''}. ` +
       `${prints.length ? `Now ${prints.join(', ')}. ` : ''}${refused.length ? `The ink forbids rolling ${refused.join(' or ')}.` : ''}`;
   }
@@ -736,6 +740,8 @@
     S.tier = tier;
     S.practice = false;
     S.demo = null;
+    S.stamps.clear();
+    S.floats = [];
     const state = replay(puzzle(), run().inputs);
     run().inputs = state.inputs;
     if (run().solved) placeSolved();
@@ -962,9 +968,11 @@
       touchTier();
       writeStore();
       if (run().solved) return; // solved in another tab meanwhile; the save said so
-      toast(`Back to the start. The ${run().moves} rolls so far still count.`);
+      toast(run().moves ? `Back to the start. The ${run().moves} rolls so far still count.` : 'Back to the start.');
     }
+    const was = S.cube;
     placeCube(replay(p, []));
+    S.cubeAnim = { ...S.cubeAnim, from: was, t: was === p.cube ? 1 : 0 };
     sfx.undo();
   }
 
@@ -1246,10 +1254,12 @@
   /**
    * The cube, seen from above with its four sides leaning out, so all five
    * places the ink can show are on screen: the top and the four sides. Ink
-   * underneath shows as a red rim around the base, which is where it touches.
+   * underneath shows no red at all, and it can only be underneath on a print.
+   * The cube is wider than a mark, so a mark under it is drawn as a ring around
+   * its base: solid once printed, dashed while bare (`ring`).
    * `squash` narrows the cube along `dir` while it tips over an edge.
    */
-  function drawCube(x, y, size, ink, dir = -1, squash = 0) {
+  function drawCube(x, y, size, ink, dir = -1, squash = 0, ring = '') {
     const h = size * 0.36, b = size * 0.14;
     ctx.save();
     ctx.translate(x, y);
@@ -1261,11 +1271,13 @@
     ctx.fillStyle = 'rgba(40, 24, 16, 0.28)';
     roundRect(-h + 2, -h + 4 + squash * 3, h * 2, h * 2, 9);
     ctx.fill();
-    if (ink === BOTTOM) {
+    if (ring) {
       ctx.strokeStyle = C.ink;
-      ctx.lineWidth = 5;
-      roundRect(-h - 3, -h - 3, h * 2 + 6, h * 2 + 6, 11);
+      ctx.lineWidth = ring === 'printed' ? 5 : 3;
+      if (ring === 'mark') ctx.setLineDash([7, 5]);
+      roundRect(-h - 4, -h - 4, h * 2 + 8, h * 2 + 8, 11);
       ctx.stroke();
+      ctx.setLineDash([]);
     }
     ctx.fillStyle = C.cubeEdge;
     roundRect(-h, -h, h * 2, h * 2, 8);
@@ -1386,7 +1398,8 @@
     const at = cubePos(a);
     const moving = a.from !== a.to && a.t < 1;
     const ink = moving && a.t < 0.5 ? a.inkFrom : a.inkTo;
-    drawCube(at.x, at.y, CELL, ink, moving ? a.dir : -1, moving ? Math.sin(a.t * Math.PI) : 0);
+    const on = !moving && puzzle().board[a.to] === MARK ? (S.printed.has(a.to) ? 'printed' : 'mark') : '';
+    drawCube(at.x, at.y, CELL, ink, moving ? a.dir : -1, moving ? Math.sin(a.t * Math.PI) : 0, on);
     if (S.mode !== 'play' || S.demo || moving || locked() || S.help) return;
     drawPreviews();
   }
@@ -1589,7 +1602,7 @@
       const over = moves - p.par;
       const printed = `${S.printed.size}/${markCount(p)} printed`;
       // Before the first roll, the line says what the red side is: the cube is the same shape as a plain block.
-      const first = !history().length && !S.practice;
+      const first = !history().length && !S.practice && !r.moves;
       const left = S.practice ? `Practice · ${moves} · ${printed}` : first ? `${day}Red side = ink` : `${day}Rolls ${moves} · ${printed}`;
       label(left, BOARD_X, y, 18, first ? C.inkHi : C.text, 'left', '800', BOARD_W * 0.6);
       const color = moves <= p.par ? C.good : over <= 2 ? C.warn : C.bad;
@@ -1680,7 +1693,7 @@
     const rolling = whole < steps && part > 0;
     const k = rolling ? ease(Math.min(1, part * 1.8)) : 0;
     const ink = LANE_INK[rolling && k >= 0.5 ? whole + 1 : whole];
-    drawCube(x0 + size / 2 + (whole + k) * size, midY, size, ink, rolling && k < 1 ? 1 : -1, rolling && k < 1 ? Math.sin(k * Math.PI) : 0);
+    drawCube(x0 + size / 2 + (whole + k) * size, midY, size, ink, rolling && k < 1 ? 1 : -1, rolling && k < 1 ? Math.sin(k * Math.PI) : 0, !rolling && whole === 2 ? 'printed' : '');
     label(at >= 2 ? 'face down on the mark: printed' : 'the red side is inked', W / 2, y0 + size + 26, 16, at >= 2 ? C.inkHi : C.muted, 'center', '700');
   }
 
