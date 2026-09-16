@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <meta name="color-scheme" content="dark">
-<title>Merge 2048 — Arkai</title>
+<title>Slide Merge — Arkai</title>
 <style>
   html, body { margin: 0; height: 100%; background: #070a16; overflow: hidden; }
   body { -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
@@ -12,7 +12,7 @@
 </style>
 </head>
 <body>
-<canvas id="game" tabindex="0" aria-label="Merge 2048. Slide every tile at once with the arrow keys, WASD or a swipe; equal numbers merge into their sum. Chase the 2048 tile and keep going."></canvas>
+<canvas id="game" tabindex="0" aria-label="Slide Merge. Slide every tile at once with the arrow keys, WASD or a swipe; equal numbers merge into their sum. Chase the 2048 tile and keep going."></canvas>
 <script>
 (() => {
   'use strict';
@@ -41,6 +41,8 @@
 
   const WIN_TILE = 2048;
   const SWIPE_MIN = 26;           // client px — below this a drag is a tap, not a swipe
+  // The keys keep the game's first name on purpose: nobody sees a storage key, and
+  // renaming them would wipe every player's saved records for a word that is not shown.
   const STORE_BEST = 'arkai:merge-2048:best', STORE_MUTE = 'arkai:merge-2048:muted';
 
   // ---- palette ----
@@ -356,7 +358,7 @@
     if (audio && audio.state === 'suspended') audio.resume().catch(() => {});
     tone(392, 0.09, 'triangle', 0.045);
     tone(587.33, 0.12, 'triangle', 0.045, 0.07);
-    emit('start', { game: 'merge-2048' });
+    emit('start', { game: 'slide-merge' });
   }
 
   function gameOver() {
@@ -538,10 +540,10 @@
     ctx.textAlign = 'left';
     ctx.font = `800 27px ${FONT}`;
     ctx.fillStyle = INK;
-    ctx.fillText('MERGE', 42, 38);
-    const wordW = ctx.measureText('MERGE ').width;
+    ctx.fillText('SLIDE', 42, 38);
+    const wordW = ctx.measureText('SLIDE ').width;
     ctx.fillStyle = ACCENT;
-    ctx.fillText('2048', 42 + wordW, 38);
+    ctx.fillText('MERGE', 42 + wordW, 38);
 
     // Progress to 2048, in the same heat the tiles use: the bar and the board
     // always tell the same story.
@@ -779,7 +781,7 @@
     }
 
     if (S.mode === 'title') {
-      drawOverlay('MERGE 2048', [
+      drawOverlay('SLIDE MERGE', [
         'Slide every tile at once. Equal numbers merge.',
         'Arrow keys, WASD, or swipe anywhere.',
         'The board heats up as the numbers climb —',

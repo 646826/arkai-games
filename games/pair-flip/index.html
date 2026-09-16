@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <meta name="color-scheme" content="dark">
-<title>Memory Match — Arkai</title>
+<title>Pair Flip — Arkai</title>
 <style>
   html, body { margin: 0; height: 100%; background: #140a1e; overflow: hidden; }
   body { -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
@@ -12,7 +12,7 @@
 </style>
 </head>
 <body>
-<canvas id="game" tabindex="0" aria-label="Memory Match. Flip two cards at a time and find every matching pair. The arrow keys move a focus ring between the cards, Enter or Space flips the focused card, M toggles the sound and P pauses."></canvas>
+<canvas id="game" tabindex="0" aria-label="Pair Flip. Flip two cards at a time and find every matching pair. The arrow keys move a focus ring between the cards, Enter or Space flips the focused card, M toggles the sound and P pauses."></canvas>
 <script>
 (() => {
   'use strict';
@@ -45,6 +45,8 @@
   const GAP = 14;
   const AREA = { x: 24, y: 104, w: 492, h: 540 };
 
+  // The keys keep the game's first name on purpose: nobody sees a storage key, and
+  // renaming them would wipe every player's saved records for a word that is not shown.
   const STORE = 'arkai:memory-cards:';
   const KEY_MUTE = STORE + 'muted', KEY_BOARD = STORE + 'board';
   const bestKey = (id) => STORE + 'best:' + id;
@@ -334,7 +336,7 @@
     ensureAudio();
     if (audio && audio.state === 'suspended') audio.resume().catch(() => {});
     sfx.deal();
-    emit('start', { game: 'memory-cards', board: shape.id, pairs: S.cards.length / 2 });
+    emit('start', { game: 'pair-flip', board: shape.id, pairs: S.cards.length / 2 });
   }
 
   // One number for the portal's records, and it has to agree with what the game
@@ -804,7 +806,7 @@
     ctx.textAlign = 'left';
     ctx.font = `700 12px ${FONT}`;
     ctx.fillStyle = 'rgba(244, 114, 182, 0.75)';
-    ctx.fillText(`MEMORY MATCH · ${shape.label} ${shape.name}`, 24, 26);
+    ctx.fillText(`PAIR FLIP · ${shape.label} ${shape.name}`, 24, 26);
 
     stat(24, 'left', 'MOVES', String(S.moves));
     stat(W / 2, 'center', 'PAIRS', `${S.found}/${pairs}`, S.found === pairs ? '#fde047' : INK);
@@ -884,7 +886,7 @@
     ctx.textBaseline = 'middle';
     ctx.font = `800 46px ${FONT}`;
     ctx.fillStyle = INK;
-    ctx.fillText('MEMORY MATCH', W / 2, 352);
+    ctx.fillText('PAIR FLIP', W / 2, 352);
 
     ctx.font = `500 16px ${FONT}`;
     ctx.fillStyle = 'rgba(247, 232, 245, 0.72)';

@@ -1,6 +1,6 @@
 {
-  "slug": "sudoku-mini",
-  "title": "Mini Sudoku",
+  "slug": "sudoku-sixes",
+  "title": "Sudoku Sixes",
   "tagline": "Sudoku that fits a coffee break",
   "description": "A six-by-six sudoku with two-by-three boxes: every row, every column and every box holds the digits 1 to 6 exactly once. Every puzzle is generated fresh and checked to have exactly one solution, in three difficulties set by how many clues are left standing, and your best time is kept for each.",
   "categories": ["Logic", "Daily"],

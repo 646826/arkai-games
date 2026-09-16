@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <meta name="color-scheme" content="dark">
-<title>Mini Sudoku — Arkai</title>
+<title>Sudoku Sixes — Arkai</title>
 <style>
   html, body { margin: 0; height: 100%; background: #081a1a; overflow: hidden; }
   body { -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
@@ -17,13 +17,13 @@
 </head>
 <body>
 <div id="say" role="status" aria-live="polite" aria-atomic="true" class="sr"></div>
-<canvas id="game" tabindex="0" aria-label="Mini Sudoku. A six by six sudoku with two by three boxes. Arrow keys move the selected cell, keys 1 to 6 place a digit, Backspace clears it, N toggles pencil marks."></canvas>
+<canvas id="game" tabindex="0" aria-label="Sudoku Sixes. A six by six sudoku with two by three boxes. Arrow keys move the selected cell, keys 1 to 6 place a digit, Backspace clears it, N toggles pencil marks."></canvas>
 <script>
 (() => {
   'use strict';
 
   // ---------------------------------------------------------------------------
-  // Mini Sudoku — 6x6, boxes two rows tall and three columns wide.
+  // Sudoku Sixes — 6x6, boxes two rows tall and three columns wide.
   // Every row, every column and every 2x3 box holds 1-6 exactly once.
   // ---------------------------------------------------------------------------
 
@@ -58,6 +58,8 @@
     { key: 'hard', name: 'Hard', clues: 11, par: 1200 },
   ];
 
+  // The keys keep the game's first name on purpose: nobody sees a storage key, and
+  // renaming them would wipe every player's saved records for a word that is not shown.
   const STORE_LEVEL = 'arkai:sudoku-mini:level';
   const STORE_MUTE = 'arkai:sudoku-mini:muted';
   const bestKey = (key) => `arkai:sudoku-mini:best:${key}`;
@@ -386,7 +388,7 @@
     // Leaving a board is the end of a run, played on or not: a `start` the portal
     // never sees closed is a run that stays open in its records forever.
     if (S.mode === 'playing' || S.mode === 'paused') {
-      emit('gameover', { game: 'sudoku-mini', won: false, score: 0, time: Math.round(elapsedMs() / 1000), difficulty: LEVELS[S.level].key });
+      emit('gameover', { game: 'sudoku-sixes', won: false, score: 0, time: Math.round(elapsedMs() / 1000), difficulty: LEVELS[S.level].key });
     }
     const made = makePuzzle(level.clues);
     S.level = levelIndex;
@@ -408,7 +410,7 @@
     storage.set(STORE_LEVEL, level.key);
     tone(520, 0.07, 'triangle', 0.04);
     tone(780, 0.09, 'triangle', 0.035, 0.07);
-    emit('start', { game: 'sudoku-mini', difficulty: level.key, clues: made.clues });
+    emit('start', { game: 'sudoku-sixes', difficulty: level.key, clues: made.clues });
   }
 
   function select(i) {
@@ -507,7 +509,7 @@
       spawnParts(BX + Math.random() * BOARD, BY + Math.random() * BOARD, ['#22d3ee', '#67e8f9', '#a5f3fc', '#fbbf24'][n % 4], 12, 190);
     }
     [523, 659, 784, 1046, 1319].forEach((f, n) => tone(f, 0.2, 'triangle', 0.05, n * 0.085));
-    emit('gameover', { game: 'sudoku-mini', won: true, score: S.points, time: seconds, mistakes: S.mistakes, difficulty: LEVELS[S.level].key });
+    emit('gameover', { game: 'sudoku-sixes', won: true, score: S.points, time: seconds, mistakes: S.mistakes, difficulty: LEVELS[S.level].key });
   }
 
   function setPaused(on) {
@@ -814,7 +816,7 @@
     ctx.textBaseline = 'middle';
     ctx.fillStyle = CYAN;
     ctx.font = `800 46px ${FONT}`;
-    ctx.fillText('MINI SUDOKU', W / 2, 150);
+    ctx.fillText('SUDOKU SIXES', W / 2, 150);
     ctx.fillStyle = MUTED;
     ctx.font = `500 17px ${FONT}`;
     ctx.fillText('Six by six. Two-by-three boxes. One coffee break.', W / 2, 188);
@@ -966,7 +968,7 @@
     if (key === said) return;
     said = key;
     if (S.mode === 'title') {
-      say.textContent = 'Mini Sudoku. Press space to play, or 1, 2 or 3 for easy, medium or hard.';
+      say.textContent = 'Sudoku Sixes. Press space to play, or 1, 2 or 3 for easy, medium or hard.';
       return;
     }
     if (S.mode === 'paused') { say.textContent = 'Paused. Press P to carry on.'; return; }
