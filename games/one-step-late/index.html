@@ -19,8 +19,9 @@
   /* The same actions as the canvas buttons, for screen readers and the Tab key.
      Hidden until one of them has focus, then shown as a bar. */
   #controls:focus-within { position: fixed; left: 8px; right: 8px; bottom: 8px; width: auto; height: auto; clip: auto; white-space: normal; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border-radius: 12px; background: #1a1636; border: 1px solid #3b3470; }
-  #controls button { min-height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid #3b3470; background: #1e1a42; color: #ece9ff; font: 600 15px system-ui, sans-serif; }
-  #controls button:focus { outline: 2px solid #ffd166; }
+  #controls button, #controls a { min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center; text-decoration: none; padding: 0 12px; border-radius: 10px; border: 1px solid #3b3470; background: #1e1a42; color: #ece9ff; font: 600 15px system-ui, sans-serif; }
+  #controls a[hidden] { display: none; }
+  #controls button:focus, #controls a:focus { outline: 2px solid #ffd166; }
   #copybox { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(8, 6, 20, 0.82); }
   #copybox.open { display: flex; }
   #copybox .card { width: min(92vw, 420px); box-sizing: border-box; padding: 18px; border-radius: 16px; background: #1a1636; border: 1px solid #3b3470; color: #ece9ff; }
@@ -44,6 +45,7 @@
   <button type="button" data-act="best">Show the par line of a solved puzzle</button>
   <button type="button" data-act="next">Next puzzle</button>
   <button type="button" data-act="share">Share result</button>
+  <a id="onward" href="#" target="_top" hidden>Play the next daily puzzle</a>
   <button type="button" data-act="card0">Easy puzzle</button>
   <button type="button" data-act="card1">Medium puzzle</button>
   <button type="button" data-act="card2">Hard puzzle</button>
@@ -383,9 +385,26 @@
     return '🔴+' + over;
   }
 
+  /**
+   * The next daily puzzle, as the portal's game page names it in this frame's
+   * address: `#next=ink-side-down&title=Ink+Side+Down`. The page knows the
+   * catalogue and the game does not, so without it nothing is offered: not in
+   * this file opened on its own, not in a copy from the games repository, not
+   * in a screenshot. Only a slug and a plain title get through — anyone can
+   * type a fragment, and the button must not become a place to write somebody
+   * else's message. The title pattern is ONWARD_TITLE in
+   * site/scripts/lib/onward.mjs; a test holds the two together.
+   */
+  function readOnward(fragment, self) {
+    const params = new URLSearchParams(String(fragment || '').replace(/^#/, ''));
+    const slug = params.get('next') || '', title = params.get('title') || '';
+    if (slug === self || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(slug) || !/^[A-Za-z0-9][A-Za-z0-9 '’-]{0,23}$/.test(title)) return null;
+    return { slug, title, path: `/games/${slug}/` };
+  }
+
   const core = {
     COLS, ROWS, CELLS, FLOOR, WALL, HOLE, TIERS, EPOCH_UTC, DAY_MS, MAX_ATTEMPTS, MAX_OPTIMAL_LINES,
-    turn, doomed, solve, walkAlone, draw, makePuzzle, fallbackPuzzle, replay, resolveFall, mergeDay, ownsPosition, readKey, dayStep, dayNumber, streakAfter, shareMark, titleDay,
+    turn, doomed, solve, walkAlone, draw, makePuzzle, fallbackPuzzle, replay, resolveFall, mergeDay, ownsPosition, readKey, dayStep, dayNumber, streakAfter, shareMark, titleDay, readOnward,
   };
   // ---- puzzle core end ----
 
@@ -538,8 +557,28 @@
   const puzzle = () => S.puzzles[S.tier];
   // Set by the portal's picture generator (site/scripts/lib/picture-flag.mjs).
   const PICTURE = window.__arkaiPicture === true;
+  // The portal's next daily, named by the game page that frames this one
+  // (readOnward). Null on its own, from file://, and in pictures.
+  const ONWARD = !PICTURE && /^https?:$/.test(location.protocol) ? readOnward(location.hash, SLUG) : null;
+  // A real link, not script: a game never reaches into the page that frames it
+  // (the quality gate refuses any parent or top access), and a link leaving for
+  // the portal is navigation the browser does, the same for a screen reader.
+  const onwardLink = document.getElementById('onward');
+  if (ONWARD) {
+    onwardLink.setAttribute('href', ONWARD.path);
+    onwardLink.textContent = `Play ${ONWARD.title}, another daily puzzle`;
+    onwardLink.hidden = false;
+    // Activated by a person: counted first, then followed by goOnward.
+    onwardLink.addEventListener('click', (event) => {
+      if (!event.isTrusted) return;
+      event.preventDefault();
+      goOnward();
+    });
+  }
   const run = () => S.runs[S.tier];
   const solvedCount = () => S.runs.filter((r) => r.solved).length;
+  // Offered once the day on screen is finished: before that, the day itself comes first.
+  const onward = () => ONWARD !== null && solvedCount() === TIERS.length;
   const locked = () => run().solved && !S.practice;
   const history = () => (S.practice ? S.practiceInputs : run().inputs);
   const setHistory = (inputs) => { if (S.practice) S.practiceInputs = inputs; else run().inputs = inputs; };
@@ -1014,6 +1053,22 @@
     toast(S.muted ? 'Sound off' : 'Sound on');
   }
 
+  // ---- onward ----
+  // The portal's sensor hears of this by message, and a message runs as a task
+  // on the parent page: navigating on the same tick can unload that page first,
+  // losing the one count this button exists to produce. A tenth of a second is
+  // less than a tap takes to feel slow. A second press inside that wait is the
+  // same decision, not another one.
+  let leftAt = -Infinity;
+  function goOnward() {
+    const now = performance.now();
+    if (!ONWARD || now - leftAt < 1000) return;
+    leftAt = now;
+    sfx.click();
+    emit('next_game', { day: S.day });
+    setTimeout(() => onwardLink.click(), 100);
+  }
+
   // ---- sharing ----
   function shareText() {
     const marks = S.runs.map((r, t) => shareMark(r.solved ? r.solvedMoves : 0, S.puzzles[t].par));
@@ -1437,7 +1492,8 @@
     if (S.mode === 'title') {
       const T = L.title;
       const list = icons(false).concat(dayArrows(), row(TIERS.map((t, i) => [`card${i}`, t.label]), T.cards, 60).map((b) => ({ ...b, card: true })));
-      if (solvedCount()) list.push({ id: 'share', label: archive() ? `Share Day ${S.day}` : 'Share today’s result', x: 80, y: T.share, w: W - 160, h: L.buttonH, primary: true });
+      if (onward()) list.push(...row([['share', archive() ? `Share Day ${S.day}` : 'Share', true], ['onward', `Play ${ONWARD.title}`]], T.share, L.buttonH, 20, W - 20));
+      else if (solvedCount()) list.push({ id: 'share', label: archive() ? `Share Day ${S.day}` : 'Share today’s result', x: 80, y: T.share, w: W - 160, h: L.buttonH, primary: true });
       return list;
     }
     const y = L.boardY + BOARD_H + (L.heading ? 18 : 12), h = L.buttonH;
@@ -1530,7 +1586,7 @@
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
-    label(b.label, b.x + b.w / 2, b.y + b.h / 2 + (down ? 2 : 0), 17, b.primary ? '#1a1300' : C.text, 'center', '700');
+    label(b.label, b.x + b.w / 2, b.y + b.h / 2 + (down ? 2 : 0), 17, b.primary ? '#1a1300' : C.text, 'center', '700', b.w - 20);
   }
 
   /** "★ 5 moves" at par, "7 moves, +2" above it: one notation everywhere. */
@@ -1764,6 +1820,7 @@
     else if (id === 'help') toggleHelp();
     else if (id === 'prevday') stepDay(-1);
     else if (id === 'nextday') stepDay(1);
+    else if (id === 'onward') goOnward();
     else if (id.startsWith('tier')) setTier(Number(id.slice(4)));
     else if (id.startsWith('card')) {
       const tier = Number(id.slice(4));

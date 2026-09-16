@@ -3,7 +3,7 @@
   "title": "Sudoku Sixes",
   "tagline": "Sudoku that fits a coffee break",
   "description": "A six-by-six sudoku with two-by-three boxes: every row, every column and every box holds the digits 1 to 6 exactly once. Every puzzle is generated fresh and checked to have exactly one solution, in three difficulties set by how many clues are left standing, and your best time is kept for each.",
-  "categories": ["Logic", "Daily"],
+  "categories": ["Logic", "Puzzle"],
   "controls": "Keyboard, touch & mouse",
   "instructions": [
     "Pick Easy, Medium or Hard on the title screen, or tap anywhere to play the last difficulty you used.",
