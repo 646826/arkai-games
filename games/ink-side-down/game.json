@@ -1,0 +1,20 @@
+{
+  "slug": "ink-side-down",
+  "title": "Ink Side Down",
+  "tagline": "Roll the cube so its inked side prints only the marks",
+  "description": "A daily logic puzzle: three new boards every day, the same for everyone. Roll a cube across a sheet of paper. One of its sides is inked, and whenever that side lands face down it prints the square beneath. Ink may only touch the marked squares, so every roll turns the inked side somewhere you have to plan for. Print every mark in as few rolls as the par, then share your result without spoiling the board. Missed a day? Every earlier day stays playable.",
+  "categories": ["Puzzle", "Daily"],
+  "controls": "Keyboard, touch & mouse",
+  "instructions": [
+    "Tap or press Space to open today's three puzzles: Easy, Medium and Hard.",
+    "Roll the cube with the arrow keys or WASD, or swipe or tap toward a square. Each roll tips it one square over.",
+    "One side of the cube is red with ink. Rolling turns that side: roll toward it and it lands face down, printing the square under the cube.",
+    "Ink may only touch the dashed marks. A roll that would ink a bare square does not happen and does not count. A red dot beside the cube shows a roll that prints; a cross shows one the ink forbids.",
+    "Print every mark to solve the puzzle. Undo and restart do not give rolls back, so match the par for a star.",
+    "Press Share (or C) to copy a spoiler-free result, and come back after midnight for the next three.",
+    "Missed a day? The arrows beside the day on the title screen (or the comma and period keys) open every earlier day. Those do not count toward your streak."
+  ],
+  "palette": ["#14111c", "#d7263d"],
+  "added": "2026-09-16",
+  "updated": "2026-09-16"
+}

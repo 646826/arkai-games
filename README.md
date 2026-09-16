@@ -4,10 +4,11 @@ Every game from [arkai.win](https://arkai.win) — each one a **single self-cont
 file** you can open from your desktop with no build step, no server, no package
 manager and no network connection.
 
-There are 8 of them. Together they are 346 KB.
+There are 9 of them. Together they are 428 KB.
 
 | Game | Kind | Controls | Size | Play |
 | --- | --- | --- | ---: | --- |
+| **Ink Side Down** | Puzzle, Daily | Keyboard, touch & mouse | 81 KB | [play](https://arkai.win/games/ink-side-down/) |
 | **Mole Rush** | Arcade, Family | Keyboard, touch & mouse | 52 KB | [play](https://arkai.win/games/mole-rush/) |
 | **One Step Late** | Puzzle, Daily | Keyboard, touch & mouse | 82 KB | [play](https://arkai.win/games/one-step-late/) |
 | **Pair Flip** | Cards, Family | Keyboard, touch & mouse | 44 KB | [play](https://arkai.win/games/pair-flip/) |
@@ -76,7 +77,7 @@ Two details that are easy to get wrong, so they are stated rather than implied:
   framing page is served from the same origin as the game file. Host the file
   yourself and it works; frame it from another domain and you get silence, by
   design.
-- **The event vocabulary is not uniform yet.** 7 of the 8 games emit
+- **The event vocabulary is not uniform yet.** 8 of the 9 games emit
   `start` and `gameover`. Brick Rebound uses a different set: `game_end`, `game_ready`, `game_start`, `level_end`, `level_start`.
   The portal normalises this on its side. Listen for both spellings until it is
   fixed at the source.

@@ -1,0 +1,1924 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="color-scheme" content="dark">
+<title>Ink Side Down — Arkai</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #14111c; overflow: hidden; }
+  body { -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+  /* dvh where it exists: on iOS 100vh is taller than the visible page while the
+     address bar shows, which pushed the buttons under it and offset every tap. */
+  canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; outline: none; cursor: pointer; }
+  canvas:focus-visible { outline: 2px solid rgba(255, 107, 107, 0.5); outline-offset: -2px; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  /* The same actions as the canvas buttons, for screen readers and the Tab key.
+     Hidden until one of them has focus, then shown as a bar. */
+  #controls:focus-within { position: fixed; left: 8px; right: 8px; bottom: 8px; width: auto; height: auto; clip: auto; white-space: normal; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border-radius: 12px; background: #221d2e; border: 1px solid #4a4058; }
+  #controls button { min-height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid #4a4058; background: #2a2437; color: #f3eee6; font: 600 15px system-ui, sans-serif; }
+  #controls button:focus { outline: 2px solid #ff6b6b; }
+  #copybox { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(12, 9, 18, 0.82); }
+  #copybox.open { display: flex; }
+  #copybox .card { width: min(92vw, 420px); box-sizing: border-box; padding: 18px; border-radius: 16px; background: #221d2e; border: 1px solid #4a4058; color: #f3eee6; }
+  #copybox p { margin: 0 0 10px; font-size: 15px; line-height: 1.4; }
+  #copybox textarea { width: 100%; height: 100px; box-sizing: border-box; padding: 10px; border-radius: 10px; border: 1px solid #4a4058; background: #14111c; color: #ffd9d2; font: 15px/1.45 ui-monospace, Menlo, Consolas, monospace; resize: none; -webkit-user-select: text; user-select: text; }
+  #copybox button { margin-top: 12px; width: 100%; height: 44px; border: 0; border-radius: 10px; background: #ff6b6b; color: #1c0407; font-weight: 700; font-size: 16px; cursor: pointer; }
+</style>
+</head>
+<body>
+<canvas id="game" tabindex="0" role="application" aria-label="Ink Side Down, a daily puzzle. Roll the cube with the arrow keys or WASD. One side of it is inked, and when that side lands face down it prints the square under it. Ink may only touch the marked squares. Print every mark in as few rolls as you can. L describes the board, U undoes, R restarts, H shows the rules. Comma and period open the previous or next day. Press Tab for buttons."></canvas>
+<div id="status" class="sr" aria-live="polite"></div>
+<div id="controls" class="sr" role="group" aria-label="Game controls">
+  <button type="button" data-act="dir0">Roll up</button>
+  <button type="button" data-act="dir1">Roll right</button>
+  <button type="button" data-act="dir2">Roll down</button>
+  <button type="button" data-act="dir3">Roll left</button>
+  <button type="button" data-act="undo">Undo</button>
+  <button type="button" data-act="restart">Restart</button>
+  <button type="button" data-act="board">Describe the board</button>
+  <button type="button" data-act="help">Rules</button>
+  <button type="button" data-act="best">Show the par line of a solved puzzle</button>
+  <button type="button" data-act="next">Next puzzle</button>
+  <button type="button" data-act="share">Share result</button>
+  <button type="button" data-act="card0">Easy puzzle</button>
+  <button type="button" data-act="card1">Medium puzzle</button>
+  <button type="button" data-act="card2">Hard puzzle</button>
+  <button type="button" data-act="mute">Sound on or off</button>
+  <button type="button" data-act="home">Title screen</button>
+  <button type="button" data-act="prevday">Previous day</button>
+  <button type="button" data-act="nextday">Next day</button>
+</div>
+<div id="copybox" role="dialog" aria-modal="true" aria-labelledby="copytitle">
+  <div class="card">
+    <p id="copytitle">Your browser would not copy by itself. Select the text below, copy it, and paste it anywhere.</p>
+    <textarea id="copytext" readonly></textarea>
+    <button id="copyclose" type="button">Done</button>
+  </div>
+</div>
+<script>
+(() => {
+  'use strict';
+
+  // ---- puzzle core begin ----
+  // Everything between the two markers is pure: no DOM, no clock, no storage.
+  // scripts/tests/ink-side-down.test.mjs runs this block on its own, because the
+  // one promise a daily puzzle makes is that puzzle #N is the same board for
+  // everyone, forever. A change here that renumbers or reshapes old days breaks
+  // every result anyone has already shared, and that test exists to say so.
+
+  const COLS = 6, ROWS = 6, CELLS = COLS * ROWS;
+  const FLOOR = 0, WALL = 1, MARK = 2;
+  // Directions are indices, 0 up, 1 right, 2 down, 3 left, so an input history
+  // stores as a string of digits and the share text never has to describe a move.
+  const DX = [0, 1, 0, -1], DY = [-1, 0, 1, 0];
+  // Where the inked side of the cube is. A side keeps the number of the
+  // direction it faces, so rolling that way is always what puts it underneath.
+  const TOP = 4, BOTTOM = 5;
+  // Mixed into every draw, so this game's boards never share a shuffle with another daily's.
+  const GAME_SEED = 0x1ed5;
+
+  // Day 1 is the launch date. Moving it renumbers every puzzle ever shared.
+  const EPOCH_UTC = Date.UTC(2026, 8, 16);
+  const DAY_MS = 86400000;
+
+  // The whole difficulty curve. `lead` is how many rolls the ink must add to
+  // the walk that simply visits every mark: a board where the inked side can be
+  // ignored is a maze, not this game, and it is rejected rather than shipped.
+  const TIERS = [
+    { name: 'I', label: 'Easy', par: [5, 8], lead: 2, walls: [2, 4], marks: [2, 3] },
+    { name: 'II', label: 'Medium', par: [10, 13], lead: 4, walls: [3, 6], marks: [4, 4] },
+    { name: 'III', label: 'Hard', par: [14, 18], lead: 5, walls: [3, 7], marks: [5, 6] },
+  ];
+  // At most this many distinct roll sequences print every mark in par rolls. A
+  // board with dozens of optimal lines reads as "I got lucky", not "I found it".
+  const MAX_OPTIMAL_LINES = 2;
+  const MAX_ATTEMPTS = 4000;
+
+  const neighbour = (cell, dir) => {
+    const x = (cell % COLS) + DX[dir], y = ((cell / COLS) | 0) + DY[dir];
+    return x < 0 || y < 0 || x >= COLS || y >= ROWS ? -1 : y * COLS + x;
+  };
+
+  /** Where the inked side ends up after one roll in `dir`. */
+  function rollInk(ink, dir) {
+    if (ink === TOP) return dir;
+    if (ink === dir) return BOTTOM;
+    if (ink === BOTTOM) return (dir + 2) % 4;
+    if (ink === (dir + 2) % 4) return TOP;
+    return ink; // the two sides the cube turns on stay where they are
+  }
+
+  /** The marks of a board, in cell order: bit k of a print mask is marks[k]. */
+  function marksOf(board) {
+    const marks = [];
+    for (let cell = 0; cell < CELLS; cell++) if (board[cell] === MARK) marks.push(cell);
+    return marks;
+  }
+
+  /**
+   * One roll. The cube tips over one edge onto the next cell: walls and the edge
+   * stop it. If the inked side lands underneath, it prints the cell, and ink may
+   * only touch a mark: a roll that would print a bare cell does not happen.
+   * `blocked` says why: 'edge', 'wall' or 'ink'.
+   */
+  function roll(board, cube, ink, dir) {
+    const next = neighbour(cube, dir);
+    if (next < 0) return { cube, ink, blocked: 'edge', printed: -1 };
+    if (board[next] === WALL) return { cube, ink, blocked: 'wall', printed: -1 };
+    const after = rollInk(ink, dir);
+    if (after !== BOTTOM) return { cube: next, ink: after, blocked: '', printed: -1 };
+    if (board[next] !== MARK) return { cube, ink, blocked: 'ink', printed: -1 };
+    return { cube: next, ink: after, blocked: '', printed: next };
+  }
+
+  /**
+   * Fewest rolls that print every mark, by breadth-first search over (cube,
+   * inked side, marks printed), plus how many different roll sequences do it in
+   * that many rolls.
+   */
+  function solve(puzzle, wantPath, maxDepth = 63) {
+    const { board, cube, ink } = puzzle;
+    const marks = marksOf(board);
+    const bit = new Int8Array(CELLS).fill(-1);
+    marks.forEach((cell, k) => { bit[cell] = k; });
+    const full = (1 << marks.length) - 1, span = 1 << marks.length;
+    const id = (c, side, mask) => (c * 6 + side) * span + mask;
+    const dist = new Int8Array(CELLS * 6 * span).fill(-1);
+    const ways = new Float64Array(dist.length);
+    const from = wantPath ? new Int32Array(dist.length) : null;
+    const moveOf = wantPath ? new Int8Array(dist.length) : null;
+    let frontier = [id(cube, ink, 0)];
+    dist[frontier[0]] = 0;
+    ways[frontier[0]] = 1;
+    for (let depth = 1; frontier.length && depth <= maxDepth; depth++) {
+      const next = [];
+      for (const state of frontier) {
+        const mask = state % span, rest = (state - mask) / span;
+        const side = rest % 6, c = (rest - side) / 6;
+        for (let dir = 0; dir < 4; dir++) {
+          const r = roll(board, c, side, dir);
+          if (r.blocked) continue;
+          const key = id(r.cube, r.ink, r.printed >= 0 ? mask | (1 << bit[r.printed]) : mask);
+          if (dist[key] < 0) {
+            dist[key] = depth;
+            if (from) { from[key] = state; moveOf[key] = dir; }
+            next.push(key);
+          }
+          if (dist[key] === depth) ways[key] += ways[state];
+        }
+      }
+      let lines = 0, firstWin = -1;
+      for (const key of next) {
+        if (key % span !== full) continue;
+        lines += ways[key];
+        if (firstWin < 0) firstWin = key;
+      }
+      if (lines) {
+        let path = null;
+        if (from) {
+          path = [];
+          for (let key = firstWin; dist[key] > 0; key = from[key]) path.push(moveOf[key]);
+          path.reverse();
+        }
+        return { par: depth, lines, path };
+      }
+      frontier = next;
+    }
+    return { par: Infinity, lines: 0, path: null };
+  }
+
+  /** Fewest steps that visit every mark, ink ignored: the maze underneath the puzzle. */
+  function walkAlone(board, from) {
+    const marks = marksOf(board);
+    const bit = new Int8Array(CELLS).fill(-1);
+    marks.forEach((cell, k) => { bit[cell] = k; });
+    const span = 1 << marks.length, full = span - 1;
+    const seen = new Uint8Array(CELLS * span);
+    const start = from * span + (bit[from] >= 0 ? 1 << bit[from] : 0);
+    if (start % span === full) return 0;
+    seen[start] = 1;
+    let frontier = [start];
+    for (let depth = 1; frontier.length; depth++) {
+      const next = [];
+      for (const state of frontier) {
+        const mask = state % span, cell = (state - mask) / span;
+        for (let dir = 0; dir < 4; dir++) {
+          const n = neighbour(cell, dir);
+          if (n < 0 || board[n] === WALL) continue;
+          const key = n * span + (bit[n] >= 0 ? mask | (1 << bit[n]) : mask);
+          if (key % span === full) return depth;
+          if (seen[key]) continue;
+          seen[key] = 1;
+          next.push(key);
+        }
+      }
+      frontier = next;
+    }
+    return Infinity;
+  }
+
+  // mulberry32 over an FNV-1a mix of the inputs: integer arithmetic only, so
+  // every engine draws the same board from the same day.
+  function seeded(...parts) {
+    let h = 2166136261 >>> 0;
+    for (const part of parts) {
+      h = Math.imul(h ^ (part & 0xffff), 16777619) >>> 0;
+      h = Math.imul(h ^ (part >>> 16), 16777619) >>> 0;
+    }
+    let a = h | 0;
+    return () => {
+      a = (a + 0x6d2b79f5) | 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function draw(day, tier, attempt) {
+    const spec = TIERS[tier];
+    const rand = seeded(GAME_SEED, day, tier, attempt);
+    const between = ([lo, hi]) => lo + Math.floor(rand() * (hi - lo + 1));
+    const walls = between(spec.walls), marks = between(spec.marks);
+    const order = Array.from({ length: CELLS }, (_, i) => i);
+    for (let i = CELLS - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1));
+      const swap = order[i]; order[i] = order[j]; order[j] = swap;
+    }
+    const board = new Uint8Array(CELLS);
+    let k = 0;
+    for (let i = 0; i < walls; i++) board[order[k++]] = WALL;
+    for (let i = 0; i < marks; i++) board[order[k++]] = MARK;
+    // The ink starts anywhere but underneath: the first roll is always the player's.
+    return { board, cube: order[k], ink: Math.floor(rand() * 5) };
+  }
+
+  /** A board that always works, for a day the generator cannot fill. */
+  function fallbackPuzzle(day, tier) {
+    const board = new Uint8Array(CELLS);
+    board[14] = WALL;
+    board[8] = MARK; board[21] = MARK;
+    const puzzle = { board, cube: 0, ink: TOP };
+    return { ...puzzle, par: solve(puzzle, false).par, day, tier, attempt: -1 };
+  }
+
+  /** The puzzle for a day and tier. Same arguments, same board, on any machine. */
+  function makePuzzle(day, tier) {
+    const spec = TIERS[tier];
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      const puzzle = draw(day, tier, attempt);
+      // A board longer than the tier allows is rejected anyway; stop looking there.
+      const { par, lines } = solve(puzzle, false, spec.par[1]);
+      if (par < spec.par[0] || par > spec.par[1] || lines > MAX_OPTIMAL_LINES) continue;
+      if (par - walkAlone(puzzle.board, puzzle.cube) < spec.lead) continue;
+      return { ...puzzle, par, day, tier, attempt };
+    }
+    // Ten years of days were generated in testing and none got here. If one
+    // ever does, a plain board beats a frozen tab.
+    return fallbackPuzzle(day, tier);
+  }
+
+  /** Where a stored roll history leaves the cube and which marks it printed. A history holds only rolls that happened. */
+  function replay(puzzle, inputs) {
+    let cube = puzzle.cube, ink = puzzle.ink;
+    const printed = new Set(), kept = [];
+    for (const dir of inputs) {
+      const r = roll(puzzle.board, cube, ink, dir);
+      if (r.blocked) break; // only a corrupt store gets here
+      cube = r.cube; ink = r.ink;
+      if (r.printed >= 0) printed.add(r.printed);
+      kept.push(dir);
+    }
+    return { cube, ink, printed, inputs: kept };
+  }
+
+  /** Every roll from here, and what it would do: the dots and crosses drawn around the cube. */
+  function previews(board, cube, ink) {
+    return DX.map((_, dir) => roll(board, cube, ink, dir));
+  }
+
+  /**
+   * One day's saved results, merged with what this tab holds. Two tabs of the
+   * same game write to one store; the later write must not unsolve a puzzle the
+   * other tab solved, or lower a roll count the player already spent.
+   * For an unsolved puzzle the position is this tab's only where `mine[tier]`
+   * says so: the tab changed it and has not saved yet, or the store still holds
+   * what the tab last saw. Otherwise another tab moved on and its position wins.
+   * Entries are { i: roll digits, m: rolls spent, s: rolls at first solve or 0 }.
+   */
+  function mergeDay(saved, current, mine) {
+    return current.map((cur, tier) => {
+      const old = (Array.isArray(saved) && saved[tier]) || {};
+      const m = Math.max(Number(old.m) || 0, cur.m);
+      const oldPath = typeof old.i === 'string' ? old.i : null;
+      if (Number(old.s) > 0) return { i: oldPath ?? cur.i, m, s: Number(old.s) };
+      const ours = !mine || mine[tier] || oldPath === null;
+      return { i: ours ? cur.i : oldPath, m, s: cur.s };
+    });
+  }
+
+  /**
+   * Whether this tab's position on a puzzle should win a merge: it changed the
+   * puzzle and has not saved yet, or the store still holds what it last saw.
+   * Anything else means another tab moved on since.
+   */
+  function ownsPosition(stored, seen, dirty) {
+    return !!dirty || stored === null || stored === seen;
+  }
+
+  // Movement is positional: arrows, and WASD by where the keys sit, so ZQSD
+  // rolls on AZERTY. Commands are read by the printed letter, so Z undoes on
+  // QWERTZ; a non-Latin letter falls back to the Latin one on the same key, so
+  // U still undoes on a Cyrillic layout. Where a layout prints a command on a
+  // WASD position (Colemak R on S, Workman H on D) the position wins: a lost
+  // letter has a button, while R read as a restart would throw progress away.
+  const KEY_DIRS = { ArrowUp: 0, KeyW: 0, ArrowRight: 1, KeyD: 1, ArrowDown: 2, KeyS: 2, ArrowLeft: 3, KeyA: 3 };
+  const ARROW_DIRS = { ArrowUp: 0, ArrowRight: 1, ArrowDown: 2, ArrowLeft: 3 };
+  // The punctuation that steps through days, by position, for layouts that print a letter there.
+  const PUNCT_KEYS = { Comma: ',', Period: '.' };
+  const own = (table, name) => Object.prototype.hasOwnProperty.call(table, name);
+
+  /** What a key press means: a direction, a puzzle digit, or a command letter. */
+  function readKey(rawCode, rawKey) {
+    const code = String(rawCode || ''), key = String(rawKey || '');
+    // An arrow is an arrow whatever reported it: the numpad with NumLock off,
+    // a remapper, or an on-screen keyboard that sends no physical code at all.
+    let dir = own(ARROW_DIRS, key) ? ARROW_DIRS[key] : own(KEY_DIRS, code) ? KEY_DIRS[code] : -1;
+    // With it on, 1 2 3 pick a puzzle; the top row counts by position, since
+    // AZERTY types symbols there without Shift.
+    const digit = /^Digit[123]$/.test(code) || (/^Numpad[123]$/.test(code) && /^[123]$/.test(key)) ? Number(code.slice(-1)) - 1 : -1;
+    let letter = key.length === 1 ? key.toLowerCase() : key;
+    // Only for other scripts: Turkish ı on the R key is a Latin letter, and
+    // reading it as R would restart the puzzle. Thai vowels are marks, not letters.
+    // Checked on the whole key, which can be two code points (Arabic لا on B).
+    // Cyrillic puts б and ю where the comma and period are; those count by position too.
+    if (/^[\p{L}\p{M}]+$/u.test(key) && /[^\p{Script=Latin}\p{Script=Inherited}\p{Script=Common}]/u.test(key)) {
+      if (/^Key[A-Z]$/.test(code)) letter = code.slice(3).toLowerCase();
+      else if (own(PUNCT_KEYS, code)) letter = PUNCT_KEYS[code];
+    }
+    return { dir, digit, letter: dir >= 0 ? '' : letter };
+  }
+
+  /** -1, +1 or 0: whether a key steps to the previous day, the next, or neither. */
+  function dayStep(letter) {
+    if (letter === ',' || letter === '<' || letter === '[') return -1;
+    if (letter === '.' || letter === '>' || letter === ']') return 1;
+    return 0;
+  }
+
+  /** Day number for a local calendar date: the puzzle turns over at your midnight, like every daily. */
+  function dayNumber(date) {
+    const utc = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+    return Math.max(1, Math.floor((utc - EPOCH_UTC) / DAY_MS) + 1);
+  }
+
+  /**
+   * The streak once all three puzzles of `day` are solved, or null if it does
+   * not change. Only on the day itself: finishing yesterday from the archive
+   * would buy a missed day back. Only forward: a day already counted, by this
+   * tab or another, is not counted again.
+   */
+  function streakAfter(streak, lastFull, day, today) {
+    if (day !== today || lastFull >= day) return null;
+    return { streak: lastFull === day - 1 ? streak + 1 : 1, lastFull: day };
+  }
+
+  /**
+   * The line under the title. `picture` is the thumbnail and the social card:
+   * photographed once and shown for months, so it names no day at all.
+   */
+  function titleDay(day, date, past, picture) {
+    if (picture) return 'Three new puzzles every day';
+    return past ? `Day ${day} · ${date}` : `Day ${day} · three new puzzles every day`;
+  }
+
+  /** One mark of the share text per tier, nothing about the board itself. */
+  function shareMark(result, par) {
+    if (!result) return '⬛';
+    const over = result - par;
+    if (over <= 0) return '⭐';
+    if (over <= 2) return '🟢+' + over;
+    if (over <= 6) return '🟡+' + over;
+    return '🔴+' + over;
+  }
+
+  const core = {
+    COLS, ROWS, CELLS, FLOOR, WALL, MARK, TOP, BOTTOM, TIERS, EPOCH_UTC, DAY_MS, MAX_ATTEMPTS, MAX_OPTIMAL_LINES, GAME_SEED,
+    rollInk, marksOf, roll, previews, solve, walkAlone, draw, makePuzzle, fallbackPuzzle, replay, mergeDay, ownsPosition, readKey, dayStep, dayNumber, streakAfter, shareMark, titleDay,
+  };
+  // ---- puzzle core end ----
+
+  // ---- layout (logical pixels) ----
+  // Two shapes. The portal frames a game at 3:4 on phones and 4:3 on desktops,
+  // and a game page opened on its own on a phone is taller than both. The
+  // compact shape drops the heading (the page around the frame already shows it)
+  // and is itself 3:4.
+  const W = 480;
+  const LAYOUTS = {
+    tall: {
+      H: 780, heading: true, iconY: 10, icon: 48, tabsY: 72, tabH: 60, infoY: 156, boardY: 176,
+      buttonH: 56, toastY: 726, footerY: 744, small: 15, tabText: 16,
+      title: { name: 92, nameSize: 42, day: 138, lanes: 176, lines: 330, lineGap: 28, cards: 452, cta: 550, sub: 584, share: 628, footer: 744 },
+    },
+    compact: {
+      H: 640, heading: false, iconY: 6, icon: 60, tabsY: 6, tabH: 60, infoY: 86, boardY: 104,
+      buttonH: 62, toastY: 68, footerY: 0, small: 16, tabText: 15,
+      title: { name: 82, nameSize: 40, day: 120, lanes: 142, lines: 286, lineGap: 26, cards: 388, cta: 478, sub: 506, share: 528, footer: 618 },
+    },
+  };
+  let L = LAYOUTS.tall;
+  const CELL = 76;
+  const BOARD_X = (W - COLS * CELL) / 2;
+  const BOARD_W = COLS * CELL, BOARD_H = ROWS * CELL;
+  const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+  const SLUG = 'ink-side-down';
+  const STORE = 'arkai:ink-side-down:v1', STORE_MUTE = 'arkai:ink-side-down:muted';
+  // The address in the share text. It is text for a clipboard, never loaded, and
+  // it is the game page rather than this frame's own address: /play/* is
+  // noindex and unmeasured, so a result shared from there would lead nowhere useful.
+  const SHARE_URL = 'https:' + '//arkai.win/games/ink-side-down/';
+  const ROLL_TIME = 0.17, PRINT_TIME = 0.35, DEMO_STEP = 0.42;
+  const COLS_NAMES = 'ABCDEF';
+  const DIR_NAMES = ['up', 'right', 'down', 'left'];
+  const INK_NAMES = ['facing up', 'facing right', 'facing down', 'facing left', 'on top', 'underneath'];
+
+  const C = {
+    bg: '#14111c', paper: '#efe6d3', paperAlt: '#e8dec9', grid: 'rgba(70, 48, 30, 0.10)', frame: '#2a2437',
+    wall: '#5a4a3f', wallTop: '#6f5c4e', wallEdge: '#3b3029',
+    ink: '#d7263d', inkHi: '#ff6b6b', inkDeep: '#9e1a2c',
+    cube: '#fbf8f1', cubeSide: '#e3d9c6', cubeEdge: '#a89b85',
+    text: '#f3eee6', muted: '#b5ab9d', good: '#6ee7a8', warn: '#fbbf24', bad: '#ff8a80',
+    button: '#2a2437', buttonHot: '#342c44', buttonDown: '#3b3250', line: 'rgba(214, 196, 170, 0.28)',
+  };
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const statusEl = document.getElementById('status');
+  const controls = document.getElementById('controls');
+  const copyBox = document.getElementById('copybox');
+  const copyText = document.getElementById('copytext');
+  const copyClose = document.getElementById('copyclose');
+  const coarseQuery = window.matchMedia ? window.matchMedia('(pointer: coarse)') : null;
+  const calmQuery = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  const touch = () => !!(coarseQuery && coarseQuery.matches);
+  // Reduced motion: no ambient animation at all. Rolls still slide, briefly,
+  // because a cube that teleports is harder to follow than one that moves.
+  const calm = () => !!(calmQuery && calmQuery.matches);
+
+  const storage = {
+    get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+    set(key, value) { try { localStorage.setItem(key, value); return true; } catch { return false; } },
+  };
+
+  const S = {
+    mode: 'title',          // title | play
+    day: 1, today: 1,       // the day on screen, and the newest day it can be
+    puzzles: [], runs: [], seen: [], dirty: [], tier: 0, newDay: false,
+    cube: 0, ink: TOP, printed: new Set(),
+    practice: false, practiceMoves: 0, practiceInputs: [],
+    demo: null,             // { path, i, t } while the par line plays
+    help: false, inkWarned: false,
+    streak: 0, bestStreak: 0, lastFull: 0, storageWarned: false,
+    muted: storage.get(STORE_MUTE) === '1',
+    clock: 0, dayCheck: 0, shake: 0, flash: 0,
+    cubeAnim: null, stamps: new Map(),
+    parts: [], floats: [], toast: null, press: null, hover: null,
+  };
+  const started = new Set();
+
+  // ---- portal events (same-origin parent only) ----
+  const emit = (event, data) => {
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: 'game-event', event, data: data || {} }, location.origin);
+      }
+    } catch { /* not embedded */ }
+  };
+
+  // A live region repeats nothing it already holds, so it is emptied first and
+  // refilled a moment later: two refused rolls in a row must be announced twice.
+  let announceTimer = 0, pending = '';
+  const announce = (message) => {
+    pending = pending ? `${pending} ${message}` : message;
+    statusEl.textContent = '';
+    clearTimeout(announceTimer);
+    announceTimer = setTimeout(() => { statusEl.textContent = pending; pending = ''; }, 60);
+  };
+
+  // ---- sound (generated, no assets) ----
+  let audio = null;
+  // Called on every gesture, not once: a touch pointerdown does not count as user
+  // activation, so the context made there starts suspended and only a later
+  // gesture (the pointerup) is allowed to resume it.
+  const ensureAudio = () => {
+    if (S.muted) return;
+    if (!audio) {
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (Ctx) audio = new Ctx();
+      } catch { audio = null; }
+    }
+    if (audio && audio.state === 'suspended') audio.resume().catch(() => {});
+  };
+  const tone = (freq, dur = 0.07, type = 'triangle', vol = 0.04, delay = 0, slide = 0) => {
+    if (S.muted || !audio || audio.state !== 'running') return;
+    const t = audio.currentTime + delay;
+    const osc = audio.createOscillator();
+    const gain = audio.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t);
+    if (slide) osc.frequency.exponentialRampToValueAtTime(Math.max(40, freq + slide), t + dur);
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(vol, t + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(gain);
+    gain.connect(audio.destination);
+    osc.start(t);
+    osc.stop(t + dur + 0.02);
+  };
+  const sfx = {
+    roll: () => { tone(240, 0.05, 'triangle', 0.045); tone(190, 0.06, 'sine', 0.035, ROLL_TIME * 0.8); },
+    print: () => { tone(150, 0.1, 'square', 0.03, ROLL_TIME * 0.8); tone(760, 0.08, 'sine', 0.035, ROLL_TIME * 0.8 + 0.05); },
+    bump: () => tone(130, 0.08, 'square', 0.025),
+    refuse: () => { tone(300, 0.07, 'square', 0.025); tone(220, 0.1, 'square', 0.025, 0.07); },
+    undo: () => tone(420, 0.06, 'sine', 0.03, 0, -120),
+    win: () => [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.16, 'triangle', 0.045, ROLL_TIME + i * 0.09)),
+    click: () => tone(700, 0.035, 'sine', 0.025),
+  };
+
+  // ---- helpers ----
+  const cx = (cell) => BOARD_X + (cell % COLS) * CELL + CELL / 2;
+  const cy = (cell) => L.boardY + ((cell / COLS) | 0) * CELL + CELL / 2;
+  const cellName = (cell) => `${COLS_NAMES[cell % COLS]}${((cell / COLS) | 0) + 1}`;
+  const ease = (t) => (t >= 1 ? 1 : t <= 0 ? 0 : 1 - Math.pow(1 - t, 3));
+  const puzzle = () => S.puzzles[S.tier];
+  // Set by the portal's picture generator (site/scripts/lib/picture-flag.mjs).
+  const PICTURE = window.__arkaiPicture === true;
+  const run = () => S.runs[S.tier];
+  const solvedCount = () => S.runs.filter((r) => r.solved).length;
+  const locked = () => run().solved && !S.practice;
+  const history = () => (S.practice ? S.practiceInputs : run().inputs);
+  const setHistory = (inputs) => { if (S.practice) S.practiceInputs = inputs; else run().inputs = inputs; };
+  const touchTier = () => { if (!S.practice) S.dirty[S.tier] = true; };
+  const liveStreak = () => (S.lastFull >= S.today - 1 ? S.streak : 0);
+  const archive = () => S.day < S.today;
+  const dayDate = (day) => new Date(EPOCH_UTC + (day - 1) * DAY_MS).toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'UTC' });
+  const titleSummary = () => `Day ${S.day}${archive() ? `, ${dayDate(S.day)}, from the archive` : ''}. ${solvedCount()} of 3 puzzles solved.`;
+  const digits = (text) => (typeof text === 'string' ? text.split('').map(Number).filter((d) => d >= 0 && d <= 3) : []);
+  const wave = (speed, phase = 0) => (calm() ? 0 : Math.sin(S.clock * speed + phase));
+  const markCount = (p) => marksOf(p.board).length;
+  // A tween between two cells. Same cell means nothing moved, so nothing animates.
+  const still = (cell, ink) => ({ from: cell, to: cell, inkFrom: ink, inkTo: ink, dir: -1, t: 1, bump: -1, bt: 1 });
+
+  function spawnParts(x, y, color, count, speed = 160) {
+    if (calm()) return;
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2, s = speed * (0.3 + Math.random() * 0.7);
+      S.parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.5 + Math.random() * 0.4, t: 0, color });
+    }
+  }
+  const float = (x, y, message, color) => S.floats.push({ x, y, text: message, color, t: 0 });
+  const toast = (message, spoken = message) => { S.toast = { text: message, t: 0 }; announce(spoken); };
+  const shake = (amount) => { if (!calm()) S.shake = amount; };
+
+  function describeBoard() {
+    const p = puzzle();
+    const list = (cells) => (cells.length ? cells.map(cellName).join(', ') : 'none');
+    const walls = [];
+    for (let c = 0; c < CELLS; c++) if (p.board[c] === WALL) walls.push(c);
+    return `Columns A to F run left to right, rows 1 to 6 run downward. Walls: ${list(walls)}. Marks: ${list(marksOf(p.board))}. ${describePieces(S)}`;
+  }
+
+  function describePieces(at) {
+    const p = puzzle();
+    const marks = marksOf(p.board);
+    const left = marks.filter((c) => !at.printed.has(c));
+    const ahead = previews(p.board, at.cube, at.ink);
+    const prints = ahead.map((r, dir) => (r.printed >= 0 ? `rolling ${DIR_NAMES[dir]} prints ${cellName(r.printed)}` : '')).filter(Boolean);
+    const refused = ahead.map((r, dir) => (r.blocked === 'ink' ? DIR_NAMES[dir] : '')).filter(Boolean);
+    return `Cube ${cellName(at.cube)}, inked side ${INK_NAMES[at.ink]}. ` +
+      `${marks.length - left.length} of ${marks.length} marks printed${left.length ? `; still bare: ${left.map(cellName).join(', ')}` : ''}. ` +
+      `${prints.length ? `Now ${prints.join(', ')}. ` : ''}${refused.length ? `The ink forbids rolling ${refused.join(' or ')}.` : ''}`;
+  }
+
+  // ---- persistence ----
+  // What the last save could not write, and the stored text it was built on.
+  // While that text is unchanged, the snapshot is the store: a day change
+  // reloads from it and must not undo the session so far. Once another tab has
+  // saved, its save is the store again and this tab merges into it as usual.
+  let unsaved = null, unsavedBase = null, lastRaw = null;
+
+  function readStore() {
+    const raw = storage.get(STORE);
+    if (unsaved && raw === unsavedBase) return unsaved;
+    unsaved = null;
+    lastRaw = raw;
+    try {
+      const data = JSON.parse(raw || 'null');
+      return data && typeof data === 'object' && data.days && typeof data.days === 'object' ? data : { days: {} };
+    } catch { return { days: {} }; }
+  }
+
+  /** Takes in what another tab saved: solved puzzles, rolls spent, newer positions and the streak. */
+  function absorb(data) {
+    const saved = data.days[S.day];
+    const current = S.runs.map((r) => ({ i: r.inputs.join(''), m: r.moves, s: r.solved ? r.solvedMoves : 0 }));
+    const mine = S.runs.map((_, tier) => {
+      const stored = Array.isArray(saved) && saved[tier] && typeof saved[tier].i === 'string' ? saved[tier].i : null;
+      // A board mid-demo is not taken over; the next sync picks it up.
+      const busy = tier === S.tier && S.demo;
+      return ownsPosition(stored, S.seen[tier], S.dirty[tier]) || !!busy;
+    });
+    const merged = mergeDay(saved, current, mine);
+    merged.forEach((entry, tier) => {
+      const r = S.runs[tier];
+      r.moves = entry.m;
+      if (entry.s > 0) {
+        S.seen[tier] = entry.i;
+        if (r.solved && r.solvedMoves === entry.s) return;
+        // Solved elsewhere, or solved in two tabs at once: the stored result is the one that counts.
+        r.solved = true;
+        r.solvedMoves = entry.s;
+        r.inputs = replay(S.puzzles[tier], digits(entry.i)).inputs;
+        if (tier === S.tier && !S.practice) {
+          S.demo = null;
+          placeSolved();
+          toast(`${TIERS[tier].label} was solved in another tab, in ${entry.s} rolls.`);
+        }
+        return;
+      }
+      if (mine[tier]) return;
+      S.seen[tier] = entry.i;
+      if (entry.i === current[tier].i) return;
+      const state = replay(S.puzzles[tier], digits(entry.i));
+      r.inputs = state.inputs;
+      if (tier === S.tier && !S.practice) {
+        placeCube(state);
+        announce(`Updated from another tab. ${describePieces(S)}`);
+      }
+    });
+    const lastFull = Number(data.lastFull) || 0;
+    if (lastFull > S.lastFull) {
+      S.lastFull = lastFull;
+      S.streak = Number(data.streak) || 0;
+    }
+    S.bestStreak = Math.max(S.bestStreak, Number(data.best) || 0);
+    return merged;
+  }
+
+  const sync = () => { if (S.runs.length) absorb(readStore()); };
+
+  // A finished day extends the streak, whichever tab solved which puzzle; the
+  // rules (today only, forward only) are in the core, as streakAfter.
+  function completeDay() {
+    if (solvedCount() !== TIERS.length) return;
+    const next = streakAfter(S.streak, S.lastFull, S.day, S.today);
+    if (!next) return;
+    S.streak = next.streak;
+    S.lastFull = next.lastFull;
+    S.bestStreak = Math.max(S.bestStreak, S.streak);
+  }
+
+  /**
+   * Merges and saves. Answers whether the store already held a solve of the
+   * current puzzle: equal scores do not make two wins the same win.
+   */
+  function writeStore() {
+    const data = readStore();
+    const saved = data.days[S.day];
+    const solvedThere = Array.isArray(saved) && saved[S.tier] && Number(saved[S.tier].s) > 0;
+    const entries = absorb(data);
+    data.days[S.day] = entries;
+    completeDay();
+    // Nothing is ever pruned: a daily player adds about 200 bytes a day, some
+    // 73 KB a year, against a quota of megabytes.
+    data.streak = S.streak; data.best = S.bestStreak; data.lastFull = S.lastFull;
+    if (storage.set(STORE, JSON.stringify(data))) {
+      unsaved = null;
+      entries.forEach((entry, tier) => { S.seen[tier] = entry.i; S.dirty[tier] = false; });
+    } else {
+      unsaved = data;
+      unsavedBase = lastRaw;
+      if (!S.storageWarned) {
+        S.storageWarned = true;
+        toast('This browser is not keeping your progress.');
+      }
+    }
+    return !!solvedThere;
+  }
+
+  /** Opens a day's three puzzles: today, or any earlier day back to day 1. */
+  function loadDay(day) {
+    S.today = dayNumber(new Date());
+    day = Math.min(Math.max(1, day), S.today);
+    S.day = day;
+    S.newDay = false;
+    S.puzzles = TIERS.map((_, tier) => makePuzzle(day, tier));
+    const data = readStore();
+    const saved = Array.isArray(data.days[day]) ? data.days[day] : [];
+    S.streak = Number(data.streak) || 0;
+    S.bestStreak = Number(data.best) || 0;
+    S.lastFull = Number(data.lastFull) || 0;
+    S.dirty = TIERS.map(() => false);
+    S.seen = TIERS.map((_, tier) => (saved[tier] && typeof saved[tier].i === 'string' ? saved[tier].i : null));
+    S.runs = S.puzzles.map((p, tier) => {
+      const entry = saved[tier] || {};
+      const path = digits(entry.i);
+      const solvedMoves = Number(entry.s) || 0;
+      return { inputs: path, moves: Math.max(Number(entry.m) || 0, path.length), solved: solvedMoves > 0, solvedMoves };
+    });
+    const firstOpen = S.runs.findIndex((r) => !r.solved);
+    selectTier(firstOpen < 0 ? 0 : firstOpen);
+  }
+
+  function selectTier(tier) {
+    S.tier = tier;
+    S.practice = false;
+    S.demo = null;
+    const state = replay(puzzle(), run().inputs);
+    run().inputs = state.inputs;
+    if (run().solved) placeSolved();
+    else placeCube(state);
+  }
+
+  function placeCube(state) {
+    S.cube = state.cube; S.ink = state.ink; S.printed = new Set(state.printed);
+    S.cubeAnim = still(state.cube, state.ink);
+  }
+
+  /** A solved board shows every mark printed, with the cube where the winning roll left it. */
+  function placeSolved() {
+    const p = puzzle();
+    placeCube(replay(p, run().inputs));
+    S.printed = new Set(marksOf(p.board));
+  }
+
+  // `start` once per unsolved puzzle per page load, however the player got to
+  // it. Looking at a finished board again is not starting it.
+  function markStart() {
+    const key = `${S.day}:${S.tier}`;
+    if (run().solved || started.has(key)) return;
+    started.add(key);
+    emit('start', { game: SLUG, day: S.day, tier: S.tier + 1 });
+  }
+
+  /**
+   * The calendar moved on. Today's puzzles follow it; an archive day stays where
+   * the player put it, and only the newest reachable day moves. Answers whether
+   * a new day was loaded.
+   */
+  function followToday() {
+    const today = dayNumber(new Date());
+    if (today === S.today) return false;
+    if (S.day !== S.today) { S.today = today; return false; }
+    loadDay(today);
+    return true;
+  }
+
+  function checkDay() {
+    if (dayNumber(new Date()) === S.today) return;
+    // Mid-puzzle on today's board, nothing is pulled away: it says so once.
+    if (S.mode === 'play' && S.day === S.today) {
+      if (!S.newDay) {
+        S.newDay = true;
+        toast(touch() ? 'New puzzles are out. Tap the home button.' : 'New puzzles are out. Press Esc.');
+      }
+      return;
+    }
+    followToday();
+  }
+
+  /** The previous or next day, from the title or mid-puzzle: it opens on that day's title screen. */
+  function stepDay(delta) {
+    const target = S.day + delta;
+    if (target < 1 || target > dayNumber(new Date())) {
+      sfx.bump();
+      announce(target < 1 ? 'Day 1 is the first day.' : 'This is today. New puzzles come at midnight.');
+      return;
+    }
+    S.mode = 'title';
+    S.help = false;
+    S.toast = null;
+    loadDay(target);
+    sfx.click();
+    announce(titleSummary());
+  }
+
+  // ---- game flow ----
+  function startPlay(tier) {
+    ensureAudio();
+    followToday();
+    if (tier !== undefined && tier !== S.tier) selectTier(tier);
+    S.mode = 'play';
+    S.help = false;
+    S.toast = null;
+    sfx.click();
+    markStart();
+    announce(`Day ${S.day}, ${TIERS[S.tier].label} puzzle, par ${puzzle().par}. ${describeBoard()}`);
+  }
+
+  function goTitle() {
+    S.mode = 'title';
+    S.demo = null;
+    S.help = false;
+    S.practice = false;
+    if (!followToday()) selectTier(S.tier);
+    sfx.click();
+    announce(titleSummary());
+  }
+
+  /** The roll animation: the cube tips toward `dir`, and its inked side turns over halfway. */
+  function animateRoll(from, to, inkFrom, inkTo, dir) {
+    S.cubeAnim = { from, to, inkFrom, inkTo, dir, t: 0, bump: -1, bt: 1 };
+  }
+
+  /** A print: the seal pops in once the cube lands. Inking a printed mark again only splashes. */
+  function stamp(cell, fresh) {
+    if (fresh) S.stamps.set(cell, -ROLL_TIME * 0.8);
+    spawnParts(cx(cell), cy(cell), C.ink, fresh ? 18 : 8, 150);
+  }
+
+  function move(dir) {
+    if (S.mode !== 'play' || S.demo) return;
+    S.help = false;
+    const wasSolved = run().solved;
+    sync(); // another tab may have moved on, or solved this one
+    if (run().solved && !wasSolved) return; // its notice is on screen; this key press is not a move
+    if (locked()) {
+      toast(touch() ? 'Solved. Tap Replay to practise it, or Next.' : 'Solved. R replays it for practice, N moves on.');
+      sfx.bump();
+      return;
+    }
+    ensureAudio();
+    const p = puzzle();
+    const r = roll(p.board, S.cube, S.ink, dir);
+    if (r.blocked) {
+      // A roll that does not happen is not a roll: nothing is counted or saved.
+      S.cubeAnim = { ...still(S.cube, S.ink), bump: dir, bt: 0 };
+      const target = neighbour(S.cube, dir);
+      if (r.blocked === 'ink') {
+        sfx.refuse();
+        shake(3);
+        float(cx(target), cy(target) - 18, 'no ink here', C.inkDeep);
+        const spoken = `The inked side would land on ${cellName(target)}, which has no mark. Ink only touches the marks.`;
+        if (!S.inkWarned) { S.inkWarned = true; toast('Ink only touches the marks', spoken); } else announce(spoken);
+      } else {
+        sfx.bump();
+        announce(`Blocked by ${r.blocked === 'wall' ? 'a wall' : 'the edge'}. ${describePieces(S)}`);
+      }
+      return;
+    }
+    if (S.practice) S.practiceMoves++;
+    else run().moves++;
+    touchTier();
+    animateRoll(S.cube, r.cube, S.ink, r.ink, dir);
+    S.cube = r.cube; S.ink = r.ink;
+    history().push(dir);
+    sfx.roll();
+    let fresh = false;
+    if (r.printed >= 0) {
+      fresh = !S.printed.has(r.printed);
+      S.printed.add(r.printed);
+      stamp(r.printed, fresh);
+      sfx.print();
+    }
+    // The winning roll is saved once, by solvedNow, with its result: saving the
+    // position first told another tab "every mark printed, unsolved".
+    if (fresh && S.printed.size === markCount(p)) { solvedNow(); return; }
+    if (!S.practice) {
+      writeStore();
+      if (run().solved) return; // solved in another tab meanwhile; the save said so
+    }
+    announce(`${r.printed >= 0 ? `Printed ${cellName(r.printed)}. ` : ''}${describePieces(S)}`);
+  }
+
+  function celebrate() {
+    sfx.win();
+    if (!calm()) S.flash = 0.5;
+    for (const cell of marksOf(puzzle().board)) spawnParts(cx(cell), cy(cell), C.inkHi, 10, 200);
+  }
+
+  function solvedNow() {
+    const p = puzzle();
+    if (S.practice) {
+      celebrate();
+      const over = S.practiceMoves - p.par;
+      toast(`Practice solved in ${S.practiceMoves}. ${over <= 0 ? 'Par!' : `${over} over par.`}`);
+      return;
+    }
+    // Another tab may have solved this puzzle, or finished the day, a moment
+    // ago. Its result stands, and it has already reported it.
+    absorb(readStore());
+    const r = run();
+    if (r.solved) { writeStore(); return; } // the other tab's result and notice stand
+    r.solved = true;
+    r.solvedMoves = r.moves;
+    // The save merges once more; if the store already held a solve of this
+    // puzzle, that win was reported by its own tab and stands.
+    if (writeStore()) return;
+    celebrate();
+    const over = r.solvedMoves - p.par;
+    emit('gameover', { won: true, score: r.solvedMoves, par: p.par, tier: S.tier + 1, day: S.day });
+    const allDone = solvedCount() === TIERS.length;
+    toast(`${over <= 0 ? 'Par! A star.' : `Solved, ${over} over par.`} ${allDone ? 'All three done.' : 'Next when ready.'}`);
+  }
+
+  function undo() {
+    if (S.mode !== 'play' || S.demo) return;
+    sync();
+    if (locked()) { announce('This puzzle is solved; undo is off. Replay it to practise.'); return; }
+    const h = history();
+    if (!h.length) { sfx.bump(); return; }
+    const was = { cube: S.cube, ink: S.ink };
+    const state = replay(puzzle(), h.slice(0, -1));
+    setHistory(state.inputs);
+    touchTier();
+    placeCube(state);
+    animateRoll(was.cube, state.cube, was.ink, state.ink, (h[h.length - 1] + 2) % 4);
+    if (!S.practice) {
+      writeStore();
+      if (run().solved) return; // solved in another tab meanwhile; the save said so
+    }
+    sfx.undo();
+    announce(`Undone. ${describePieces(S)}`);
+  }
+
+  function restart() {
+    if (S.mode !== 'play') return;
+    S.demo = null;
+    const wasSolved = run().solved;
+    sync(); // decides between a fresh start and practice, so it must know about other tabs
+    if (run().solved && !wasSolved) return; // solved in another tab just now; that is news, not a practice request
+    const p = puzzle();
+    if (run().solved) {
+      // A solved puzzle stays solved. Replaying it is practice, scored apart.
+      S.practice = true;
+      S.practiceMoves = 0;
+      S.practiceInputs = [];
+      toast('Practice run. Your result is already saved.');
+    } else {
+      run().inputs = [];
+      touchTier();
+      writeStore();
+      if (run().solved) return; // solved in another tab meanwhile; the save said so
+      toast(`Back to the start. The ${run().moves} rolls so far still count.`);
+    }
+    placeCube(replay(p, []));
+    sfx.undo();
+  }
+
+  function nextPuzzle() {
+    if (S.mode !== 'play') return;
+    const open = [1, 2].map((k) => (S.tier + k) % TIERS.length).find((t) => !S.runs[t].solved);
+    if (open === undefined) { goTitle(); return; }
+    setTier(open);
+  }
+
+  function setTier(tier) {
+    if (S.mode !== 'play' || tier === S.tier) return;
+    selectTier(tier);
+    S.toast = null; // "solved" belongs to the puzzle just left
+    sfx.click();
+    markStart();
+    announce(`${TIERS[tier].label} puzzle, par ${puzzle().par}. ${describeBoard()}`);
+  }
+
+  function showBestLine() {
+    if (S.mode !== 'play') return;
+    const wasSolved = run().solved;
+    sync();
+    if (run().solved && !wasSolved) return; // solved in another tab just now; its notice comes first
+    // Only from a finished board: in a practice run this would throw the run away.
+    if (!locked()) { announce(run().solved ? 'Leave the practice run (switch puzzle or go home) to see the par line.' : 'The par line opens once this puzzle is solved.'); return; }
+    const { path } = solve(puzzle(), true);
+    if (!path) return;
+    placeCube(replay(puzzle(), []));
+    S.help = false; // the rules panel would hide the whole demonstration
+    S.demo = { path, i: 0, t: 0.4 };
+    const spoken = `The par line: ${path.map((d) => DIR_NAMES[d]).join(', ')}.`;
+    // In the compact shape the strip above the board already says it.
+    if (L.heading) toast('Watch the par line.', spoken); else { S.toast = null; announce(spoken); }
+  }
+
+  function stepDemo() {
+    const d = S.demo;
+    const dir = d.path[d.i++];
+    const r = roll(puzzle().board, S.cube, S.ink, dir);
+    animateRoll(S.cube, r.cube, S.ink, r.ink, dir);
+    S.cube = r.cube; S.ink = r.ink;
+    sfx.roll();
+    if (r.printed >= 0) { stamp(r.printed, !S.printed.has(r.printed)); S.printed.add(r.printed); sfx.print(); }
+    // The par line prints every mark, so the board it leaves is the solved one.
+    if (d.i >= d.path.length) S.demo = null;
+  }
+
+  function toggleMute() {
+    S.muted = !S.muted;
+    storage.set(STORE_MUTE, S.muted ? '1' : '0');
+    if (S.muted) { if (audio) audio.suspend().catch(() => {}); }
+    else { ensureAudio(); sfx.click(); }
+    toast(S.muted ? 'Sound off' : 'Sound on');
+  }
+
+  // ---- sharing ----
+  function shareText() {
+    const marks = S.runs.map((r, t) => shareMark(r.solved ? r.solvedMoves : 0, S.puzzles[t].par));
+    return `Ink Side Down #${S.day}\n${marks.join('  ')}\n${SHARE_URL}`;
+  }
+
+  // `share` is reported only once the text really left: a cancelled sheet or a
+  // refused clipboard is not a share, and this number is the growth loop.
+  const shared = () => emit('share', { day: S.day, score: solvedCount() });
+  let manualCopyCounted = false, focusBeforeCopy = null;
+  const countCopy = () => { if (!manualCopyCounted) { manualCopyCounted = true; shared(); } };
+
+  function share() {
+    sync();
+    if (!solvedCount()) { toast('Solve a puzzle first, then share it.'); return; }
+    const message = shareText();
+    // A phone gets the system share sheet; a desktop gets the clipboard, which is
+    // what people there paste from. Either call has to run inside this gesture.
+    if (touch() && navigator.share) {
+      try {
+        navigator.share({ text: message }).then(() => { shared(); toast('Shared'); }, (err) => {
+          if (!err || err.name !== 'AbortError') copy(message);
+        });
+        return;
+      } catch { /* some webviews throw instead of rejecting: copy instead */ }
+    }
+    copy(message);
+  }
+
+  function copy(message) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(message).then(() => { shared(); toast('Result copied. Paste it anywhere.'); }, () => openCopyBox(message));
+        return;
+      }
+    } catch { /* fall through to the manual box */ }
+    openCopyBox(message);
+  }
+
+  function openCopyBox(message) {
+    copyText.value = message;
+    if (copyBox.classList.contains('open')) return; // a second press while it is up
+    manualCopyCounted = false;
+    pressedBackdrop = releasedBackdrop = false;
+    focusBeforeCopy = document.activeElement;
+    copyBox.classList.add('open');
+    // aria-modal only promises; inert keeps clicks and focus off the game behind it.
+    canvas.inert = true;
+    controls.inert = true;
+    copyText.focus();
+    copyText.setSelectionRange(0, message.length);
+    try {
+      if (document.execCommand('copy')) {
+        countCopy();
+        closeCopyBox();
+        toast('Result copied. Paste it anywhere.');
+      }
+    } catch { /* the box stays open for a manual copy */ }
+  }
+
+  function closeCopyBox() {
+    copyBox.classList.remove('open');
+    canvas.inert = false;
+    controls.inert = false;
+    // Back to whatever opened it: the Share button in the controls, or the board.
+    const back = focusBeforeCopy instanceof HTMLElement && focusBeforeCopy !== document.body ? focusBeforeCopy : canvas;
+    back.focus({ preventScroll: true });
+  }
+
+  // A copy made by hand from the box is a share too; closing the box is not.
+  copyText.addEventListener('copy', countCopy);
+  copyClose.addEventListener('click', closeCopyBox);
+  // The backdrop closes the dialog only when pressed and released on it: a text
+  // selection dragged out of the box ends with a click on the backdrop too.
+  let pressedBackdrop = false, releasedBackdrop = false;
+  copyBox.addEventListener('mousedown', (event) => { if (event.target === copyBox) event.preventDefault(); });
+  copyBox.addEventListener('pointerdown', (event) => { pressedBackdrop = event.button === 0 && event.target === copyBox; });
+  copyBox.addEventListener('pointerup', (event) => {
+    releasedBackdrop = event.button === 0 && document.elementFromPoint(event.clientX, event.clientY) === copyBox;
+  });
+  copyBox.addEventListener('click', () => {
+    const both = pressedBackdrop && releasedBackdrop;
+    pressedBackdrop = releasedBackdrop = false;
+    if (both) closeCopyBox();
+  });
+  copyBox.addEventListener('keydown', (event) => {
+    // Handled here and stopped: on its way up to the window this Escape would
+    // find the dialog already closed and send the player to the title screen.
+    event.stopPropagation();
+    if (event.key === 'Escape') { event.preventDefault(); closeCopyBox(); return; }
+    // aria-modal promises that focus stays here.
+    if (event.key === 'Tab') {
+      event.preventDefault();
+      (document.activeElement === copyText ? copyClose : copyText).focus();
+    }
+  });
+
+  // ---- update ----
+  function update(dt) {
+    S.clock += dt;
+    if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 24);
+    if (S.flash > 0) S.flash = Math.max(0, S.flash - dt);
+    const a = S.cubeAnim;
+    if (a.t < 1) a.t = Math.min(1, a.t + dt / ROLL_TIME);
+    if (a.bt < 1) a.bt = Math.min(1, a.bt + dt / 0.16);
+    for (const [cell, t] of S.stamps) {
+      if (t + dt >= PRINT_TIME) S.stamps.delete(cell);
+      else S.stamps.set(cell, t + dt);
+    }
+    for (let i = S.parts.length - 1; i >= 0; i--) {
+      const p = S.parts[i];
+      p.t += dt;
+      if (p.t >= p.life) { S.parts.splice(i, 1); continue; }
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vx *= 0.93; p.vy = p.vy * 0.93 + 180 * dt;
+    }
+    for (let i = S.floats.length - 1; i >= 0; i--) {
+      S.floats[i].t += dt;
+      if (S.floats[i].t > 1) S.floats.splice(i, 1);
+    }
+    if (S.toast) {
+      S.toast.t += dt;
+      if (S.toast.t > 3) S.toast = null;
+    }
+    if (S.demo) {
+      S.demo.t -= dt;
+      if (S.demo.t <= 0) { stepDemo(); if (S.demo) S.demo.t = DEMO_STEP; }
+    }
+    // A page left open over midnight must not keep offering yesterday.
+    S.dayCheck -= dt;
+    if (S.dayCheck <= 0) { S.dayCheck = 5; checkDay(); }
+  }
+
+  // ---- drawing ----
+  const view = { scale: 1, ox: 0, oy: 0, dpr: 1 };
+  // Ink specks on the backdrop, fixed per page.
+  const specks = Array.from({ length: 40 }, (_, i) => {
+    const r = seeded(4242, i);
+    return { x: r() * W, y: r() * 780, s: 1 + r() * 2.2, p: r() * 6.28 };
+  });
+
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const cw = canvas.clientWidth || window.innerWidth, ch = canvas.clientHeight || window.innerHeight;
+    // Below 480:780 both shapes are limited by width and scale alike, so the one
+    // with the heading wins; above it the compact shape is always the larger.
+    L = cw / ch > 0.62 ? LAYOUTS.compact : LAYOUTS.tall;
+    view.dpr = dpr;
+    view.scale = Math.min(cw / W, ch / L.H);
+    view.ox = (cw - W * view.scale) / 2;
+    view.oy = (ch - L.H * view.scale) / 2;
+    canvas.width = Math.round(cw * dpr);
+    canvas.height = Math.round(ch * dpr);
+  }
+
+  const roundRect = (x, y, w, h, r) => {
+    const rr = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + rr, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rr);
+    ctx.arcTo(x + w, y + h, x, y + h, rr);
+    ctx.arcTo(x, y + h, x, y, rr);
+    ctx.arcTo(x, y, x + w, y, rr);
+    ctx.closePath();
+  };
+
+  function label(str, x, y, size, color, align = 'center', weight = '600', maxWidth = W) {
+    ctx.font = `${weight} ${size}px ${FONT}`;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = 'middle';
+    ctx.fillText(str, x, y, maxWidth);
+  }
+
+  function drawBackground() {
+    const g = ctx.createLinearGradient(0, 0, 0, L.H);
+    g.addColorStop(0, '#1b1624');
+    g.addColorStop(1, '#0f0c15');
+    ctx.fillStyle = g;
+    ctx.fillRect(-view.ox / view.scale, -view.oy / view.scale, W + (2 * view.ox) / view.scale, L.H + (2 * view.oy) / view.scale);
+    ctx.fillStyle = '#d7263d';
+    for (const s of specks) {
+      if (s.y > L.H) continue;
+      ctx.globalAlpha = 0.1 + 0.08 * (0.5 + 0.5 * wave(0.9, s.p));
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /** A mark waiting for ink: a dashed seal outline. */
+  function drawMark(x, y, size) {
+    const s = size * 0.56;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(215, 38, 61, 0.7)';
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([7, 5]);
+    roundRect(x - s / 2, y - s / 2, s, s, 8);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(215, 38, 61, 0.1)';
+    ctx.fill();
+    ctx.restore();
+  }
+
+  /** A printed mark: a red seal, turned a little, differently on every cell. */
+  function drawSeal(x, y, size, cell, pop = 1) {
+    const s = size * 0.6 * pop;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(((cell * 37) % 11 - 5) * 0.012);
+    ctx.fillStyle = C.ink;
+    roundRect(-s / 2, -s / 2, s, s, 7);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(251, 248, 241, 0.55)';
+    ctx.lineWidth = 2;
+    roundRect(-s / 2 + 6, -s / 2 + 6, s - 12, s - 12, 4);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /**
+   * The cube, seen from above with its four sides leaning out, so all five
+   * places the ink can show are on screen: the top and the four sides. Ink
+   * underneath shows as a red rim around the base, which is where it touches.
+   * `squash` narrows the cube along `dir` while it tips over an edge.
+   */
+  function drawCube(x, y, size, ink, dir = -1, squash = 0) {
+    const h = size * 0.36, b = size * 0.14;
+    ctx.save();
+    ctx.translate(x, y);
+    if (dir >= 0 && squash > 0) {
+      const k = 1 - squash * 0.25;
+      if (dir % 2) ctx.scale(k, 1); else ctx.scale(1, k);
+    }
+    // Shadow on the paper, lifted a little mid-roll.
+    ctx.fillStyle = 'rgba(40, 24, 16, 0.28)';
+    roundRect(-h + 2, -h + 4 + squash * 3, h * 2, h * 2, 9);
+    ctx.fill();
+    if (ink === BOTTOM) {
+      ctx.strokeStyle = C.ink;
+      ctx.lineWidth = 5;
+      roundRect(-h - 3, -h - 3, h * 2 + 6, h * 2 + 6, 11);
+      ctx.stroke();
+    }
+    ctx.fillStyle = C.cubeEdge;
+    roundRect(-h, -h, h * 2, h * 2, 8);
+    ctx.fill();
+    // Sides: 0 up, 1 right, 2 down, 3 left, each a trapezoid from the outer edge to the top face.
+    const outer = [[-h, -h], [h, -h], [h, h], [-h, h]], inner = [[-h + b, -h + b], [h - b, -h + b], [h - b, h - b], [-h + b, h - b]];
+    for (let side = 0; side < 4; side++) {
+      const o1 = outer[side], o2 = outer[(side + 1) % 4], i2 = inner[(side + 1) % 4], i1 = inner[side];
+      ctx.beginPath();
+      ctx.moveTo(o1[0], o1[1]);
+      ctx.lineTo(o2[0], o2[1]);
+      ctx.lineTo(i2[0], i2[1]);
+      ctx.lineTo(i1[0], i1[1]);
+      ctx.closePath();
+      ctx.fillStyle = ink === side ? C.ink : side === 2 || side === 1 ? C.cubeSide : '#efe7d8';
+      ctx.fill();
+    }
+    ctx.fillStyle = ink === TOP ? C.ink : C.cube;
+    roundRect(-h + b, -h + b, (h - b) * 2, (h - b) * 2, 5);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(90, 70, 50, 0.35)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    if (ink === TOP) {
+      // The inked top reads as ink, not as a red button: a lighter seal ring inside it.
+      ctx.strokeStyle = 'rgba(251, 248, 241, 0.5)';
+      ctx.lineWidth = 1.8;
+      roundRect(-h + b + 5, -h + b + 5, (h - b) * 2 - 10, (h - b) * 2 - 10, 3);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawBoard() {
+    const p = puzzle(), top0 = L.boardY;
+    ctx.fillStyle = C.frame;
+    roundRect(BOARD_X - 8, top0 - 8, BOARD_W + 16, BOARD_H + 16, 16);
+    ctx.fill();
+    ctx.fillStyle = C.paper;
+    roundRect(BOARD_X, top0, BOARD_W, BOARD_H, 8);
+    ctx.fill();
+    for (let cell = 0; cell < CELLS; cell++) {
+      const x = BOARD_X + (cell % COLS) * CELL, y = top0 + ((cell / COLS) | 0) * CELL;
+      const kind = p.board[cell];
+      if ((cell % COLS + ((cell / COLS) | 0)) % 2) {
+        ctx.fillStyle = C.paperAlt;
+        ctx.fillRect(x, y, CELL, CELL);
+      }
+      if (kind === WALL) {
+        ctx.fillStyle = C.wallEdge;
+        roundRect(x + 5, y + 8, CELL - 10, CELL - 10, 10);
+        ctx.fill();
+        ctx.fillStyle = C.wall;
+        roundRect(x + 5, y + 4, CELL - 10, CELL - 12, 10);
+        ctx.fill();
+        ctx.fillStyle = C.wallTop;
+        roundRect(x + 11, y + 9, CELL - 22, 8, 4);
+        ctx.fill();
+      }
+    }
+    ctx.strokeStyle = C.grid;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 1; i < COLS; i++) { ctx.moveTo(BOARD_X + i * CELL, top0); ctx.lineTo(BOARD_X + i * CELL, top0 + BOARD_H); }
+    for (let i = 1; i < ROWS; i++) { ctx.moveTo(BOARD_X, top0 + i * CELL); ctx.lineTo(BOARD_X + BOARD_W, top0 + i * CELL); }
+    ctx.stroke();
+    for (const cell of marksOf(p.board)) {
+      const t = S.stamps.get(cell);
+      if (t !== undefined && t < 0) { drawMark(cx(cell), cy(cell), CELL); continue; } // the cube has not landed yet
+      if (S.printed.has(cell)) drawSeal(cx(cell), cy(cell), CELL, cell, t === undefined ? 1 : 1 + 0.25 * Math.sin((t / PRINT_TIME) * Math.PI));
+      else drawMark(cx(cell), cy(cell), CELL);
+    }
+  }
+
+  function cubePos(anim) {
+    const k = ease(anim.t);
+    let x = cx(anim.from) + (cx(anim.to) - cx(anim.from)) * k;
+    let y = cy(anim.from) + (cy(anim.to) - cy(anim.from)) * k;
+    if (anim.bump >= 0 && anim.bt < 1) {
+      const push = Math.sin(anim.bt * Math.PI) * 9;
+      x += DX[anim.bump] * push;
+      y += DY[anim.bump] * push;
+    }
+    return { x, y };
+  }
+
+  /** Around the cube: a red dot where a roll prints, a cross where the ink forbids one. */
+  function drawPreviews() {
+    const p = puzzle();
+    previews(p.board, S.cube, S.ink).forEach((r, dir) => {
+      const n = neighbour(S.cube, dir);
+      if (n < 0 || r.blocked === 'wall') return;
+      const x = cx(S.cube) + DX[dir] * CELL * 0.62, y = cy(S.cube) + DY[dir] * CELL * 0.62;
+      if (r.printed >= 0) {
+        const pulse = 1 + 0.12 * wave(6);
+        ctx.fillStyle = C.ink;
+        ctx.beginPath();
+        ctx.arc(x, y, 7 * pulse, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(251, 248, 241, 0.9)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      } else if (r.blocked === 'ink') {
+        ctx.strokeStyle = 'rgba(158, 26, 44, 0.75)';
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(x - 6, y - 6); ctx.lineTo(x + 6, y + 6);
+        ctx.moveTo(x + 6, y - 6); ctx.lineTo(x - 6, y + 6);
+        ctx.stroke();
+        ctx.lineCap = 'butt';
+      }
+    });
+  }
+
+  function drawCubeOnBoard() {
+    const a = S.cubeAnim;
+    const at = cubePos(a);
+    const moving = a.from !== a.to && a.t < 1;
+    const ink = moving && a.t < 0.5 ? a.inkFrom : a.inkTo;
+    drawCube(at.x, at.y, CELL, ink, moving ? a.dir : -1, moving ? Math.sin(a.t * Math.PI) : 0);
+    if (S.mode !== 'play' || S.demo || moving || locked() || S.help) return;
+    drawPreviews();
+  }
+
+  function drawParts() {
+    for (const p of S.parts) {
+      ctx.globalAlpha = 1 - p.t / p.life;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 2.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    for (const f of S.floats) {
+      ctx.globalAlpha = 1 - f.t;
+      label(f.text, f.x, f.y - (calm() ? 0 : f.t * 30), 17, f.color, 'center', '800');
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // ---- buttons (logical rectangles; the same list draws and hit-tests) ----
+  function row(items, y, h, x0 = 10, x1 = W - 10) {
+    const gap = 8, w = (x1 - x0 - gap * (items.length - 1)) / items.length;
+    return items.map(([id, text, primary], i) => ({ id, label: text, x: x0 + i * (w + gap), y, w, h, primary }));
+  }
+
+  function icons(withHome) {
+    const size = L.icon, right = W - (L.heading ? 10 : 6);
+    const list = [{ id: 'mute', icon: 'sound', x: right - size, y: L.iconY, w: size, h: size }];
+    if (withHome) list.push({ id: 'home', icon: 'home', x: right - 2 * size - 6, y: L.iconY, w: size, h: size });
+    return list;
+  }
+
+  function buttons() {
+    if (S.mode === 'title') {
+      const T = L.title;
+      const list = icons(false).concat(dayArrows(), row(TIERS.map((t, i) => [`card${i}`, t.label]), T.cards, 60).map((b) => ({ ...b, card: true })));
+      if (solvedCount()) list.push({ id: 'share', label: archive() ? `Share Day ${S.day}` : 'Share today’s result', x: 80, y: T.share, w: W - 160, h: L.buttonH, primary: true });
+      return list;
+    }
+    const y = L.boardY + BOARD_H + (L.heading ? 18 : 12), h = L.buttonH;
+    const key = (k) => (touch() ? '' : `  ${k}`);
+    if (locked()) {
+      const allDone = solvedCount() === TIERS.length;
+      return icons(true).concat(row([
+        ['next', allDone ? 'Done' : 'Next', true],
+        ['share', 'Share', true],
+        ['best', S.demo ? 'Playing' : 'Par line'],
+        ['restart', 'Replay'],
+      ], y, h));
+    }
+    return icons(true).concat(row([
+      ['undo', `Undo${key('U')}`],
+      ['restart', `Restart${key('R')}`],
+      ['help', `${S.help ? 'Close' : 'Rules'}${key('H')}`],
+    ], y, h));
+  }
+
+  // Either side of the day line on the title screen, each only where there is a day to go to.
+  const ARROW = 56;
+  function dayArrows() {
+    const y = L.title.day - ARROW / 2, list = [];
+    if (S.day > 1) list.push({ id: 'prevday', icon: 'prev', x: 14, y, w: ARROW, h: ARROW });
+    if (S.day < S.today) list.push({ id: 'nextday', icon: 'next', x: W - 14 - ARROW, y, w: ARROW, h: ARROW });
+    return list;
+  }
+
+  function tabs() {
+    const x1 = L.heading ? W - 10 : W - 6 - 2 * L.icon - 12;
+    return row(TIERS.map((t, i) => [`tier${i}`, t.label]), L.tabsY, L.tabH, L.heading ? 10 : 6, x1).map((b, i) => ({ ...b, tier: i }));
+  }
+
+  const inside = (b, x, y) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
+
+  function drawIcon(b) {
+    const x = b.x + b.w / 2, y = b.y + b.h / 2;
+    ctx.fillStyle = S.hover === b.id ? C.buttonHot : C.button;
+    roundRect(b.x, b.y, b.w, b.h, 12);
+    ctx.fill();
+    ctx.strokeStyle = C.line;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = C.text;
+    ctx.strokeStyle = C.text;
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    if (b.icon === 'home') {
+      ctx.beginPath();
+      ctx.moveTo(x - 11, y - 1); ctx.lineTo(x, y - 11); ctx.lineTo(x + 11, y - 1);
+      ctx.moveTo(x - 7, y - 4); ctx.lineTo(x - 7, y + 10); ctx.lineTo(x + 7, y + 10); ctx.lineTo(x + 7, y - 4);
+      ctx.stroke();
+    } else if (b.icon === 'prev' || b.icon === 'next') {
+      const back = b.icon === 'prev' ? 1 : -1;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(x + 5 * back, y - 11); ctx.lineTo(x - 6 * back, y); ctx.lineTo(x + 5 * back, y + 11);
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(x - 12, y - 4); ctx.lineTo(x - 7, y - 4); ctx.lineTo(x, y - 10);
+      ctx.lineTo(x, y + 10); ctx.lineTo(x - 7, y + 4); ctx.lineTo(x - 12, y + 4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      if (S.muted) {
+        ctx.moveTo(x + 5, y - 5); ctx.lineTo(x + 13, y + 5);
+        ctx.moveTo(x + 13, y - 5); ctx.lineTo(x + 5, y + 5);
+      } else {
+        ctx.arc(x + 3, y, 6, -0.9, 0.9);
+        ctx.moveTo(x + 7.5, y - 9.5);
+        ctx.arc(x + 3, y, 11, -0.9, 0.9);
+      }
+      ctx.stroke();
+    }
+    ctx.lineCap = 'butt';
+  }
+
+  function drawButton(b) {
+    if (b.icon) { drawIcon(b); return; }
+    if (b.card) { drawTierCard(b, Number(b.id.slice(4)), S.hover === b.id); return; }
+    const down = S.press && S.press.id === b.id;
+    const hot = S.hover === b.id;
+    ctx.fillStyle = b.primary ? (down ? C.ink : C.inkHi) : down ? C.buttonDown : hot ? C.buttonHot : C.button;
+    roundRect(b.x, b.y + (down ? 2 : 0), b.w, b.h, 12);
+    ctx.fill();
+    if (!b.primary) {
+      ctx.strokeStyle = C.line;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+    label(b.label, b.x + b.w / 2, b.y + b.h / 2 + (down ? 2 : 0), 17, b.primary ? '#1c0407' : C.text, 'center', '700');
+  }
+
+  /** "★ 5 rolls" at par, "7 rolls, +2" above it: one notation everywhere. */
+  function resultText(moves, par) {
+    const over = moves - par;
+    return over <= 0 ? `★ ${moves} rolls` : `${moves} rolls, +${over}`;
+  }
+
+  function drawTierCard(b, tier, active) {
+    const r = S.runs[tier], p = S.puzzles[tier];
+    ctx.fillStyle = active ? C.buttonHot : '#1e1a29';
+    roundRect(b.x, b.y, b.w, b.h, 12);
+    ctx.fill();
+    ctx.strokeStyle = active ? C.inkHi : r.solved ? 'rgba(255, 107, 107, 0.5)' : C.line;
+    ctx.lineWidth = active ? 2 : 1.5;
+    ctx.stroke();
+    const size = L.tabText;
+    label(`${TIERS[tier].name} · ${TIERS[tier].label}`, b.x + b.w / 2, b.y + b.h * 0.32, size + 1, active || r.solved ? C.text : C.muted, 'center', '700', b.w - 8);
+    label(r.solved ? resultText(r.solvedMoves, p.par) : `par ${p.par}`, b.x + b.w / 2, b.y + b.h * 0.7, size, r.solved ? C.inkHi : C.muted, 'center', '600', b.w - 8);
+  }
+
+  function drawArrow(x, y, dir, color, size = 1) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate((Math.PI / 2) * dir);
+    ctx.scale(size, size);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(0, -12);
+    ctx.lineTo(11, 3);
+    ctx.lineTo(-11, 3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawDemoStrip(x, y) {
+    const { path, i } = S.demo;
+    const step = Math.min(18, 250 / path.length);
+    path.forEach((dir, k) => {
+      const color = k === i - 1 ? C.inkHi : k < i ? C.text : 'rgba(181, 171, 157, 0.55)';
+      drawArrow(x + k * step + step / 2, y, dir, color, step / 26);
+    });
+  }
+
+  function drawHud() {
+    if (L.heading) {
+      label('Ink Side Down', 12, 24, 21, C.text, 'left', '800');
+      label(`Day ${S.day}${archive() ? ' · archive' : ''}`, 12, 48, 16, C.inkHi, 'left', '700');
+    }
+    for (const t of tabs()) drawTierCard(t, t.tier, t.tier === S.tier);
+    const p = puzzle(), r = run();
+    const y = L.infoY;
+    const day = L.heading ? '' : `Day ${S.day} · `;
+    if (S.toast && toastOverInfo()) {
+      // the toast is drawn here instead, for its three seconds
+    } else if (S.newDay && !L.heading) {
+      label(touch() ? 'New puzzles are out: tap home' : 'New puzzles are out: press Esc', BOARD_X, y, 17, C.inkHi, 'left', '800');
+    } else if (S.demo) {
+      label('Par line', BOARD_X, y, 18, C.text, 'left', '800');
+      drawDemoStrip(BOARD_X + 84, y);
+      label(`par ${p.par}`, BOARD_X + BOARD_W, y, 18, C.muted, 'right', '800');
+    } else if (locked()) {
+      const over = r.solvedMoves - p.par;
+      label(`${day}Solved in ${r.solvedMoves}`, BOARD_X, y, 19, C.text, 'left', '800');
+      label(over <= 0 ? '★ par' : `par ${p.par}, +${over}`, BOARD_X + BOARD_W, y, 19, C.inkHi, 'right', '800');
+    } else {
+      const moves = S.practice ? S.practiceMoves : r.moves;
+      const over = moves - p.par;
+      const printed = `${S.printed.size}/${markCount(p)} printed`;
+      // Before the first roll, the line says what the red side is: the cube is the same shape as a plain block.
+      const first = !history().length && !S.practice;
+      const left = S.practice ? `Practice · ${moves} · ${printed}` : first ? `${day}Red side = ink` : `${day}Rolls ${moves} · ${printed}`;
+      label(left, BOARD_X, y, 18, first ? C.inkHi : C.text, 'left', '800', BOARD_W * 0.6);
+      const color = moves <= p.par ? C.good : over <= 2 ? C.warn : C.bad;
+      label(`par ${p.par} (fewest)`, BOARD_X + BOARD_W, y, 16, color, 'right', '700');
+    }
+  }
+
+  const RULES = [
+    ['Roll the cube one square at a time.', C.text],
+    ['One of its sides is inked red.', C.inkHi],
+    ['When the inked side lands face down,', C.inkHi],
+    ['it prints the square under it.', C.inkHi],
+    ['Ink may only touch the dashed marks:', C.text],
+    ['a roll that would ink a bare square', C.muted],
+    ['does not happen, and does not count.', C.muted],
+    ['A red dot beside the cube: that roll prints.', C.muted],
+    ['A cross: the ink forbids that roll.', C.muted],
+    ['Print every mark to solve the puzzle.', C.text],
+    ['Every roll counts: undo and restart', C.text],
+    ['do not give rolls back.', C.text],
+  ];
+  const rulesText = () => RULES.map(([line]) => line).join(' ');
+
+  function toggleHelp() {
+    S.help = !S.help;
+    sfx.click();
+    if (S.help) announce(rulesText());
+  }
+
+  function drawHelp() {
+    ctx.fillStyle = 'rgba(20, 17, 28, 0.95)';
+    roundRect(BOARD_X - 8, L.boardY - 8, BOARD_W + 16, BOARD_H + 16, 16);
+    ctx.fill();
+    RULES.forEach(([str, color], i) => label(str, W / 2, L.boardY + 40 + i * 34, 17, color, 'center', '600', BOARD_W - 12));
+  }
+
+  function drawFooter(y) {
+    if (S.toast || !y) return;
+    if (S.newDay) { label(touch() ? 'New puzzles are out: tap the home button' : 'New puzzles are out: press Esc', W / 2, y, 15, C.inkHi, 'center', '700'); return; }
+    if (touch()) { label('Swipe, or tap toward a square', W / 2, y, 15, C.muted, 'center', '500'); return; }
+    const hint = S.mode === 'title'
+      ? S.today > 1 ? 'Arrows or WASD · U undo · R restart · < > other days' : 'Arrow keys or WASD · U undo · R restart · L reads the board'
+      : 'Arrows or WASD · 1 2 3 switch · Esc home · M sound';
+    label(hint, W / 2, y, 15, C.muted, 'center', '500');
+  }
+
+  function drawPlay() {
+    drawHud();
+    ctx.save();
+    if (S.shake > 0) ctx.translate((Math.random() - 0.5) * S.shake, (Math.random() - 0.5) * S.shake);
+    drawBoard();
+    drawCubeOnBoard();
+    drawParts();
+    ctx.restore();
+    if (S.help) drawHelp();
+    for (const b of buttons()) drawButton(b);
+    drawFooter(L.footerY);
+  }
+
+  function untilMidnight() {
+    const now = new Date();
+    const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const mins = Math.max(0, Math.ceil((next - now) / 60000));
+    return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m`;
+  }
+
+  // One strip of paper: the cube rolls right with ink on top, the ink turns to
+  // face right, then lands face down on the mark and prints it. The rule, shown
+  // before it is read.
+  const LANE_INK = [TOP, 1, BOTTOM, 3, TOP];
+  function drawLane(y0) {
+    const size = 58, steps = 4, x0 = (W - size * (steps + 1)) / 2, beat = 0.62;
+    const cycle = (steps + 3) * beat;
+    const t = S.clock % cycle;
+    // Reduced motion gets one still frame that shows the print itself.
+    const at = calm() ? 2 : Math.min(steps, t / beat);
+    const whole = Math.floor(at), part = at - whole;
+    ctx.fillStyle = C.frame;
+    roundRect(x0 - 6, y0 - 6, size * (steps + 1) + 12, size + 12, 12);
+    ctx.fill();
+    for (let i = 0; i <= steps; i++) {
+      ctx.fillStyle = i % 2 ? C.paperAlt : C.paper;
+      ctx.fillRect(x0 + i * size, y0, size, size);
+    }
+    const markX = x0 + 2 * size + size / 2, midY = y0 + size / 2;
+    if (at >= 2) drawSeal(markX, midY, size, 7);
+    else drawMark(markX, midY, size);
+    const rolling = whole < steps && part > 0;
+    const k = rolling ? ease(Math.min(1, part * 1.8)) : 0;
+    const ink = LANE_INK[rolling && k >= 0.5 ? whole + 1 : whole];
+    drawCube(x0 + size / 2 + (whole + k) * size, midY, size, ink, rolling && k < 1 ? 1 : -1, rolling && k < 1 ? Math.sin(k * Math.PI) : 0);
+    label(at >= 2 ? 'face down on the mark: printed' : 'the red side is inked', W / 2, y0 + size + 26, 16, at >= 2 ? C.inkHi : C.muted, 'center', '700');
+  }
+
+  function drawTitle() {
+    const T = L.title;
+    label('INK SIDE DOWN', W / 2, T.name, T.nameSize, C.text, 'center', '900');
+    const past = archive();
+    label(titleDay(S.day, past ? dayDate(S.day) : '', past, PICTURE), W / 2, T.day, 17, C.inkHi, 'center', '700', W - 2 * (14 + ARROW + 6));
+    drawLane(T.lanes);
+
+    const lines = [
+      ['Roll the cube. One side is inked.', C.text],
+      ['When it lands face down, it prints.', C.text],
+      ['Ink may only touch the marks.', C.inkHi],
+      ['Print them all: match par for a star.', C.muted],
+    ];
+    lines.forEach(([str, color], i) => label(str, W / 2, T.lines + i * T.lineGap, 18, color, 'center', '600'));
+
+    const allDone = solvedCount() === TIERS.length;
+    ctx.globalAlpha = allDone ? 1 : 0.8 + 0.2 * wave(3);
+    const go = touch() ? 'Tap' : 'Tap or press Space';
+    const done = past ? `Day ${S.day} is done` : `Next puzzles in ${untilMidnight()}`;
+    label(allDone ? done : `${go} to ${solvedCount() ? 'continue' : 'play'}`, W / 2, T.cta, 21, allDone ? C.text : C.inkHi, 'center', '800');
+    ctx.globalAlpha = 1;
+    // Finished for today is the moment an earlier day is worth offering.
+    const again = allDone ? (!past && S.day > 1 ? '‹ plays earlier days' : 'Tap a puzzle to see it again') : '';
+    const sub = past
+      ? again || 'Earlier days do not count toward the streak'
+      : [again, S.bestStreak ? `Streak ${liveStreak()} · best ${S.bestStreak}` : ''].filter(Boolean).join('  ·  ');
+    if (sub) label(sub, W / 2, T.sub, 15, C.muted, 'center', '600');
+    for (const b of buttons()) drawButton(b);
+    drawFooter(T.footer);
+  }
+
+  // In the compact shape the toast takes the place of the info line for its
+  // three seconds, par-line strip included.
+  const toastOverInfo = () => !L.heading && S.mode === 'play';
+
+  function drawToast() {
+    if (!S.toast) return;
+    const a = Math.min(1, S.toast.t * 6, (3 - S.toast.t) * 3);
+    ctx.globalAlpha = Math.max(0, a);
+    ctx.font = `700 15px ${FONT}`;
+    const w = Math.min(W - 16, ctx.measureText(S.toast.text).width + 32);
+    const y = S.mode === 'title' ? L.title.footer - 18 : L.toastY;
+    const h = toastOverInfo() ? 28 : 36; // compact: clear of the board frame
+    ctx.fillStyle = '#3a2f46';
+    roundRect((W - w) / 2, y, w, h, h / 2);
+    ctx.fill();
+    label(S.toast.text, W / 2, y + h / 2, 15, C.text, 'center', '700');
+    ctx.globalAlpha = 1;
+  }
+
+  function render() {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = C.bg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const k = view.scale * view.dpr;
+    ctx.setTransform(k, 0, 0, k, view.ox * view.dpr, view.oy * view.dpr);
+    drawBackground();
+    if (S.mode === 'title') drawTitle();
+    else drawPlay();
+    drawToast();
+    if (S.flash > 0) {
+      ctx.fillStyle = `rgba(255, 220, 210, ${S.flash * 0.22})`;
+      ctx.fillRect(0, 0, W, L.H);
+    }
+  }
+
+  // ---- input ----
+  const toLogical = (event) => {
+    const rect = canvas.getBoundingClientRect();
+    return { x: (event.clientX - rect.left - view.ox) / view.scale, y: (event.clientY - rect.top - view.oy) / view.scale };
+  };
+
+  const hitButton = (x, y) => [...buttons(), ...(S.mode === 'play' ? tabs() : [])].find((b) => inside(b, x, y));
+
+  function press(id) {
+    if (id === 'share') share();
+    else if (id === 'mute') toggleMute();
+    else if (id === 'home') goTitle();
+    else if (id === 'next') nextPuzzle();
+    else if (id === 'best') showBestLine();
+    else if (id === 'undo') undo();
+    else if (id === 'restart') restart();
+    else if (id === 'help') toggleHelp();
+    else if (id === 'prevday') stepDay(-1);
+    else if (id === 'nextday') stepDay(1);
+    else if (id.startsWith('tier')) setTier(Number(id.slice(4)));
+    else if (id.startsWith('card')) {
+      const tier = Number(id.slice(4));
+      if (S.mode === 'title') startPlay(tier); else setTier(tier);
+    }
+  }
+
+  canvas.addEventListener('pointerdown', (event) => {
+    // Only the first finger, and only the main mouse button: a second finger or
+    // a right click must never become a counted roll.
+    if (!event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
+    canvas.focus({ preventScroll: true, focusVisible: false });
+    ensureAudio();
+    const at = toLogical(event);
+    const b = hitButton(at.x, at.y);
+    S.press = { id: b ? b.id : null, x: at.x, y: at.y, pointer: event.pointerId };
+    try { canvas.setPointerCapture(event.pointerId); } catch { /* not supported */ }
+  });
+
+  canvas.addEventListener('pointermove', (event) => {
+    if (event.pointerType !== 'mouse') return;
+    const at = toLogical(event);
+    const b = hitButton(at.x, at.y);
+    S.hover = b ? b.id : null;
+  });
+
+  canvas.addEventListener('pointerup', (event) => {
+    const start = S.press;
+    if (!start || start.pointer !== event.pointerId) return;
+    S.press = null;
+    ensureAudio();
+    const at = toLogical(event);
+    if (start.id) {
+      const b = hitButton(at.x, at.y);
+      if (b && b.id === start.id) press(b.id);
+      return;
+    }
+    if (S.mode === 'title') { startPlay(); return; }
+    if (S.help) { S.help = false; return; }
+    const dx = at.x - start.x, dy = at.y - start.y;
+    if (Math.hypot(dx, dy) > 26) {
+      move(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 1 : 3) : dy > 0 ? 2 : 0);
+      return;
+    }
+    // A tap on the board rolls toward the tapped square, along its longer axis.
+    if (at.x < BOARD_X || at.x > BOARD_X + BOARD_W || at.y < L.boardY || at.y > L.boardY + BOARD_H) return;
+    const col = Math.floor((at.x - BOARD_X) / CELL), rowAt = Math.floor((at.y - L.boardY) / CELL);
+    const ddx = col - (S.cube % COLS), ddy = rowAt - ((S.cube / COLS) | 0);
+    if (!ddx && !ddy) return;
+    move(Math.abs(ddx) >= Math.abs(ddy) ? (ddx > 0 ? 1 : 3) : ddy > 0 ? 2 : 0);
+  });
+
+  canvas.addEventListener('pointercancel', (event) => {
+    if (S.press && S.press.pointer === event.pointerId) S.press = null;
+  });
+
+  window.addEventListener('keydown', (event) => {
+    // While the copy dialog is open the board is not there to play, wherever focus went.
+    if (copyBox.classList.contains('open')) {
+      if (event.key === 'Escape') closeCopyBox();
+      return;
+    }
+    // Keys typed in the dialog or on the accessible buttons are theirs.
+    if (event.target instanceof Element && event.target.closest('#copybox, #controls')) return;
+    // Ctrl+R, Cmd+W, Ctrl+S belong to the browser.
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    const code = event.code;
+    const { dir, digit, letter } = readKey(code, event.key);
+    const space = code === 'Space' || event.key === ' ';
+    if (dir >= 0 || space || letter === 'Backspace') event.preventDefault();
+    // Every roll is counted, so a held key must not turn into thirty of them.
+    if (event.repeat) return;
+    ensureAudio();
+    if (dir >= 0) {
+      if (S.mode === 'title') startPlay(); else move(dir);
+      return;
+    }
+    const step = dayStep(letter);
+    if (step) { stepDay(step); return; }
+    if (letter === 'm') { toggleMute(); return; }
+    if (letter === 'l') { announce(S.mode === 'play' ? describeBoard() : `Day ${S.day}. Start a puzzle to hear its board.`); return; }
+    if (letter === 'h' || letter === '?') { if (S.mode === 'title') announce(rulesText()); else toggleHelp(); return; }
+    if (S.mode === 'title') {
+      if (space || letter === 'Enter') startPlay();
+      else if (letter === 'c') share();
+      else if (digit >= 0) startPlay(digit);
+      return;
+    }
+    if (letter === 'u' || letter === 'z' || letter === 'Backspace') { undo(); return; }
+    if (letter === 'r') { restart(); return; }
+    if (letter === 'n' || letter === 'Enter' || space) { if (locked()) nextPuzzle(); return; }
+    if (letter === 'b') { showBestLine(); return; }
+    if (letter === 'c') { share(); return; }
+    if (digit >= 0) { setTier(digit); return; }
+    if (letter === 'Escape') { if (S.help) S.help = false; else goTitle(); }
+  });
+
+  controls.addEventListener('click', (event) => {
+    const button = event.target instanceof Element ? event.target.closest('button[data-act]') : null;
+    if (!button || copyBox.classList.contains('open')) return;
+    ensureAudio();
+    const act = button.dataset.act;
+    if (act.startsWith('dir')) {
+      if (S.mode === 'title') startPlay();
+      else move(Number(act.slice(3)));
+    } else if (act === 'board') {
+      announce(S.mode === 'play' ? describeBoard() : `Day ${S.day}. Start a puzzle to hear its board.`);
+    } else if (act === 'next' && S.mode === 'title') {
+      startPlay();
+    } else if (act === 'help' && S.mode === 'title') {
+      announce(rulesText());
+    } else {
+      press(act);
+    }
+  });
+
+  // Another tab of this game saved something: take it in, so neither tab
+  // overwrites the other's solved puzzles or positions on its next roll.
+  window.addEventListener('storage', (event) => {
+    if (event.key === STORE && S.runs.length) absorb(readStore());
+  });
+
+  // ---- loop ----
+  let lastTime = 0, running = true;
+  function frame(now) {
+    const dt = Math.min(0.05, (now - lastTime) / 1000 || 0);
+    lastTime = now;
+    if (running) {
+      update(dt);
+      render();
+    }
+    requestAnimationFrame(frame);
+  }
+
+  // A turn-based game has no clock to stop, but a hidden tab should not keep
+  // drawing, and sound must not start again on its own.
+  document.addEventListener('visibilitychange', () => {
+    running = !document.hidden;
+    if (audio) {
+      if (document.hidden) audio.suspend().catch(() => {});
+      else if (!S.muted) audio.resume().catch(() => {});
+    }
+    if (!document.hidden && S.runs.length) { absorb(readStore()); checkDay(); }
+  });
+
+  window.addEventListener('resize', resize);
+  resize();
+  loadDay(dayNumber(new Date()));
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
