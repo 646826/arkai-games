@@ -587,9 +587,12 @@
     onwardLink.setAttribute('href', ONWARD.path);
     onwardLink.textContent = `Play ${ONWARD.title}, another daily puzzle`;
     onwardLink.hidden = false;
-    // Activated by a person: counted first, then followed by goOnward.
+    // Activated by a person: counted first, then followed by goOnward. Ctrl, Cmd,
+    // Shift or Alt asks for another tab or window, so this page stays, the count
+    // gets through on its own, and the browser does what was asked.
     onwardLink.addEventListener('click', (event) => {
       if (!event.isTrusted) return;
+      if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) { countOnward(); return; }
       event.preventDefault();
       goOnward();
     });
@@ -1071,18 +1074,24 @@
   }
 
   // ---- onward ----
+  // One count per decision. A second press while a slow phone is still opening
+  // the next page is the same decision: it leaves again, but is not counted
+  // again, or the one number this button exists to produce would be inflated.
+  let countedAt = -Infinity;
+  function countOnward() {
+    const now = performance.now();
+    if (now - countedAt < 10000) return;
+    countedAt = now;
+    emit('next_game', { day: S.day });
+  }
+
   // The portal's sensor hears of this by message, and a message runs as a task
   // on the parent page: navigating on the same tick can unload that page first,
-  // losing the one count this button exists to produce. A tenth of a second is
-  // less than a tap takes to feel slow. A second press inside that wait is the
-  // same decision, not another one.
-  let leftAt = -Infinity;
+  // losing the count. A tenth of a second is less than a tap takes to feel slow.
   function goOnward() {
-    const now = performance.now();
-    if (!ONWARD || now - leftAt < 1000) return;
-    leftAt = now;
+    if (!ONWARD) return;
     sfx.click();
-    emit('next_game', { day: S.day });
+    countOnward();
     setTimeout(() => onwardLink.click(), 100);
   }
 
