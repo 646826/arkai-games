@@ -116,6 +116,7 @@
     score: 0, best: Number(storage.get(STORE_BEST)) || 0, newBest: false,
     prev: null,                 // one step of undo: { grid, score, reached, moves, newBest }
     reached: false,             // 2048 already celebrated this run
+    winSent: false,             // the portal was told this run is won; undo leaves it alone
     moves: 0,
     slides: [], pops: [], spawn: null, animT: 1e9, queued: null,
     bump: null,
@@ -310,8 +311,12 @@
       S.flash = 0.5;
       S.shake = 12;
       winChord();
-      // No event here: reaching 2048 does not end the run. The portal hears about
-      // the win once, from gameOver(), so one run is never both a win and an end.
+      // The run is won the moment 2048 exists, and this is where the portal hears
+      // it: most winners close the tab or press R from here, and neither reaches
+      // gameOver(). Once per run — undo can take 2048 back and the player can make
+      // it again, which is still one won run — and gameOver() then stays silent,
+      // so a run is never both a win and an end.
+      if (!S.winSent) { S.winSent = true; emit('gameover', { won: true, score: S.score, moves: S.moves }); }
       // The board is *not* checked here on purpose: the celebration comes first
       // even when that same move filled the last square. keepGoing() asks the
       // question the moment the player dismisses it, so a win that is also the
@@ -322,8 +327,9 @@
   }
 
   // Leaving the win screen is the only place where a run can already be over
-  // without anyone having looked. Every path out of 'won' goes through here;
-  // without it the winning-and-final move left the game in 'playing' on a dead
+  // without anyone having looked. Every path that *continues* the run from 'won'
+  // goes through here (R and NEW start a new run instead, which is why the win is
+  // reported when 2048 appears, not here); without it the winning-and-final move left the game in 'playing' on a dead
   // board, bumping forever, and the portal never heard the run finish.
   function keepGoing() {
     S.mode = 'playing';
@@ -344,7 +350,7 @@
   function reset() {
     S.grid = new Array(N * N).fill(0);
     S.score = 0; S.newBest = false; S.moves = 0;
-    S.prev = null; S.reached = false;
+    S.prev = null; S.reached = false; S.winSent = false;
     S.slides = []; S.pops = []; S.spawn = null; S.animT = 1e9; S.queued = null;
     S.bump = null; S.shake = 0; S.flash = 0; S.overT = 0; S.confirmT = 0;
     S.parts = []; S.floats = [];
@@ -370,7 +376,7 @@
     tone(330, 0.16, 'sawtooth', 0.045);
     tone(220, 0.22, 'sawtooth', 0.045, 0.12);
     tone(147, 0.34, 'sawtooth', 0.045, 0.26);
-    emit('gameover', { won: S.reached, score: S.score, best: S.best, moves: S.moves, peak: peakTile() });
+    if (!S.winSent) emit('gameover', { won: false, score: S.score, best: S.best, moves: S.moves, peak: peakTile() });
   }
 
   const canUndo = () => !!S.prev && (S.mode === 'playing' || S.mode === 'won');
