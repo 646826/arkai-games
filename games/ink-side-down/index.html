@@ -382,7 +382,12 @@
    * tab or another, is not counted again.
    */
   function streakAfter(streak, lastFull, day, today) {
-    if (day !== today || lastFull >= day) return null;
+    if (day !== today) return null;
+    // A day later than today was saved by a clock that ran ahead: that set was
+    // played today and already counted, so bring the record back to the
+    // calendar without counting it twice.
+    if (lastFull > today) return { streak, lastFull: day };
+    if (lastFull >= day) return null;
     return { streak: lastFull === day - 1 ? streak + 1 : 1, lastFull: day };
   }
 
@@ -786,6 +791,7 @@
     S.floats = [];
     S.parts = [];
     S.flash = 0;
+    S.shake = 0;
     const state = replay(puzzle(), run().inputs);
     run().inputs = state.inputs;
     if (run().solved) placeSolved();
@@ -1098,7 +1104,8 @@
   // ---- sharing ----
   function shareText() {
     const marks = S.runs.map((r, t) => shareMark(r.solved ? r.solvedMoves : 0, S.puzzles[t].par));
-    return `Ink Side Down #${S.day}\n${marks.join('  ')}\n${SHARE_URL}`;
+    // An archive day says so: "#3" posted on day 10 otherwise reads as played on the day.
+    return `Ink Side Down #${S.day}${archive() ? ' (archive)' : ''}\n${marks.join('  ')}\n${SHARE_URL}`;
   }
 
   // `share` is reported only once the text really left: a cancelled sheet or a
@@ -1744,8 +1751,11 @@
     const size = 58, steps = 4, x0 = (W - size * (steps + 1)) / 2, beat = 0.62;
     const cycle = (steps + 3) * beat;
     const t = S.clock % cycle;
+    // The cube holds one beat on the mark, or the print is over before it is read.
+    const beats = t / beat;
+    const held = beats < 2 ? beats : beats < 3 ? 2 : beats - 1;
     // Reduced motion gets one still frame that shows the print itself.
-    const at = calm() ? 2 : Math.min(steps, t / beat);
+    const at = calm() ? 2 : Math.min(steps, held);
     const whole = Math.floor(at), part = at - whole;
     ctx.fillStyle = C.frame;
     roundRect(x0 - 6, y0 - 6, size * (steps + 1) + 12, size + 12, 12);
@@ -1764,7 +1774,10 @@
     else drawMark(markX, midY, size);
     const ink = LANE_INK[rolling && k >= 0.5 ? whole + 1 : whole];
     drawCube(x0 + size / 2 + pos * size, midY, size, ink, rolling && k < 1 ? 1 : -1, rolling && k < 1 ? Math.sin(k * Math.PI) : 0, pos === 2 ? 'printed' : '');
-    label(pos >= 2 ? 'face down on the mark: printed' : 'the red side is inked', W / 2, y0 + size + 26, 16, pos >= 2 ? C.inkHi : C.muted, 'center', '700');
+    // The caption says what the cube is doing now: once it has rolled on, "face
+    // down on the mark" describes a cube that is no longer there.
+    const caption = pos < 2 ? 'the red side is inked' : pos < 3 ? 'face down on the mark: printed' : 'rolled on: the print stays';
+    label(caption, W / 2, y0 + size + 26, 16, pos >= 2 && pos < 3 ? C.inkHi : C.muted, 'center', '700');
   }
 
   function drawTitle() {

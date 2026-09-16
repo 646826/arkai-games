@@ -337,24 +337,52 @@
   // once. Marking a digit that merely disagrees with the stored solution would be
   // the game playing for you: a legal-looking guess is still a guess, and finding
   // out it was wrong is the puzzle.
-  function recompute() {
-    S.bad.fill(0);
+  // ---- rules core begin ----
+  // Pure: no DOM, no storage, no state of the game. scripts/tests/sudoku-sixes.test.mjs
+  // runs this block on its own.
+  // Only the player's digits can be wrong. A clue that a guess clashes with is
+  // still right, and painting it red too told the player to doubt the one digit
+  // on the board they never have to.
+  function conflictsOf(given, entry) {
+    const at = (i) => given[i] || entry[i];
+    const bad = new Uint8Array(36);
     for (let i = 0; i < 36; i++) {
-      const d = valueAt(i);
-      if (!d) continue;
+      const d = entry[i];
+      if (!d || given[i]) continue;
       const r = (i / 6) | 0, c = i % 6;
       for (let k = 0; k < 6; k++) {
-        if (k !== c && valueAt(r * 6 + k) === d) S.bad[i] = 1;
-        if (k !== r && valueAt(k * 6 + c) === d) S.bad[i] = 1;
+        if (k !== c && at(r * 6 + k) === d) bad[i] = 1;
+        if (k !== r && at(k * 6 + c) === d) bad[i] = 1;
       }
       const br = ((r / 2) | 0) * 2, bc = ((c / 3) | 0) * 3;
       for (let rr = br; rr < br + 2; rr++) {
         for (let cc = bc; cc < bc + 3; cc++) {
           const j = rr * 6 + cc;
-          if (j !== i && valueAt(j) === d) S.bad[i] = 1;
+          if (j !== i && at(j) === d) bad[i] = 1;
         }
       }
     }
+    return bad;
+  }
+
+  // How many of each digit are still to place, indexed 1..6. A digit sitting in a
+  // cell that clashes with a peer has not been placed, it has been guessed:
+  // counting it would tell the player a digit is finished while one of its six is
+  // still red.
+  function digitsLeft(given, entry, bad) {
+    const left = [6, 6, 6, 6, 6, 6, 6];
+    for (let i = 0; i < 36; i++) {
+      const d = given[i] || entry[i];
+      if (d && !bad[i]) left[d]--;
+    }
+    return left;
+  }
+
+  const core = { conflictsOf, digitsLeft };
+  // ---- rules core end ----
+
+  function recompute() {
+    S.bad = conflictsOf(S.given, S.entry);
   }
 
   const unitComplete = (i) => {
@@ -736,15 +764,11 @@
   function drawPad() {
     // How many of each digit are still missing. It costs the player nothing they
     // could not count by eye, and it saves them counting sixes by eye.
-    const used = new Array(7).fill(0);
-    // A digit sitting in a cell that clashes with a peer has not been placed, it
-    // has been guessed: counting it would tell the player a digit is finished
-    // while one of its six is still red.
-    for (let i = 0; i < 36; i++) if (!S.bad[i]) used[valueAt(i)]++;
+    const left = digitsLeft(S.given, S.entry, S.bad);
     const selVal = valueAt(S.sel);
     for (let d = 1; d <= 6; d++) {
       const x = PAD_X + (d - 1) * (PAD_W + PAD_GAP);
-      const spent = used[d] >= 6;
+      const spent = left[d] <= 0;
       const active = selVal === d;
       ctx.fillStyle = spent ? 'rgba(148, 190, 198, 0.09)' : active ? 'rgba(34, 211, 238, 0.22)' : 'rgba(34, 211, 238, 0.10)';
       roundRect(x, PAD_Y, PAD_W, PAD_H, 12);
@@ -759,7 +783,7 @@
       ctx.fillText(String(d), x + PAD_W / 2, PAD_Y + PAD_H / 2 - 5);
       ctx.font = `600 13px ${FONT}`;
       ctx.fillStyle = spent ? 'rgba(148, 190, 198, 0.55)' : 'rgba(148, 190, 198, 0.7)';
-      ctx.fillText(spent ? 'done' : `${6 - used[d]} left`, x + PAD_W / 2, PAD_Y + PAD_H - 14);
+      ctx.fillText(spent ? 'done' : `${left[d]} left`, x + PAD_W / 2, PAD_Y + PAD_H - 14);
       hitBox(`d:${d}`, x, PAD_Y - 6, PAD_W, PAD_H + 12);
     }
   }

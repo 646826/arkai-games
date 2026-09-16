@@ -362,7 +362,12 @@
    * tab or another, is not counted again.
    */
   function streakAfter(streak, lastFull, day, today) {
-    if (day !== today || lastFull >= day) return null;
+    if (day !== today) return null;
+    // A day later than today was saved by a clock that ran ahead: that set was
+    // played today and already counted, so bring the record back to the
+    // calendar without counting it twice.
+    if (lastFull > today) return { streak, lastFull: day };
+    if (lastFull >= day) return null;
     return { streak: lastFull === day - 1 ? streak + 1 : 1, lastFull: day };
   }
 
@@ -1081,7 +1086,8 @@
   // ---- sharing ----
   function shareText() {
     const marks = S.runs.map((r, t) => shareMark(r.solved ? r.solvedMoves : 0, S.puzzles[t].par));
-    return `One Step Late #${S.day}\n${marks.join('  ')}\n${SHARE_URL}`;
+    // An archive day says so: "#3" posted on day 10 otherwise reads as played on the day.
+    return `One Step Late #${S.day}${archive() ? ' (archive)' : ''}\n${marks.join('  ')}\n${SHARE_URL}`;
   }
 
   // `share` is reported only once the text really left: a cancelled sheet or a
