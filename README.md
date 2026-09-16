@@ -4,7 +4,7 @@ Every game from [arkai.win](https://arkai.win) — each one a **single self-cont
 file** you can open from your desktop with no build step, no server, no package
 manager and no network connection.
 
-There are 7 of them. Together they are 263 KB.
+There are 8 of them. Together they are 344 KB.
 
 | Game | Kind | Controls | Size | Play |
 | --- | --- | --- | ---: | --- |
@@ -12,6 +12,7 @@ There are 7 of them. Together they are 263 KB.
 | **Merge 2048** | Puzzle, Numbers | Keyboard, touch & swipe | 36 KB | [play](https://arkai.win/games/merge-2048/) |
 | **Mini Sudoku** | Logic, Daily | Keyboard, touch & mouse | 50 KB | [play](https://arkai.win/games/sudoku-mini/) |
 | **Mole Rush** | Arcade, Family | Keyboard, touch & mouse | 52 KB | [play](https://arkai.win/games/mole-rush/) |
+| **One Step Late** | Puzzle, Daily | Keyboard, touch & mouse | 81 KB | [play](https://arkai.win/games/one-step-late/) |
 | **Breakout** | Arcade, Classic | Mouse, touch & keyboard | 33 KB | [play](https://arkai.win/games/breakout/) |
 | **Minesweeper** | Logic, Puzzle | Mouse, touch & keyboard | 27 KB | [play](https://arkai.win/games/minesweeper/) |
 | **Snake** | Arcade, Classic | Keyboard, touch & swipe | 22 KB | [play](https://arkai.win/games/snake/) |
@@ -75,7 +76,7 @@ Two details that are easy to get wrong, so they are stated rather than implied:
   framing page is served from the same origin as the game file. Host the file
   yourself and it works; frame it from another domain and you get silence, by
   design.
-- **The event vocabulary is not uniform yet.** 6 of the 7 games emit
+- **The event vocabulary is not uniform yet.** 7 of the 8 games emit
   `start` and `gameover` (Merge 2048 adds `win`). Breakout uses a different set: `game_end`, `game_ready`, `game_start`, `level_end`, `level_start`.
   The portal normalises this on its side. Listen for both spellings until it is
   fixed at the source.

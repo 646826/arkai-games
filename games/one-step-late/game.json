@@ -1,0 +1,20 @@
+{
+  "slug": "one-step-late",
+  "title": "One Step Late",
+  "tagline": "Your shadow copies you, one turn behind",
+  "description": "A daily logic puzzle: three new boards every day, the same for everyone. You step where you choose, and your shadow repeats the move you made the turn before. You can see the holes and never walk into them; your shadow cannot, and follows you straight in. Bring yourself to the sun and your shadow to the moon at the same moment, in as few moves as the par, then share your result without spoiling the board. Missed a day? Every earlier day stays playable.",
+  "categories": ["Puzzle", "Daily"],
+  "controls": "Keyboard, touch & mouse",
+  "instructions": [
+    "Tap or press Space to open today's three puzzles: Easy, Medium and Hard.",
+    "Move with the arrow keys or WASD, or swipe or tap toward a cell; each move steps you one cell.",
+    "Your shadow then repeats the move you made on the previous turn. The arrow on it shows that next step, and turns red when the step is into a hole.",
+    "Walls, the board's edge and each other block you both. If your shadow falls, the move that aimed it at the hole is taken back, and both moves still count.",
+    "Finish with you on the sun and your shadow on the moon at the same time. Undo and restart do not give moves back, so match the par for a star.",
+    "Press Share (or C) to copy a spoiler-free result, and come back after midnight for the next three.",
+    "Missed a day? The arrows beside the day on the title screen (or the comma and period keys) open every earlier day. Those do not count toward your streak."
+  ],
+  "palette": ["#0d0b1f", "#ffd166"],
+  "added": "2026-09-16",
+  "updated": "2026-09-16"
+}
