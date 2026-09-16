@@ -1,6 +1,6 @@
 {
-  "slug": "breakout",
-  "title": "Breakout",
+  "slug": "brick-rebound",
+  "title": "Brick Rebound",
   "tagline": "Bounce, smash, repeat.",
   "description": "Bounce the ball, smash every brick and grab power-ups: wide paddle, multi-ball and slow motion. Six hand-made levels that loop faster and tougher, with your best score saved on this device.",
   "categories": ["Arcade", "Classic"],
@@ -13,5 +13,5 @@
   ],
   "palette": ["#080d1a", "#6366f1"],
   "added": "2026-09-15",
-  "updated": "2026-09-15"
+  "updated": "2026-09-16"
 }

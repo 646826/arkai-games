@@ -13,7 +13,7 @@ There are 8 of them. Together they are 345 KB.
 | **Mini Sudoku** | Logic, Daily | Keyboard, touch & mouse | 50 KB | [play](https://arkai.win/games/sudoku-mini/) |
 | **Mole Rush** | Arcade, Family | Keyboard, touch & mouse | 52 KB | [play](https://arkai.win/games/mole-rush/) |
 | **One Step Late** | Puzzle, Daily | Keyboard, touch & mouse | 82 KB | [play](https://arkai.win/games/one-step-late/) |
-| **Breakout** | Arcade, Classic | Mouse, touch & keyboard | 33 KB | [play](https://arkai.win/games/breakout/) |
+| **Brick Rebound** | Arcade, Classic | Mouse, touch & keyboard | 33 KB | [play](https://arkai.win/games/brick-rebound/) |
 | **Minesweeper** | Logic, Puzzle | Mouse, touch & keyboard | 27 KB | [play](https://arkai.win/games/minesweeper/) |
 | **Snake** | Arcade, Classic | Keyboard, touch & swipe | 22 KB | [play](https://arkai.win/games/snake/) |
 
@@ -31,7 +31,7 @@ home cannot reach this page either.
 
 That has a few consequences worth knowing:
 
-- **It runs from `file://`.** Download `games/breakout/index.html`,
+- **It runs from `file://`.** Download `games/brick-rebound/index.html`,
   double-click it, and it works — offline, forever, with no toolchain.
 - **It cannot phone home.** There is no network code in these files at all — no
   `fetch`, no `XMLHttpRequest`, no `sendBeacon`; the build rejects a game that
@@ -44,7 +44,7 @@ That has a few consequences worth knowing:
 
 ```sh
 git clone https://github.com/646826/arkai-games.git
-open arkai-games/games/breakout/index.html   # macOS; xdg-open or a browser elsewhere
+open arkai-games/games/brick-rebound/index.html   # macOS; xdg-open or a browser elsewhere
 ```
 
 No install step. That is the whole thing.
@@ -54,8 +54,8 @@ No install step. That is the whole thing.
 Each file is a complete document, so an `<iframe>` is all it takes:
 
 ```html
-<iframe src="games/breakout/index.html" width="480" height="640"
-        title="Breakout" style="border:0"></iframe>
+<iframe src="games/brick-rebound/index.html" width="480" height="640"
+        title="Brick Rebound" style="border:0"></iframe>
 ```
 
 The games report progress to the page that frames them:
@@ -77,7 +77,7 @@ Two details that are easy to get wrong, so they are stated rather than implied:
   yourself and it works; frame it from another domain and you get silence, by
   design.
 - **The event vocabulary is not uniform yet.** 7 of the 8 games emit
-  `start` and `gameover` (Merge 2048 adds `win`). Breakout uses a different set: `game_end`, `game_ready`, `game_start`, `level_end`, `level_start`.
+  `start` and `gameover` (Merge 2048 adds `win`). Brick Rebound uses a different set: `game_end`, `game_ready`, `game_start`, `level_end`, `level_start`.
   The portal normalises this on its side. Listen for both spellings until it is
   fixed at the source.
 
