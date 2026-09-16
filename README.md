@@ -77,7 +77,7 @@ Two details that are easy to get wrong, so they are stated rather than implied:
   yourself and it works; frame it from another domain and you get silence, by
   design.
 - **The event vocabulary is not uniform yet.** 7 of the 8 games emit
-  `start` and `gameover` (Slide Merge adds `win`). Brick Rebound uses a different set: `game_end`, `game_ready`, `game_start`, `level_end`, `level_start`.
+  `start` and `gameover`. Brick Rebound uses a different set: `game_end`, `game_ready`, `game_start`, `level_end`, `level_start`.
   The portal normalises this on its side. Listen for both spellings until it is
   fixed at the source.
 

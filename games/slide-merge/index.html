@@ -310,7 +310,8 @@
       S.flash = 0.5;
       S.shake = 12;
       winChord();
-      emit('win', { score: S.score, moves: S.moves });
+      // No event here: reaching 2048 does not end the run. The portal hears about
+      // the win once, from gameOver(), so one run is never both a win and an end.
       // The board is *not* checked here on purpose: the celebration comes first
       // even when that same move filled the last square. keepGoing() asks the
       // question the moment the player dismisses it, so a win that is also the
@@ -369,7 +370,7 @@
     tone(330, 0.16, 'sawtooth', 0.045);
     tone(220, 0.22, 'sawtooth', 0.045, 0.12);
     tone(147, 0.34, 'sawtooth', 0.045, 0.26);
-    emit('gameover', { score: S.score, best: S.best, moves: S.moves, peak: peakTile() });
+    emit('gameover', { won: S.reached, score: S.score, best: S.best, moves: S.moves, peak: peakTile() });
   }
 
   const canUndo = () => !!S.prev && (S.mode === 'playing' || S.mode === 'won');
