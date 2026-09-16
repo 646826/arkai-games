@@ -363,7 +363,7 @@
     spawnConfetti();
     sfx.fanfare();
     emit('gameover', {
-      score: scoreOf(pairs, S.moves, S.time),
+      won: true, score: scoreOf(pairs, S.moves, S.time),
       moves: S.moves, seconds: Math.round(S.time), pairs, board: shape.id, best: S.best ? S.best.m : S.moves,
     });
   }
