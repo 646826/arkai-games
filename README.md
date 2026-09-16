@@ -4,7 +4,7 @@ Every game from [arkai.win](https://arkai.win) — each one a **single self-cont
 file** you can open from your desktop with no build step, no server, no package
 manager and no network connection.
 
-There are 8 of them. Together they are 344 KB.
+There are 8 of them. Together they are 345 KB.
 
 | Game | Kind | Controls | Size | Play |
 | --- | --- | --- | ---: | --- |
@@ -12,7 +12,7 @@ There are 8 of them. Together they are 344 KB.
 | **Merge 2048** | Puzzle, Numbers | Keyboard, touch & swipe | 36 KB | [play](https://arkai.win/games/merge-2048/) |
 | **Mini Sudoku** | Logic, Daily | Keyboard, touch & mouse | 50 KB | [play](https://arkai.win/games/sudoku-mini/) |
 | **Mole Rush** | Arcade, Family | Keyboard, touch & mouse | 52 KB | [play](https://arkai.win/games/mole-rush/) |
-| **One Step Late** | Puzzle, Daily | Keyboard, touch & mouse | 81 KB | [play](https://arkai.win/games/one-step-late/) |
+| **One Step Late** | Puzzle, Daily | Keyboard, touch & mouse | 82 KB | [play](https://arkai.win/games/one-step-late/) |
 | **Breakout** | Arcade, Classic | Mouse, touch & keyboard | 33 KB | [play](https://arkai.win/games/breakout/) |
 | **Minesweeper** | Logic, Puzzle | Mouse, touch & keyboard | 27 KB | [play](https://arkai.win/games/minesweeper/) |
 | **Snake** | Arcade, Classic | Keyboard, touch & swipe | 22 KB | [play](https://arkai.win/games/snake/) |

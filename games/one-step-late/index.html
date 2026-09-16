@@ -364,6 +364,15 @@
     return { streak: lastFull === day - 1 ? streak + 1 : 1, lastFull: day };
   }
 
+  /**
+   * The line under the title. `picture` is the thumbnail and the social card:
+   * photographed once and shown for months, so it names no day at all.
+   */
+  function titleDay(day, date, past, picture) {
+    if (picture) return 'Three new puzzles every day';
+    return past ? `Day ${day} · ${date}` : `Day ${day} · three new puzzles every day`;
+  }
+
   /** One mark of the share text per tier, nothing about the board itself. */
   function shareMark(result, par) {
     if (!result) return '⬛';
@@ -376,7 +385,7 @@
 
   const core = {
     COLS, ROWS, CELLS, FLOOR, WALL, HOLE, TIERS, EPOCH_UTC, DAY_MS, MAX_ATTEMPTS, MAX_OPTIMAL_LINES,
-    turn, doomed, solve, walkAlone, draw, makePuzzle, fallbackPuzzle, replay, resolveFall, mergeDay, ownsPosition, readKey, dayStep, dayNumber, streakAfter, shareMark,
+    turn, doomed, solve, walkAlone, draw, makePuzzle, fallbackPuzzle, replay, resolveFall, mergeDay, ownsPosition, readKey, dayStep, dayNumber, streakAfter, shareMark, titleDay,
   };
   // ---- puzzle core end ----
 
@@ -527,6 +536,8 @@
   const cellName = (cell) => `${COLS_NAMES[cell % COLS]}${((cell / COLS) | 0) + 1}`;
   const ease = (t) => (t >= 1 ? 1 : t <= 0 ? 0 : 1 - Math.pow(1 - t, 3));
   const puzzle = () => S.puzzles[S.tier];
+  // Set by the portal's picture generator (site/scripts/lib/picture-flag.mjs).
+  const PICTURE = window.__arkaiPicture === true;
   const run = () => S.runs[S.tier];
   const solvedCount = () => S.runs.filter((r) => r.solved).length;
   const locked = () => run().solved && !S.practice;
@@ -1672,7 +1683,7 @@
     const T = L.title;
     label('ONE STEP LATE', W / 2, T.name, T.nameSize, C.text, 'center', '900');
     const past = archive();
-    label(past ? `Day ${S.day} · ${dayDate(S.day)}` : `Day ${S.day} · three new puzzles every day`, W / 2, T.day, 17, C.gold, 'center', '700', W - 2 * (14 + ARROW + 6));
+    label(titleDay(S.day, past ? dayDate(S.day) : '', past, PICTURE), W / 2, T.day, 17, C.gold, 'center', '700', W - 2 * (14 + ARROW + 6));
     drawLanes(T.lanes);
 
     const lines = [
