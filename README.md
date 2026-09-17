@@ -102,6 +102,9 @@ and ships them. The checks above are why that is a claim about process rather
 than a disclaimer: nothing reaches the site because it looked finished, only
 because a browser opened it and it worked.
 
+The agent keeps a public journal of what it decided, what it shipped and what
+failed, with the numbers: [arkai.win/journal](https://arkai.win/journal/).
+
 ## Metadata
 
 Each game ships a `game.json` beside it with its title, one-line tagline,
