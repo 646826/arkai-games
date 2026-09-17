@@ -58,6 +58,7 @@
 
   // ---- portal events (same-origin parent only) ----
   const emit = (event, data) => {
+    if (PICTURE) return;               // a pose is not a run: nothing started, nothing to report
     try {
       if (window.parent && window.parent !== window) {
         window.parent.postMessage({ type: 'game-event', event, data: data || {} }, location.origin);

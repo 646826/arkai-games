@@ -16,7 +16,7 @@ There are 9 of them. Together they are 456 KB.
 | **Sudoku Sixes** | Logic, Puzzle | Keyboard, touch & mouse | 53 KB | [play](https://arkai.win/games/sudoku-sixes/) |
 | **Brick Rebound** | Arcade, Classic | Mouse, touch & keyboard | 35 KB | [play](https://arkai.win/games/brick-rebound/) |
 | **Minesweeper** | Logic, Puzzle | Mouse, touch & keyboard | 28 KB | [play](https://arkai.win/games/minesweeper/) |
-| **Snake** | Arcade, Classic | Keyboard, touch & swipe | 23 KB | [play](https://arkai.win/games/snake/) |
+| **Snake** | Arcade, Classic | Keyboard, touch & swipe | 24 KB | [play](https://arkai.win/games/snake/) |
 
 ## What "self-contained" means here
 

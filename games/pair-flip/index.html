@@ -62,8 +62,9 @@
   // Private mode throws on every one of these, and an uncaught throw here is a
   // blank page rather than a game with no saved best.
   const storage = {
-    get(key) { try { return localStorage.getItem(key); } catch { return null; } },
-    set(key, value) { try { localStorage.setItem(key, value); return true; } catch { return false; } },
+    // The picture neither reads nor writes: what a browser remembers has no business in a photograph.
+    get(key) { if (PICTURE) return null; try { return localStorage.getItem(key); } catch { return null; } },
+    set(key, value) { if (PICTURE) return false; try { localStorage.setItem(key, value); return true; } catch { return false; } },
   };
 
   // A record is { m: moves, t: milliseconds }. Fewest moves first, and the clock
@@ -81,6 +82,7 @@
 
   // ---- the one allowed channel to the portal ----
   const emit = (event, data) => {
+    if (PICTURE) return;               // a pose is not a run: nothing started, nothing to report
     try {
       if (window.parent && window.parent !== window) {
         window.parent.postMessage({ type: 'game-event', event, data: data || {} }, location.origin);
@@ -91,7 +93,7 @@
   // ---- sound: generated on the spot, no files ----
   let audio = null;
   const ensureAudio = () => {
-    if (audio || S.muted) return;
+    if (audio || S.muted || PICTURE) return;
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (Ctx) audio = new Ctx();
@@ -1131,7 +1133,7 @@
   // A tab sent to the background must not keep the clock running: a best time
   // earned while the player was reading their mail is not a best time.
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden && S.mode === 'playing') S.mode = 'paused';
+    if (document.hidden && S.mode === 'playing' && !PICTURE) S.mode = 'paused';   // a pose holds still: it has no clock to stop
   });
 
   window.addEventListener('resize', resize);

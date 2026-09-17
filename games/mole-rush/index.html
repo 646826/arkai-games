@@ -1310,7 +1310,7 @@
 
   // A sixty-second clock that keeps running in a hidden tab steals the run.
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden && S.mode === 'playing') S.mode = 'paused';
+    if (document.hidden && S.mode === 'playing' && !PICTURE) S.mode = 'paused';   // a pose holds still: it has no clock to stop
   });
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', resize);
