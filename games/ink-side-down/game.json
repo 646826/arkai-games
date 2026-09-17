@@ -14,6 +14,7 @@
     "Press Share (or C) to copy a spoiler-free result, and come back after midnight for the next three.",
     "Missed a day? The arrows beside the day on the title screen (or the comma and period keys) open every earlier day. Those do not count toward your streak."
   ],
+  "daily": { "store": "arkai:ink-side-down:v1", "epoch": "2026-09-16", "puzzles": 3 },
   "palette": ["#14111c", "#d7263d"],
   "added": "2026-09-16",
   "updated": "2026-09-16"
