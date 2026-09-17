@@ -29,6 +29,12 @@
   const TAU = Math.PI * 2;
   const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
+  // Set by the portal's picture generator before this script runs: the game is
+  // being photographed for its thumbnail and its social card, and a title over
+  // four lines of instructions is a dark square at that size. Under the flag it
+  // poses instead — see posePicture().
+  const PICTURE = window.__arkaiPicture === true;
+
   // ---- the difficulty curve, as three named pairs ----------------------
   // Each pair is [how it feels at 1:00, how it feels at 0:00]. These three
   // numbers are the whole curve: "still too easy at 0:40" is one edit here and
@@ -57,6 +63,9 @@
   // at its mound: the head of a top-row mole reaches y=179, and a tap on a head
   // that answered with nothing read as a dropped input rather than a miss.
   const GRID_X = 30, GRID_Y = 172, CELL = 160;
+  // How much of the stage the picture frames (see PICTURE): down to the bottom
+  // edge of the grid. The buttons and the key-binding line start below it.
+  const PICTURE_H = GRID_Y + 3 * CELL;
   const HOLE_RX = 60, HOLE_RY = 21;
   const MOUND_RX = 78, MOUND_RY = 34;
   const BODY_H = 104, MOLE_LIFT = 106;           // a fully risen mole clears the rim by ~96px
@@ -77,10 +86,11 @@
   if (!ctx) return;
 
   // Private mode throws on the first read, and an uncaught throw here is a blank
-  // page rather than a game without a high score.
+  // page rather than a game without a high score. The picture neither reads
+  // nor writes: whatever a browser remembers has no business in a photograph.
   const storage = {
-    get(key) { try { return localStorage.getItem(key); } catch { return null; } },
-    set(key, value) { try { localStorage.setItem(key, value); return true; } catch { return false; } },
+    get(key) { if (PICTURE) return null; try { return localStorage.getItem(key); } catch { return null; } },
+    set(key, value) { if (PICTURE) return false; try { localStorage.setItem(key, value); return true; } catch { return false; } },
   };
 
   const BTN = {
@@ -108,14 +118,16 @@
 
   // Dust hanging in the air. It is decoration, but it is also the reason the
   // screen is never byte-identical two frames running: a still frame in a game
-  // with a running clock is indistinguishable from a crash.
+  // with a running clock is indistinguishable from a crash. The picture has no
+  // running clock and must come out the same twice, so it has no dust either.
   const MOTES = [];
-  for (let i = 0; i < 44; i++) {
+  for (let i = 0; i < (PICTURE ? 0 : 44); i++) {
     MOTES.push({ x: Math.random() * W, y: Math.random() * (H + 40), r: 0.7 + Math.random() * 1.8, s: 5 + Math.random() * 16, w: 0.4 + Math.random() * 1.1, p: Math.random() * TAU, a: 0.10 + Math.random() * 0.22 });
   }
 
   // ---- the one channel to the portal ------------------------------------
   const emit = (event, data) => {
+    if (PICTURE) return;               // a pose is not a run: nothing started, nothing to report
     try {
       if (window.parent && window.parent !== window) {
         window.parent.postMessage({ type: 'game-event', event, data: data || {} }, location.origin);
@@ -126,7 +138,7 @@
   // ---- sound, synthesised ------------------------------------------------
   let audio = null, noiseBuf = null;
   const ensureAudio = () => {
-    if (audio || S.muted) return;
+    if (audio || S.muted || PICTURE) return;   // no context, so every sfx below is silent in the picture
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (!Ctx) return;
@@ -282,6 +294,38 @@
     S.muted = !S.muted;
     storage.set(STORE_MUTE, S.muted ? '1' : '0');
     if (!S.muted) { wake(); sfx.move(); }
+  }
+
+  // The picture (see PICTURE): the last seconds of a good run, stopped 55 ms
+  // after a bonk — the middle mole at its flattest, the ring where the hand
+  // landed, the chain at ×5. Three burrows busy besides the one being bonked is
+  // what the curve allows only under 0:05, which is why the clock is red. Every
+  // value is a literal: no dice, no clock, nothing from storage. frame() never
+  // calls update() under the flag, so nothing here moves, spawns, ends or
+  // reports; shake, flashes and soil bursts, which only exist in motion, are
+  // left at the zero reset() gave them.
+  function posePicture() {
+    S.mode = 'playing';
+    S.clock = 12.4;                   // only the phase of the glows, the grass and the ring's beads
+    S.time = 4.4; S.tickAt = 5;
+    S.score = 2380; S.best = 2710;
+    S.combo = 13; S.chain = 13; S.comboT = COMBO_HOLD - 0.055; S.comboPop = 0.8;
+    S.cursor = 4; S.cursorPop = 0.75;
+    for (const b of S.burrows) { b.state = 'empty'; b.rise = 0; b.t = 0; b.wait = 0; b.seed = 0; }
+    // burrow, kind, state, seconds in that state, which way it looks, idle phase
+    const up = [
+      [1, 'gold', 'up', 0.20, -1, 2.0],
+      [3, 'mole', 'up', 0.35, 1, 0.6],
+      [4, 'mole', 'hit', 0.055, 1, 0],
+      [8, 'bomb', 'up', 0.50, -1, 4.1],
+    ];
+    for (const [i, kind, state, t, face, seed] of up) {
+      Object.assign(S.burrows[i], { kind, state, t, face, seed, rise: 1, riseAtHit: 1, hold: 1, duck: 0.2 });
+    }
+    // What swing() leaves behind on a ×5 bonk of the middle burrow.
+    S.rings.push({ i: 4, t: 0.055, ok: true });
+    S.floats.push({ x: 270, y: 320, text: '+50', color: '#fdf6e8', size: 23, t: 0.055 });
+    S.floats.push({ x: 304, y: 340, text: '×5', color: '#fbbf24', size: 18, t: 0.055 });
   }
 
   // ---- burrows -----------------------------------------------------------
@@ -522,9 +566,13 @@
     // with nothing in the console. Keep the last good view and try again later.
     if (!cw || !ch) return;
     view.dpr = dpr; view.cw = cw; view.ch = ch;
-    view.scale = Math.min(cw / W, ch / H);
+    // The picture is square and the stage is portrait, so it frames the HUD and
+    // the nine burrows and lets the strip under them — two buttons and a line of
+    // key bindings — fall off the bottom, rather than shrink the field for them.
+    const fit = PICTURE ? PICTURE_H : H;
+    view.scale = Math.min(cw / W, ch / fit);
     view.ox = (cw - W * view.scale) / 2;
-    view.oy = (ch - H * view.scale) / 2;
+    view.oy = (ch - fit * view.scale) / 2;
     canvas.width = Math.round(cw * dpr);
     canvas.height = Math.round(ch * dpr);
   }
@@ -1285,8 +1333,9 @@
     // frame on screen and the game looking frozen rather than broken.
     try {
       checkView();
-      update(dt);
+      if (!PICTURE) update(dt);       // the pose holds still: the loop only redraws it
       draw();
+      if (PICTURE) window.__arkaiPosed = true;   // the generator waits for this before it photographs
     } finally {
       requestAnimationFrame(frame);
     }
@@ -1294,6 +1343,7 @@
 
   reset();
   S.mode = 'title';
+  if (PICTURE) posePicture();
   resize();
   requestAnimationFrame(frame);
 })();

@@ -52,13 +52,17 @@
   const ctx = canvas.getContext('2d');
   const params = new URLSearchParams(location.search);
   const coverMode = params.has('cover');
+  // Set by the portal's photographer before any script runs (D-025): the game then
+  // poses a fixed position from the middle of play for its thumbnail and social card.
+  const PICTURE = window.__arkaiPicture === true;
 
+  // A photographed game has no player: it reads nothing from storage and leaves nothing in it.
   const storage = {
-    get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+    get(key) { if (PICTURE) return null; try { return localStorage.getItem(key); } catch { return null; } },
     // Reports whether the value actually landed: a full or blocked store throws,
     // and a caller that is about to drop the old copy has to know.
-    set(key, value) { try { localStorage.setItem(key, value); return true; } catch { return false; } },
-    remove(key) { try { localStorage.removeItem(key); } catch { /* storage blocked */ } },
+    set(key, value) { if (PICTURE) return false; try { localStorage.setItem(key, value); return true; } catch { return false; } },
+    remove(key) { if (PICTURE) return; try { localStorage.removeItem(key); } catch { /* storage blocked */ } },
   };
 
   // One-off move from the dotted keys of the first release. Runs before state is read.
@@ -94,6 +98,7 @@
 
   // ---- portal events (same-origin parent only) ----
   const emit = (event, data) => {
+    if (PICTURE) return; // a pose is not a session: the portal hears nothing about it
     try {
       if (window.parent && window.parent !== window) {
         window.parent.postMessage({ type: 'game-event', event, data: data || {} }, location.origin);
@@ -104,7 +109,7 @@
   // ---- sound (generated, no assets) ----
   let audio = null;
   const ensureAudio = () => {
-    if (audio || S.muted) return;
+    if (audio || S.muted || PICTURE) return;
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (Ctx) audio = new Ctx();
@@ -205,6 +210,7 @@
   }
 
   function pause() {
+    if (PICTURE) return; // a blur in the photographer's browser must not put PAUSED over the pose
     if (S.mode === 'playing' || S.mode === 'serve') {
       S.pausedFrom = S.mode;
       S.mode = 'paused';
@@ -367,6 +373,7 @@
   }
 
   function update(dt) {
+    if (PICTURE) return; // the pose stands still, whoever asks for a step
     S.clock += dt;
     for (const part of S.parts) {
       part.t -= dt;
@@ -899,9 +906,44 @@
   // expose a tiny debug surface for automated QA only
   window.__brickRebound = { state: S, loadLevel, levelClear, applyPower };
 
+  // ---- picture pose (D-025) ----
+  // A fixed position from the middle of level 2, put into the ordinary state and drawn
+  // by render() like any other frame: a wall with a channel eaten into it, three balls
+  // of a multi-ball in flight, the wide paddle, a capsule on its way down. Every number
+  // is literal, and update() never steps it.
+  function posePicture() {
+    loadLevel(2, false);
+    // hit points left per brick, in the LEVELS notation ('.' is broken)
+    const left = ['....22....', '...1111...', '..2.1222..', '.1..11111.', '332.132133', '1....1..11'];
+    for (const b of S.bricks) {
+      const ch = left[b.row][Math.round((b.x - BRICK_MARGIN) / (BRICK_W + BRICK_GAP))];
+      b.hp = ch === '.' ? 0 : Number(ch);
+    }
+    S.mode = 'playing';
+    S.score = 2480;
+    S.best = 6150;
+    S.lives = 3;
+    S.combo = 2;
+    S.speed = 408; // level 2 base plus the twenty hits the wall above has taken
+    S.wideT = 9;
+    S.paddle.x = 352;
+    S.paddle.w = PADDLE_WIDE;
+    S.caps = [{ x: 92.2, y: 404, type: 'S' }];
+    // heading in degrees from straight up, clockwise; the trail is where the ball has just been
+    S.balls = [[190, 174, -25], [424, 338, -20], [326, 524, 145]].map(([x, y, deg]) => {
+      const a = deg * Math.PI / 180, vx = Math.sin(a) * curSpeed(), vy = -Math.cos(a) * curSpeed();
+      const trail = [];
+      for (let i = 7; i >= 0; i--) trail.push(x - vx * STEP * i, y - vy * STEP * i);
+      return { x, y, vx, vy, stuck: false, trail };
+    });
+  }
+
   loadLevel(1, false);
   S.mode = 'title';
+  if (PICTURE) posePicture();
   resize();
+  // resize() has just drawn the first frame, and under PICTURE that frame is the pose
+  if (PICTURE) window.__arkaiPosed = true;
   requestAnimationFrame(frame);
   if (!coverMode) canvas.focus({ preventScroll: true });
   emit('game_ready', {});

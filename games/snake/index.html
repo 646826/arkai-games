@@ -34,13 +34,19 @@
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
 
+  // Set by the portal's picture generator before this script runs: the game is
+  // being photographed for its thumbnail and social card, and poses (see
+  // `posePicture`). A pose is the same every time, so it neither reads nor
+  // writes what a player has stored.
+  const PICTURE = window.__arkaiPicture === true;
+
   const storage = {
-    get(key) { try { return localStorage.getItem(key); } catch { return null; } },
-    set(key, value) { try { localStorage.setItem(key, value); return true; } catch { return false; } },
+    get(key) { if (PICTURE) return null; try { return localStorage.getItem(key); } catch { return null; } },
+    set(key, value) { if (PICTURE) return false; try { localStorage.setItem(key, value); return true; } catch { return false; } },
   };
 
   const S = {
-    mode: 'title',            // title | playing | paused | gameover
+    mode: 'title',            // title | playing | paused | gameover | posed (picture only)
     cells: [], dir: { x: 1, y: 0 }, queue: [],
     prevTail: null, grew: false,
     food: null, gold: null, goldT: 0,
@@ -62,7 +68,7 @@
   // ---- sound (generated, no assets) ----
   let audio = null;
   const ensureAudio = () => {
-    if (audio || S.muted) return;
+    if (audio || S.muted || PICTURE) return;
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (Ctx) audio = new Ctx();
@@ -135,6 +141,31 @@
     S.parts = []; S.floats = [];
     S.gold = null; S.goldT = 0;
     S.food = freeCell(null);
+  }
+
+  // The picture (D-025): a position from the middle of a run instead of the
+  // title screen, which at thumbnail size is a dark square of unreadable rules.
+  // Everything here is a literal — no randomness, no clock — and `posed` is a
+  // mode nothing leaves: `update` holds it still, no key or tap starts a run
+  // from it, so nothing is emitted, played or stored.
+  function posePicture() {
+    // Corners from head to tail; the cells between them are filled in.
+    const corners = [[10, 4], [6, 4], [6, 8], [16, 8], [16, 12], [3, 12], [3, 16], [18, 16], [18, 20], [3, 20]];
+    S.cells = [{ x: corners[0][0], y: corners[0][1] }];
+    for (const [cx, cy] of corners.slice(1)) {
+      let c = S.cells[S.cells.length - 1];
+      while (c.x !== cx || c.y !== cy) {
+        c = { x: c.x + Math.sign(cx - c.x), y: c.y + Math.sign(cy - c.y) };
+        S.cells.push(c);
+      }
+    }
+    S.dir = { x: 1, y: 0 };
+    S.food = { x: 14, y: 4 };
+    // 74 long is 71 eaten: the star came up one food ago, and ten of the
+    // thirteen before it were caught.
+    S.gold = { x: 18, y: 6 }; S.goldT = 4.5;
+    S.eaten = 71; S.score = 1210; S.best = 1480;
+    S.mode = 'posed';
   }
 
   function start() {
@@ -233,6 +264,9 @@
   }
 
   function update(dt) {
+    // Even the clock stands still: it is what makes the food and the star pulse,
+    // and two photographs of the pose have to be the same picture.
+    if (S.mode === 'posed') return;
     S.clock += dt;
     if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 30);
     if (S.flash > 0) S.flash = Math.max(0, S.flash - dt);
@@ -445,6 +479,8 @@
     ctx.fillStyle = S.newBest ? '#fbbf24' : '#ecfdf5';
     ctx.fillText(String(S.best), W - 20, 46);
 
+    // The key hints are instructions, and the picture carries none.
+    if (PICTURE) return;
     ctx.textAlign = 'center';
     ctx.font = `500 13px ${FONT}`;
     ctx.fillStyle = 'rgba(167, 243, 208, 0.55)';
@@ -533,6 +569,9 @@
     }
 
     ctx.restore();
+
+    // The generator waits for this: the posed frame is on the canvas.
+    if (S.mode === 'posed') window.__arkaiPosed = true;
   }
 
   // ---- input ----
@@ -625,7 +664,7 @@
     requestAnimationFrame(frame);
   }
 
-  reset();
+  if (PICTURE) posePicture(); else reset();
   resize();
   requestAnimationFrame(frame);
 })();

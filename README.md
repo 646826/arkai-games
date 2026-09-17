@@ -4,19 +4,19 @@ Every game from [arkai.win](https://arkai.win) — each one a **single self-cont
 file** you can open from your desktop with no build step, no server, no package
 manager and no network connection.
 
-There are 9 of them. Together they are 438 KB.
+There are 9 of them. Together they are 456 KB.
 
 | Game | Kind | Controls | Size | Play |
 | --- | --- | --- | ---: | --- |
-| **Ink Side Down** | Puzzle, Daily | Keyboard, touch & mouse | 87 KB | [play](https://arkai.win/games/ink-side-down/) |
-| **Mole Rush** | Arcade, Family | Keyboard, touch & mouse | 52 KB | [play](https://arkai.win/games/mole-rush/) |
-| **One Step Late** | Puzzle, Daily | Keyboard, touch & mouse | 86 KB | [play](https://arkai.win/games/one-step-late/) |
-| **Pair Flip** | Cards, Family | Keyboard, touch & mouse | 44 KB | [play](https://arkai.win/games/pair-flip/) |
-| **Slide Merge** | Puzzle, Numbers | Keyboard, touch & swipe | 37 KB | [play](https://arkai.win/games/slide-merge/) |
-| **Sudoku Sixes** | Logic, Puzzle | Keyboard, touch & mouse | 51 KB | [play](https://arkai.win/games/sudoku-sixes/) |
-| **Brick Rebound** | Arcade, Classic | Mouse, touch & keyboard | 33 KB | [play](https://arkai.win/games/brick-rebound/) |
-| **Minesweeper** | Logic, Puzzle | Mouse, touch & keyboard | 27 KB | [play](https://arkai.win/games/minesweeper/) |
-| **Snake** | Arcade, Classic | Keyboard, touch & swipe | 22 KB | [play](https://arkai.win/games/snake/) |
+| **Ink Side Down** | Puzzle, Daily | Keyboard, touch & mouse | 88 KB | [play](https://arkai.win/games/ink-side-down/) |
+| **Mole Rush** | Arcade, Family | Keyboard, touch & mouse | 55 KB | [play](https://arkai.win/games/mole-rush/) |
+| **One Step Late** | Puzzle, Daily | Keyboard, touch & mouse | 87 KB | [play](https://arkai.win/games/one-step-late/) |
+| **Pair Flip** | Cards, Family | Keyboard, touch & mouse | 46 KB | [play](https://arkai.win/games/pair-flip/) |
+| **Slide Merge** | Puzzle, Numbers | Keyboard, touch & swipe | 39 KB | [play](https://arkai.win/games/slide-merge/) |
+| **Sudoku Sixes** | Logic, Puzzle | Keyboard, touch & mouse | 53 KB | [play](https://arkai.win/games/sudoku-sixes/) |
+| **Brick Rebound** | Arcade, Classic | Mouse, touch & keyboard | 35 KB | [play](https://arkai.win/games/brick-rebound/) |
+| **Minesweeper** | Logic, Puzzle | Mouse, touch & keyboard | 28 KB | [play](https://arkai.win/games/minesweeper/) |
+| **Snake** | Arcade, Classic | Keyboard, touch & swipe | 23 KB | [play](https://arkai.win/games/snake/) |
 
 ## What "self-contained" means here
 
@@ -93,8 +93,9 @@ and each one clears the same checks before it ships:
 2. Metadata complete and valid — description, controls, instructions.
 3. **A real browser opens it**, waits for it to become interactive and plays
    inputs into it. A game that throws or never starts fails here.
-4. That browser photographs the game's own first screen for the catalogue, and a
-   later check refuses to publish a game whose picture no longer matches its code.
+4. That browser photographs the game for the catalogue: the game itself draws a
+   position from the middle of play, with the code that draws every other frame.
+   A later check refuses to publish a game whose picture no longer matches its code.
 
 Arkai is run by an autonomous AI agent — it plans the portal, writes the games
 and ships them. The checks above are why that is a claim about process rather

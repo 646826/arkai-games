@@ -51,6 +51,11 @@
   const KEY_MUTE = STORE + 'muted', KEY_BOARD = STORE + 'board';
   const bestKey = (id) => STORE + 'best:' + id;
 
+  // Set by the portal's photographer before this script runs: the catalogue
+  // thumbnail and the social card are this game photographing itself, and under
+  // the flag it poses a position from the middle of a run instead of its title.
+  const PICTURE = window.__arkaiPicture === true;
+
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
 
@@ -227,7 +232,8 @@
   ];
 
   // ---- state -----------------------------------------------------------------
-  const savedBoard = BOARDS.findIndex((b) => b.id === storage.get(KEY_BOARD));
+  // The picture reads nothing from storage: it is the same on every machine.
+  const savedBoard = PICTURE ? -1 : BOARDS.findIndex((b) => b.id === storage.get(KEY_BOARD));
   const S = {
     mode: 'title',            // title | playing | paused | won
     boardIndex: savedBoard >= 0 ? savedBoard : 1,
@@ -238,7 +244,7 @@
     guardT: 0,                // a breath after the deal in which a stray second tap cannot flip
     cursor: 0,                // the card the keyboard is on
     best: null, newBest: false,
-    muted: storage.get(KEY_MUTE) === '1',
+    muted: !PICTURE && storage.get(KEY_MUTE) === '1',
     clock: 0, overT: 0, shake: 0,
     parts: [], floats: [],
   };
@@ -337,6 +343,27 @@
     if (audio && audio.state === 'suspended') audio.resume().catch(() => {});
     sfx.deal();
     emit('start', { game: 'pair-flip', board: shape.id, pairs: S.cards.length / 2 });
+  }
+
+  // The position the game holds for its picture: the 4 × 4 board nine moves in,
+  // four pairs found and a fifth attempt face up — a diamond and a triangle, so
+  // a miss, which is the moment the game is about. Every value is a literal, and
+  // update() never runs on it: nothing is judged, timed, sounded, sent or saved.
+  function posePicture() {
+    const deck = [4, 1, 2, 8, 11, 3, 7, 4, 5, 2, 1, 5, 7, 11, 8, 3];   // indices into SYMBOLS
+    const found = [0, 2, 4, 7, 8, 9, 11, 13];
+    S.shape = board();
+    S.L = layout(S.shape);
+    S.sel = [5, 10];
+    S.cards = deck.map((sym, i) => {
+      const matched = found.includes(i);
+      return { sym, up: matched || S.sel.includes(i), from: false, flipT: -1, matched, matchT: MATCH_POP_S, shakeT: 0, dealT: DEAL_DUR_S };
+    });
+    S.cursor = 10;
+    S.moves = 9; S.found = 4; S.time = 47;
+    S.best = { m: 12, t: 58000 };
+    S.clock = 0.6;            // holds the glow on the found pairs near its peak
+    S.mode = 'playing';
   }
 
   // One number for the portal's records, and it has to agree with what the game
@@ -819,6 +846,7 @@
     ctx.font = `600 13px ${FONT}`;
     ctx.fillStyle = S.newBest ? '#fde047' : 'rgba(244, 114, 182, 0.85)';
     ctx.fillText(`BEST on ${shape.name} — ${bestText(S.best)}`, W / 2, 670);
+    if (PICTURE) return;      // a line of key names is instructions, and the picture carries none
     ctx.font = `500 12px ${FONT}`;
     ctx.fillStyle = DIM;
     ctx.fillText('Arrows move · Enter flips · M sound · P pause', W / 2, 696);
@@ -1124,16 +1152,22 @@
     const cw = canvas.clientWidth || window.innerWidth;
     const ch = canvas.clientHeight || window.innerHeight;
     if (cw !== view.cw || ch !== view.ch || Math.min(window.devicePixelRatio || 1, 2) !== view.dpr) resize();
-    update(dt);
+    if (!PICTURE) update(dt);   // the pose is a still: redrawn, never advanced
     if (S.mode !== 'title' || titleDirty) {
       draw();
       titleDirty = false;
     }
+    // The photographer waits for this: the posed frame is on the canvas.
+    if (PICTURE) window.__arkaiPosed = true;
     requestAnimationFrame(frame);
   }
 
-  S.L = layout(board());
-  S.best = readBest(board().id);
+  if (PICTURE) {
+    posePicture();
+  } else {
+    S.L = layout(board());
+    S.best = readBest(board().id);
+  }
   resize();
   requestAnimationFrame(frame);
 })();

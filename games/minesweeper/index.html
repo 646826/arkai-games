@@ -33,12 +33,17 @@
   const STORE_LEVEL = 'arkai:minesweeper:level', STORE_MUTE = 'arkai:minesweeper:muted';
   const bestKey = (key) => `arkai:minesweeper:best:${key}`;
 
+  // Set by the picture generator before this script runs: the game is being
+  // photographed for its thumbnail and social card, and poses (posePicture).
+  const PICTURE = window.__arkaiPicture === true;
+
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
 
+  // A pose reads nothing and leaves nothing behind: storage is inert under it.
   const storage = {
-    get(key) { try { return localStorage.getItem(key); } catch { return null; } },
-    set(key, value) { try { localStorage.setItem(key, value); return true; } catch { return false; } },
+    get(key) { if (PICTURE) return null; try { return localStorage.getItem(key); } catch { return null; } },
+    set(key, value) { if (PICTURE) return false; try { localStorage.setItem(key, value); return true; } catch { return false; } },
   };
 
   const savedLevel = LEVELS.findIndex((level) => level.key === storage.get(STORE_LEVEL));
@@ -63,6 +68,7 @@
   const L = { cell: 40, x: 0, y: 0, w: 0, h: 0 };
 
   const emit = (event, data) => {
+    if (PICTURE) return;    // a photograph is not a game the portal should count
     try {
       if (window.parent && window.parent !== window) {
         window.parent.postMessage({ type: 'game-event', event, data: data || {} }, location.origin);
@@ -164,7 +170,10 @@
       [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
     }
     for (let i = 0; i < S.mines && i < candidates.length; i++) S.grid[candidates[i]].mine = true;
+    numberCells();
+  }
 
+  function numberCells() {
     for (const cell of S.grid) {
       if (cell.mine) continue;
       let n = 0;
@@ -179,6 +188,36 @@
       const a = Math.random() * Math.PI * 2, s = 50 + Math.random() * 180;
       S.parts.push({ x: px, y: py, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.5 + Math.random() * 0.4, t: 0, color });
     }
+  }
+
+  // ---- the picture (D-025) ----
+  // An Easy board part-way through: one opening tap, two safe follow-ups, six
+  // flags. Literal, so two photographs match; opened by reveal() and drawn by
+  // draw() like any position a player reaches. `*` is a mine, `F` a flagged one.
+  const POSE_MINES = [
+    '......F..',
+    '......F*.',
+    '.......*.',
+    'F......F.',
+    '...F.....',
+    '........*',
+    '.........',
+    '.*....F..',
+    '..**.....',
+    '.........',
+    '.........',
+  ];
+  const POSE_TAPS = [[2, 1], [2, 4], [1, 4]];
+
+  function posePicture() {
+    newGame(0);
+    POSE_MINES.forEach((row, y) => [...row].forEach((ch, x) => { at(x, y).mine = ch !== '.'; }));
+    numberCells();          // S.placed: reveal() neither lays mines nor starts the clock
+    for (const [x, y] of POSE_TAPS) reveal(x, y);
+    POSE_MINES.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === 'F') toggleFlag(x, y); }));
+    for (const cell of S.grid) cell.t = 1;   // numbers fully faded in
+    S.time = 38;
+    S.best = 84;
   }
 
   const cellCenter = (cell) => ({ x: L.x + cell.x * L.cell + L.cell / 2, y: L.y + cell.y * L.cell + L.cell / 2 });
@@ -573,6 +612,7 @@
     }
 
     ctx.restore();
+    if (PICTURE) window.__arkaiPosed = true;   // the generator waits for this frame
   }
 
   // ---- input ----
@@ -733,7 +773,7 @@
     if (!last) last = now;
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
-    update(dt);
+    if (!PICTURE) update(dt);   // a pose stands still
     draw();
     requestAnimationFrame(frame);
   }
@@ -743,6 +783,7 @@
   S.mines = LEVELS[S.level].mines;
   S.best = Number(storage.get(bestKey(LEVELS[S.level].key))) || 0;
   layout();
+  if (PICTURE) posePicture();
   resize();
   requestAnimationFrame(frame);
 })();

@@ -486,10 +486,13 @@
   // Reduced motion: no ambient animation at all. Rolls still slide, briefly,
   // because a cube that teleports is harder to follow than one that moves.
   const calm = () => !!(calmQuery && calmQuery.matches);
+  // Set by the portal's picture generator (site/scripts/lib/picture-flag.mjs).
+  const PICTURE = window.__arkaiPicture === true;
 
+  // A picture has no player: nothing of anyone's is read into it, and it saves nothing.
   const storage = {
-    get(key) { try { return localStorage.getItem(key); } catch { return null; } },
-    set(key, value) { try { localStorage.setItem(key, value); return true; } catch { return false; } },
+    get(key) { if (PICTURE) return null; try { return localStorage.getItem(key); } catch { return null; } },
+    set(key, value) { if (PICTURE) return false; try { localStorage.setItem(key, value); return true; } catch { return false; } },
   };
 
   const S = {
@@ -510,6 +513,7 @@
 
   // ---- portal events (same-origin parent only) ----
   const emit = (event, data) => {
+    if (PICTURE) return; // a photograph is not a session
     try {
       if (window.parent && window.parent !== window) {
         window.parent.postMessage({ type: 'game-event', event, data: data || {} }, location.origin);
@@ -574,8 +578,6 @@
   const cellName = (cell) => `${COLS_NAMES[cell % COLS]}${((cell / COLS) | 0) + 1}`;
   const ease = (t) => (t >= 1 ? 1 : t <= 0 ? 0 : 1 - Math.pow(1 - t, 3));
   const puzzle = () => S.puzzles[S.tier];
-  // Set by the portal's picture generator (site/scripts/lib/picture-flag.mjs).
-  const PICTURE = window.__arkaiPicture === true;
   // The portal's next daily, named by the game page that frames this one
   // (readOnward). Null on its own, from file://, and in pictures.
   const ONWARD = !PICTURE && /^https?:$/.test(location.protocol) ? readOnward(location.hash, SLUG) : null;
@@ -805,6 +807,28 @@
     S.printed = new Set(marksOf(p.board));
   }
 
+  // The thumbnail and the social card show the game, not its title screen: the
+  // Hard board part of the way down its par line, the two before it solved.
+  // Day 0 is a board nobody is ever dealt (the calendar starts at day 1), so the
+  // picture gives away no puzzle, and it is the same whatever day it is taken.
+  const POSE = { day: 0, tier: 2, rolls: 9 };
+
+  /** Instead of loadDay under PICTURE: no clock, no store, no event, and update() holds it still. */
+  function posePicture() {
+    S.day = S.today = POSE.day;
+    S.puzzles = TIERS.map((_, tier) => makePuzzle(POSE.day, tier));
+    S.dirty = TIERS.map(() => false);
+    S.seen = TIERS.map(() => null);
+    S.runs = S.puzzles.map((p, tier) => {
+      const solved = tier < POSE.tier;
+      const inputs = solve(p, true).path.slice(0, solved ? p.par : POSE.rolls);
+      const moves = solved ? p.par + 2 * tier : inputs.length; // Easy at par, Medium two over
+      return { inputs, moves, solved, solvedMoves: solved ? moves : 0 };
+    });
+    selectTier(POSE.tier);
+    S.mode = 'play';
+  }
+
   // `start` once per unsolved puzzle per page load, however the player got to
   // it. Looking at a finished board again is not starting it.
   function markStart() {
@@ -828,7 +852,7 @@
   }
 
   function checkDay() {
-    if (dayNumber(new Date()) === S.today) return;
+    if (PICTURE || dayNumber(new Date()) === S.today) return; // the posed board belongs to no day
     // Mid-puzzle on today's board, nothing is pulled away: it says so once.
     if (S.mode === 'play' && S.day === S.today) {
       if (!S.newDay) {
@@ -1196,6 +1220,7 @@
 
   // ---- update ----
   function update(dt) {
+    if (PICTURE) return; // the pose holds still
     S.clock += dt;
     if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 24);
     if (S.flash > 0) S.flash = Math.max(0, S.flash - dt);
@@ -1648,12 +1673,13 @@
   function drawHud() {
     if (L.heading) {
       label('Ink Side Down', 12, 24, 21, C.text, 'left', '800');
-      label(`Day ${S.day}${archive() ? ' · archive' : ''}`, 12, 48, 16, C.inkHi, 'left', '700');
+      if (!PICTURE) label(`Day ${S.day}${archive() ? ' · archive' : ''}`, 12, 48, 16, C.inkHi, 'left', '700');
     }
     for (const t of tabs()) drawTierCard(t, t.tier, t.tier === S.tier);
     const p = puzzle(), r = run();
     const y = L.infoY;
-    const day = L.heading ? '' : `Day ${S.day} · `;
+    const day = L.heading || PICTURE ? '' : `Day ${S.day} · `; // a picture names no day
+
     if (S.toast && toastOverInfo()) {
       // the toast is drawn here instead, for its three seconds
     } else if (S.newDay && !L.heading) {
@@ -1991,6 +2017,8 @@
     if (running) {
       update(dt);
       render();
+      // The generator waits for this before it photographs (POSED_FLAG in picture-flag.mjs).
+      if (PICTURE) window.__arkaiPosed = true;
     }
     requestAnimationFrame(frame);
   }
@@ -2008,7 +2036,8 @@
 
   window.addEventListener('resize', resize);
   resize();
-  loadDay(dayNumber(new Date()));
+  if (PICTURE) posePicture();
+  else loadDay(dayNumber(new Date()));
   requestAnimationFrame(frame);
 })();
 </script>
