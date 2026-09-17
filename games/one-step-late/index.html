@@ -760,6 +760,10 @@
     S.practice = false;
     S.demo = null;
     S.fall = null;
+    S.floats = [];
+    S.parts = [];
+    S.flash = 0;
+    S.shake = 0;
     const p = puzzle();
     const state = replay(p, run().inputs);
     run().inputs = state.inputs;
