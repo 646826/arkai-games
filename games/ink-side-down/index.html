@@ -382,12 +382,7 @@
    * tab or another, is not counted again.
    */
   function streakAfter(streak, lastFull, day, today) {
-    if (day !== today) return null;
-    // A day later than today was saved by a clock that ran ahead: that set was
-    // played today and already counted, so bring the record back to the
-    // calendar without counting it twice.
-    if (lastFull > today) return { streak, lastFull: day };
-    if (lastFull >= day) return null;
+    if (day !== today || lastFull >= day) return null;
     return { streak: lastFull === day - 1 ? streak + 1 : 1, lastFull: day };
   }
 
@@ -1776,8 +1771,8 @@
     drawCube(x0 + size / 2 + pos * size, midY, size, ink, rolling && k < 1 ? 1 : -1, rolling && k < 1 ? Math.sin(k * Math.PI) : 0, pos === 2 ? 'printed' : '');
     // The caption says what the cube is doing now: once it has rolled on, "face
     // down on the mark" describes a cube that is no longer there.
-    const caption = pos < 2 ? 'the red side is inked' : pos < 3 ? 'face down on the mark: printed' : 'rolled on: the print stays';
-    label(caption, W / 2, y0 + size + 26, 16, pos >= 2 && pos < 3 ? C.inkHi : C.muted, 'center', '700');
+    const caption = pos < 2 ? 'the red side is inked' : pos === 2 ? 'face down on the mark: printed' : 'rolled on: the print stays';
+    label(caption, W / 2, y0 + size + 26, 16, pos === 2 ? C.inkHi : C.muted, 'center', '700');
   }
 
   function drawTitle() {
