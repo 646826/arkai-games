@@ -835,7 +835,7 @@
     const key = `${S.day}:${S.tier}`;
     if (run().solved || started.has(key)) return;
     started.add(key);
-    emit('start', { game: SLUG, day: S.day, tier: S.tier + 1 });
+    emit('start', { game: SLUG, day: S.day, tier: S.tier + 1, archive: archive() });
   }
 
   /**
@@ -944,8 +944,11 @@
       }
       return;
     }
+    // The portal cannot see the board. Each counted move tells it how far this
+    // puzzle has got, so a player who leaves unfinished leaves a number behind;
+    // the portal keeps it to itself until then. Practice is not progress.
     if (S.practice) S.practiceMoves++;
-    else run().moves++;
+    else { run().moves++; emit('progress', { moves: run().moves, tier: S.tier + 1, day: S.day, archive: archive() }); }
     touchTier();
     animateRoll(S.cube, r.cube, S.ink, r.ink, dir);
     S.cube = r.cube; S.ink = r.ink;
@@ -994,7 +997,7 @@
     if (writeStore()) return;
     celebrate();
     const over = r.solvedMoves - p.par;
-    emit('gameover', { won: true, score: r.solvedMoves, par: p.par, tier: S.tier + 1, day: S.day });
+    emit('gameover', { won: true, score: r.solvedMoves, par: p.par, tier: S.tier + 1, day: S.day, archive: archive() });
     const allDone = solvedCount() === TIERS.length;
     toast(`${over <= 0 ? 'Par! A star.' : `Solved, ${over} over par.`} ${allDone ? 'All three done.' : 'Next when ready.'}`);
   }
