@@ -1714,7 +1714,10 @@
     if (touch()) { label('Tap an arrow to fire · tap a square to mark', W / 2, y, 15, C.muted, 'center', '500'); return; }
     const hint = S.mode === 'title'
       ? S.today > 1 ? 'Space plays · 1 2 3 pick a puzzle · < > other days' : 'Space plays · 1 2 3 pick a puzzle · L reads the box'
-      : 'Arrows move · Space fires or marks · K check · Esc home';
+      // The keyboard cursor is drawn only once a key has moved it; to a player on the mouse,
+      // "Arrows move" would promise a cursor that is not on the screen.
+      : S.keys ? 'Arrows move · Space fires or marks · K check · Esc home'
+        : 'Click an arrow to fire · a square to mark · or arrow keys';
     label(hint, W / 2, y, 15, C.muted, 'center', '500');
   }
 
