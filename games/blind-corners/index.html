@@ -516,7 +516,9 @@
   // The address in the share text. It is text for a clipboard, never loaded, and
   // it is the game page rather than this frame's own address: /play/* is
   // noindex and unmeasured, so a result shared from there would lead nowhere useful.
-  const SHARE_URL = 'https:' + '//arkai.win/games/blind-corners/';
+  // ?ref=share is how the portal's beacon tells a visit from a shared result
+  // apart from `direct`: chats and apps send no referrer at all.
+  const SHARE_URL = 'https:' + '//arkai.win/games/blind-corners/?ref=share';
   // A beam takes the same time whatever it met inside: the wait must not leak the length of the path.
   const SHOT_OUT = 0.28, SHOT_TIME = 0.7;
   const MARK_NAMES = ['no mark', 'a slash mirror', 'a backslash mirror'];

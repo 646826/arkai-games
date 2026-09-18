@@ -485,7 +485,9 @@
   // The address in the share text. It is text for a clipboard, never loaded, and
   // it is the game page rather than this frame's own address: /play/* is
   // noindex and unmeasured, so a result shared from there would lead nowhere useful.
-  const SHARE_URL = 'https:' + '//arkai.win/games/ink-side-down/';
+  // ?ref=share is how the portal's beacon tells a visit from a shared result
+  // apart from `direct`: chats and apps send no referrer at all.
+  const SHARE_URL = 'https:' + '//arkai.win/games/ink-side-down/?ref=share';
   const ROLL_TIME = 0.17, PRINT_TIME = 0.35, DEMO_STEP = 0.42;
   const COLS_NAMES = 'ABCDEF';
   const DIR_NAMES = ['up', 'right', 'down', 'left'];

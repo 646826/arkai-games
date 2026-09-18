@@ -466,7 +466,9 @@
   // The address in the share text. It is text for a clipboard, never loaded, and
   // it is the game page rather than this frame's own address: /play/* is
   // noindex and unmeasured, so a result shared from there would lead nowhere useful.
-  const SHARE_URL = 'https:' + '//arkai.win/games/one-step-late/';
+  // ?ref=share is how the portal's beacon tells a visit from a shared result
+  // apart from `direct`: chats and apps send no referrer at all.
+  const SHARE_URL = 'https:' + '//arkai.win/games/one-step-late/?ref=share';
   const STEP_TIME = 0.13, SHADOW_DELAY = 0.07, FALL_TIME = 0.75, DEMO_STEP = 0.42;
   const COLS_NAMES = 'ABCDEF';
   const DIR_NAMES = ['up', 'right', 'down', 'left'];
