@@ -9,7 +9,7 @@ There are 10 of them. Together they are 554 KB.
 | Game | Kind | Controls | Size | Play |
 | --- | --- | --- | ---: | --- |
 | **Blind Corners** | Puzzle, Daily | Keyboard, touch & mouse | 92 KB | [play](https://arkai.win/games/blind-corners/) |
-| **Ink Side Down** | Puzzle, Daily | Keyboard, touch & mouse | 91 KB | [play](https://arkai.win/games/ink-side-down/) |
+| **Ink Side Down** | Puzzle, Daily | Keyboard, touch & mouse | 92 KB | [play](https://arkai.win/games/ink-side-down/) |
 | **Mole Rush** | Arcade, Family | Keyboard, touch & mouse | 55 KB | [play](https://arkai.win/games/mole-rush/) |
 | **One Step Late** | Puzzle, Daily | Keyboard, touch & mouse | 90 KB | [play](https://arkai.win/games/one-step-late/) |
 | **Pair Flip** | Cards, Family | Keyboard, touch & mouse | 46 KB | [play](https://arkai.win/games/pair-flip/) |

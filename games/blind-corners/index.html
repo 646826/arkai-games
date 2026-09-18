@@ -361,6 +361,15 @@
   }
 
   /**
+   * What a saved board holds that is the player's own doing: the path, and any
+   * notes written on it. A missing line and an untouched board read the same.
+   */
+  function boardKey(entries, tier) {
+    const e = Array.isArray(entries) && entries[tier];
+    return e ? `${typeof e.i === 'string' ? e.i : ''}|${typeof e.g === 'string' ? e.g : ''}` : '|';
+  }
+
+  /**
    * What a tab could not save, carried onto a store another tab has written
    * since. `base` is the store the snapshot was built on: a position this tab
    * changed from it wins, one it did not change is the other tab's to move on.
@@ -370,12 +379,11 @@
    * finished the later day.
    */
   function carryUnsaved(fresh, snapshot, openDay, base) {
-    const pathOf = (entries, tier) => (Array.isArray(entries) && entries[tier] && typeof entries[tier].i === 'string' ? entries[tier].i : '');
     const days = { ...fresh.days };
     for (const [day, entries] of Object.entries(snapshot.days || {})) {
       if (Number(day) === openDay || !Array.isArray(entries)) continue;
       const was = base && base.days ? base.days[day] : undefined;
-      days[day] = mergeDay(days[day], entries, entries.map((_, tier) => pathOf(entries, tier) !== pathOf(was, tier)));
+      days[day] = mergeDay(days[day], entries, entries.map((_, tier) => boardKey(entries, tier) !== boardKey(was, tier)));
     }
     const from = (Number(snapshot.lastFull) || 0) > (Number(fresh.lastFull) || 0) ? snapshot : fresh;
     return { ...fresh, days, streak: from.streak, lastFull: from.lastFull, best: Math.max(Number(fresh.best) || 0, Number(snapshot.best) || 0) };
@@ -477,7 +485,7 @@
   const core = {
     EMPTY, SLASH, BACK, TIERS, OPENING, EPOCH_UTC, DAY_MS, MAX_ATTEMPTS, GAME_SEED,
     portStart, portAt, portRing, ringPort, portName, exitOf, tracePath, pairsOf, candidates, solverLine, draw, makePuzzle, fallbackPuzzle,
-    judge, costOf, replay, mergeDay, ownsPosition, carryUnsaved, readKey, dayStep, dayNumber, streakAfter, shareMark, titleDay, readOnward,
+    judge, costOf, replay, mergeDay, ownsPosition, boardKey, carryUnsaved, readKey, dayStep, dayNumber, streakAfter, shareMark, titleDay, readOnward,
   };
   // ---- puzzle core end ----
 
@@ -850,9 +858,8 @@
     const stored = unsaved ? parseStore(unsavedBase).days[day] : saved;
     const pathOf = (entries, tier) => (Array.isArray(entries) && entries[tier] && typeof entries[tier].i === 'string' ? entries[tier].i : null);
     S.seen = TIERS.map((_, tier) => pathOf(stored, tier));
-    // A snapshot position the store does not hold is a change not yet saved;
-    // an untouched board is the same whether or not the store has a line for it.
-    S.dirty = TIERS.map((_, tier) => (pathOf(saved, tier) ?? '') !== (S.seen[tier] ?? ''));
+    // A snapshot board the store does not hold is a change not yet saved.
+    S.dirty = TIERS.map((_, tier) => boardKey(saved, tier) !== boardKey(stored, tier));
     S.runs = TIERS.map((_, tier) => {
       const entry = saved[tier] || {};
       const inputs = typeof entry.i === 'string' ? entry.i : '';
