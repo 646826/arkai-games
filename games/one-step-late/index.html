@@ -529,6 +529,10 @@
     } catch { /* not embedded */ }
   };
 
+  // The board now on screen, for the portal's sensor: a page left from here was
+  // left on this puzzle, even one begun earlier (`start` is sent once).
+  const reportFocus = () => emit('focus', { day: S.day, tier: S.tier + 1 });
+
   // A live region repeats nothing it already holds, so it is emptied first and
   // refilled a moment later: two falls in a row must be announced twice.
   // Messages that arrive together are read together: a sync that moved the
@@ -703,6 +707,8 @@
         // Solved elsewhere, or solved in two tabs at once: the stored result is the one that counts.
         r.solved = true;
         r.solvedMoves = entry.s;
+        // Finished, not abandoned: the tab that solved it sent the `win`.
+        emit('closed', { day: S.day, tier: tier + 1 });
         if (tier === S.tier && !S.practice) {
           S.demo = null;
           S.fall = null;
@@ -912,6 +918,7 @@
     sfx.click();
     markStart();
     announce(`Day ${S.day}, ${TIERS[S.tier].label} puzzle, par ${puzzle().par}. ${describeBoard()}`);
+    reportFocus();
   }
 
   function goTitle() {
@@ -1090,6 +1097,7 @@
     sfx.click();
     markStart();
     announce(`${TIERS[tier].label} puzzle, par ${puzzle().par}. ${describeBoard()}`);
+    reportFocus();
   }
 
   function showBestLine() {

@@ -4,7 +4,7 @@ Every game from [arkai.win](https://arkai.win) — each one a **single self-cont
 file** you can open from your desktop with no build step, no server, no package
 manager and no network connection.
 
-There are 10 of them. Together they are 554 KB.
+There are 10 of them. Together they are 556 KB.
 
 | Game | Kind | Controls | Size | Play |
 | --- | --- | --- | ---: | --- |

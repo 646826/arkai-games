@@ -578,6 +578,10 @@
     } catch { /* not embedded */ }
   };
 
+  // The board now on screen, for the portal's sensor: a page left from here was
+  // left on this puzzle, even one begun earlier (`start` is sent once).
+  const reportFocus = () => emit('focus', { day: S.day, tier: S.tier + 1 });
+
   // A live region repeats nothing it already holds, so it is emptied first and
   // refilled a moment later: two refused rolls in a row must be announced twice.
   let announceTimer = 0, pending = '';
@@ -766,6 +770,8 @@
         // Solved elsewhere, or solved in two tabs at once: the stored result is the one that counts.
         r.solved = true;
         r.solvedMoves = entry.s;
+        // Finished, not abandoned: the tab that solved it sent the `win`.
+        emit('closed', { day: S.day, tier: tier + 1 });
         r.par = entry.p;
         r.inputs = entry.i;
         r.marks = entry.g;
@@ -979,6 +985,7 @@
     S.toast = null;
     sfx.click();
     announce(`Day ${S.day}, ${spec().label} puzzle. ${describeBoard()}`);
+    reportFocus();
   }
 
   function goTitle() {
@@ -1143,6 +1150,7 @@
     S.toast = null; // "solved" belongs to the puzzle just left
     sfx.click();
     announce(`${TIERS[tier].label} puzzle. ${describeBoard()}`);
+    reportFocus();
   }
 
   /** On a solved box: the ports the reference solver fired, numbered in its order. */
