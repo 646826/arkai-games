@@ -455,14 +455,38 @@
     return past ? `Day ${day} · ${date}` : `Day ${day} · three new puzzles every day`;
   }
 
-  /** One mark of the share text per tier, nothing about the board itself. */
+  /**
+   * One mark of the share text per tier, nothing about the board itself.
+   * Par is a greedy solver's count, not the least possible, so a player can
+   * beat it — and that is the result worth sending: "⭐-1".
+   */
   function shareMark(result, par) {
     if (!result) return '⬛';
     const over = result - par;
-    if (over <= 0) return '⭐';
+    if (over < 0) return '⭐' + over;
+    if (over === 0) return '⭐';
     if (over <= 2) return '🟢+' + over;
     if (over <= 6) return '🟡+' + over;
     return '🔴+' + over;
+  }
+
+  /** "★ 5 beams" at par, "★ 4 beams, -1" under it, "7 beams, +2" above it: the share text's notation. */
+  function resultText(moves, par) {
+    const over = moves - par, beams = `${moves} beam${moves === 1 ? '' : 's'}`;
+    if (over < 0) return `★ ${beams}, ${over}`;
+    return over === 0 ? `★ ${beams}` : `${beams}, +${over}`;
+  }
+
+  /** The right half of the line over a solved box: "★ 1 under par", "★ par", "par 5, +2". */
+  function parNote(moves, par) {
+    const over = moves - par;
+    return over < 0 ? `★ ${-over} under par` : over === 0 ? '★ par' : `par ${par}, +${over}`;
+  }
+
+  /** What the box says on a solve; `allDone` when this was the last of the three. */
+  function solvedNotice(over, allDone) {
+    const verdict = over < 0 ? `${-over} under par: you beat the solver!` : over === 0 ? 'Par! A star.' : `Solved, ${over} over par.`;
+    return `${verdict} ${allDone ? 'All three done.' : 'Next when ready.'}`;
   }
 
   /**
@@ -485,7 +509,7 @@
   const core = {
     EMPTY, SLASH, BACK, TIERS, OPENING, EPOCH_UTC, DAY_MS, MAX_ATTEMPTS, GAME_SEED,
     portStart, portAt, portRing, ringPort, portName, exitOf, tracePath, pairsOf, candidates, solverLine, draw, makePuzzle, fallbackPuzzle,
-    judge, costOf, replay, mergeDay, ownsPosition, boardKey, carryUnsaved, readKey, dayStep, dayNumber, streakAfter, shareMark, titleDay, readOnward,
+    judge, costOf, replay, mergeDay, ownsPosition, boardKey, carryUnsaved, readKey, dayStep, dayNumber, streakAfter, shareMark, resultText, parNote, solvedNotice, titleDay, readOnward,
   };
   // ---- puzzle core end ----
 
@@ -1136,7 +1160,7 @@
     const over = r.solvedMoves - p.par;
     emit('gameover', { won: true, score: r.solvedMoves, par: p.par, tier: S.tier + 1, day: S.day, archive: archive() });
     const allDone = solvedCount() === TIERS.length;
-    toast(`${over <= 0 ? 'Par! A star.' : `Solved, ${over} over par.`} ${allDone ? 'All three done.' : 'Next when ready.'}`);
+    toast(solvedNotice(over, allDone));
   }
 
   function nextPuzzle() {
@@ -1689,11 +1713,6 @@
     label(b.label, b.x + b.w / 2, b.y + b.h / 2 + (down ? 2 : 0), 17, b.primary ? '#04201f' : C.text, 'center', '700', b.w - 20);
   }
 
-  /** "★ 5 beams" at par, "7 beams, +2" above it: one notation everywhere. */
-  function resultText(moves, par) {
-    const over = moves - par;
-    return over <= 0 ? `★ ${moves} beams` : `${moves} beams, +${over}`;
-  }
 
   function drawTierCard(b, tier, active) {
     const r = S.runs[tier], t = TIERS[tier];
@@ -1724,9 +1743,8 @@
     } else if (S.newDay && !L.heading) {
       label(touch() ? 'New puzzles are out: tap home' : 'New puzzles are out: press Esc', BOARD_X, y, 17, C.inkHi, 'left', '800');
     } else if (locked()) {
-      const over = r.solvedMoves - parOf(S.tier);
       label(`${day}Solved in ${r.solvedMoves}`, BOARD_X, y, 19, C.text, 'left', '800');
-      label(over <= 0 ? '★ par' : `par ${parOf(S.tier)}, +${over}`, x1, y, 19, C.inkHi, 'right', '800');
+      label(parNote(r.solvedMoves, parOf(S.tier)), x1, y, 19, C.inkHi, 'right', '800');
     } else {
       const over = r.moves - p.par;
       // Before the first beam, the line says what to do: the box itself is the first screen.
