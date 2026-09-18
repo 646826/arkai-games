@@ -360,6 +360,27 @@
     return !!dirty || stored === null || stored === seen;
   }
 
+  /**
+   * What a tab could not save, carried onto a store another tab has written
+   * since. `base` is the store the snapshot was built on: a position this tab
+   * changed from it wins, one it did not change is the other tab's to move on.
+   * The open day is left to absorb, which holds it in memory. Dropping the
+   * snapshot whole lost every unsaved day but the one on screen; letting it win
+   * everywhere rolled the other tab back. The streak comes from whichever side
+   * finished the later day.
+   */
+  function carryUnsaved(fresh, snapshot, openDay, base) {
+    const pathOf = (entries, tier) => (Array.isArray(entries) && entries[tier] && typeof entries[tier].i === 'string' ? entries[tier].i : '');
+    const days = { ...fresh.days };
+    for (const [day, entries] of Object.entries(snapshot.days || {})) {
+      if (Number(day) === openDay || !Array.isArray(entries)) continue;
+      const was = base && base.days ? base.days[day] : undefined;
+      days[day] = mergeDay(days[day], entries, entries.map((_, tier) => pathOf(entries, tier) !== pathOf(was, tier)));
+    }
+    const from = (Number(snapshot.lastFull) || 0) > (Number(fresh.lastFull) || 0) ? snapshot : fresh;
+    return { ...fresh, days, streak: from.streak, lastFull: from.lastFull, best: Math.max(Number(fresh.best) || 0, Number(snapshot.best) || 0) };
+  }
+
   // Movement is positional: arrows, and WASD by where the keys sit, so ZQSD
   // rolls on AZERTY. Commands are read by the printed letter, so Z undoes on
   // QWERTZ; a non-Latin letter falls back to the Latin one on the same key, so
@@ -456,7 +477,7 @@
   const core = {
     EMPTY, SLASH, BACK, TIERS, OPENING, EPOCH_UTC, DAY_MS, MAX_ATTEMPTS, GAME_SEED,
     portStart, portAt, portRing, ringPort, portName, exitOf, tracePath, pairsOf, candidates, solverLine, draw, makePuzzle, fallbackPuzzle,
-    judge, costOf, replay, mergeDay, ownsPosition, readKey, dayStep, dayNumber, streakAfter, shareMark, titleDay, readOnward,
+    judge, costOf, replay, mergeDay, ownsPosition, carryUnsaved, readKey, dayStep, dayNumber, streakAfter, shareMark, titleDay, readOnward,
   };
   // ---- puzzle core end ----
 
@@ -699,15 +720,24 @@
   // saved, its save is the store again and this tab merges into it as usual.
   let unsaved = null, unsavedBase = null, lastRaw = null;
 
-  function readStore() {
-    const raw = storage.get(STORE);
-    if (unsaved && raw === unsavedBase) return unsaved;
-    unsaved = null;
-    lastRaw = raw;
+  function parseStore(raw) {
     try {
       const data = JSON.parse(raw || 'null');
       return data && typeof data === 'object' && data.days && typeof data.days === 'object' ? data : { days: {} };
     } catch { return { days: {} }; }
+  }
+
+  function readStore() {
+    const raw = storage.get(STORE);
+    if (unsaved && raw === unsavedBase) return unsaved;
+    lastRaw = raw;
+    const data = parseStore(raw);
+    if (!unsaved) return data;
+    // Another tab saved: its save is the store again, and the days only this
+    // tab holds ride on it until a save of ours goes through.
+    unsaved = carryUnsaved(data, unsaved, S.day, parseStore(unsavedBase));
+    unsavedBase = raw;
+    return unsaved;
   }
 
   /** Takes in what another tab saved: solved puzzles, beams spent, newer positions and the streak. */
@@ -753,6 +783,9 @@
       S.streak = Number(data.streak) || 0;
     }
     S.bestStreak = Math.max(S.bestStreak, Number(data.best) || 0);
+    // While nothing of ours can be saved, the snapshot is the store: the open
+    // day's merge lives there too, or leaving the day would drop it.
+    if (unsaved && data === unsaved) unsaved.days[S.day] = merged;
     return merged;
   }
 
@@ -799,6 +832,9 @@
 
   /** Opens a day's three puzzles: today, or any earlier day back to day 1. */
   function loadDay(day) {
+    // Take in any save from another tab while the day on screen is still open,
+    // so the carry keeps what this tab did on it.
+    if (unsaved && S.runs.length) sync();
     S.today = dayNumber(new Date());
     day = Math.min(Math.max(1, day), S.today);
     S.day = day;
@@ -809,8 +845,14 @@
     S.streak = Number(data.streak) || 0;
     S.bestStreak = Number(data.best) || 0;
     S.lastFull = Number(data.lastFull) || 0;
-    S.dirty = TIERS.map(() => false);
-    S.seen = TIERS.map((_, tier) => (saved[tier] && typeof saved[tier].i === 'string' ? saved[tier].i : null));
+    // Seen means what the store holds: a day opened from an unsaved snapshot
+    // must still tell its own positions from another tab's later save.
+    const stored = unsaved ? parseStore(unsavedBase).days[day] : saved;
+    const pathOf = (entries, tier) => (Array.isArray(entries) && entries[tier] && typeof entries[tier].i === 'string' ? entries[tier].i : null);
+    S.seen = TIERS.map((_, tier) => pathOf(stored, tier));
+    // A snapshot position the store does not hold is a change not yet saved;
+    // an untouched board is the same whether or not the store has a line for it.
+    S.dirty = TIERS.map((_, tier) => (pathOf(saved, tier) ?? '') !== (S.seen[tier] ?? ''));
     S.runs = TIERS.map((_, tier) => {
       const entry = saved[tier] || {};
       const inputs = typeof entry.i === 'string' ? entry.i : '';
