@@ -1,0 +1,23 @@
+{
+  "slug": "blind-corners",
+  "title": "Blind Corners",
+  "tagline": "Fire beams into a dark box and work out where its mirrors hide",
+  "description": "A daily deduction puzzle: three new boxes every day, the same for everyone. A dark box hides a few mirrors. Fire a beam of light in from any edge and you learn one thing only: where it comes out. Every mirror it met on the way turned it around a corner you could not see. Mark where the mirrors must be, watch the beam run through your marks, and check when every beam is explained. Each beam costs a point, so find the mirrors in as few as the par, then share your result without spoiling the box. Missed a day? Every earlier day stays playable.",
+  "categories": ["Puzzle", "Daily"],
+  "controls": "Keyboard, touch & mouse",
+  "instructions": [
+    "The game opens on today's Easy box. The tabs above it, or the keys 1, 2 and 3, switch between Easy, Medium and Hard.",
+    "Tap an arrow on the edge of the box to fire a beam in. It turns at every hidden mirror it meets, and the box shows only where it comes out: both ends get the same number and colour.",
+    "Tap a square inside the box to mark a mirror: one tap for a slash, two for a backslash, three to clear it. Marks are free.",
+    "The line on the box is the selected beam running through your marks. A port with a dashed red edge belongs to a beam your marks do not explain yet.",
+    "Press Check (or K) once every beam is explained. If the mirrors are wrong, the box fires a beam that proves it, and that costs 2. Any layout that no beam could tell from the hidden one counts as solved.",
+    "Every beam costs 1. Spend no more than the par, which is what the portal's own solver needed, for a star.",
+    "With a keyboard: arrows or WASD move the cursor, Space fires from a port or marks a square, slash and backslash place a mirror, X clears your marks.",
+    "Press Share (or C) to copy a spoiler-free result, and come back after midnight for the next three.",
+    "Missed a day? The arrows beside the day on the title screen (or the comma and period keys) open every earlier day. Those do not count toward your streak."
+  ],
+  "daily": { "store": "arkai:blind-corners:v1", "epoch": "2026-09-18", "puzzles": 3 },
+  "palette": ["#0d1321", "#3dd6d0"],
+  "added": "2026-09-18",
+  "updated": "2026-09-18"
+}

@@ -4,10 +4,11 @@ Every game from [arkai.win](https://arkai.win) — each one a **single self-cont
 file** you can open from your desktop with no build step, no server, no package
 manager and no network connection.
 
-There are 9 of them. Together they are 457 KB.
+There are 10 of them. Together they are 546 KB.
 
 | Game | Kind | Controls | Size | Play |
 | --- | --- | --- | ---: | --- |
+| **Blind Corners** | Puzzle, Daily | Keyboard, touch & mouse | 89 KB | [play](https://arkai.win/games/blind-corners/) |
 | **Ink Side Down** | Puzzle, Daily | Keyboard, touch & mouse | 89 KB | [play](https://arkai.win/games/ink-side-down/) |
 | **Mole Rush** | Arcade, Family | Keyboard, touch & mouse | 55 KB | [play](https://arkai.win/games/mole-rush/) |
 | **One Step Late** | Puzzle, Daily | Keyboard, touch & mouse | 87 KB | [play](https://arkai.win/games/one-step-late/) |
@@ -32,7 +33,7 @@ home cannot reach this page either.
 
 That has a few consequences worth knowing:
 
-- **It runs from `file://`.** Download `games/brick-rebound/index.html`,
+- **It runs from `file://`.** Download `games/blind-corners/index.html`,
   double-click it, and it works — offline, forever, with no toolchain.
 - **It cannot phone home.** There is no network code in these files at all — no
   `fetch`, no `XMLHttpRequest`, no `sendBeacon`; the build rejects a game that
@@ -45,7 +46,7 @@ That has a few consequences worth knowing:
 
 ```sh
 git clone https://github.com/646826/arkai-games.git
-open arkai-games/games/brick-rebound/index.html   # macOS; xdg-open or a browser elsewhere
+open arkai-games/games/blind-corners/index.html   # macOS; xdg-open or a browser elsewhere
 ```
 
 No install step. That is the whole thing.
@@ -55,8 +56,8 @@ No install step. That is the whole thing.
 Each file is a complete document, so an `<iframe>` is all it takes:
 
 ```html
-<iframe src="games/brick-rebound/index.html" width="480" height="640"
-        title="Brick Rebound" style="border:0"></iframe>
+<iframe src="games/blind-corners/index.html" width="480" height="640"
+        title="Blind Corners" style="border:0"></iframe>
 ```
 
 The games report progress to the page that frames them:
@@ -77,7 +78,7 @@ Two details that are easy to get wrong, so they are stated rather than implied:
   framing page is served from the same origin as the game file. Host the file
   yourself and it works; frame it from another domain and you get silence, by
   design.
-- **The event vocabulary is not uniform yet.** 8 of the 9 games emit
+- **The event vocabulary is not uniform yet.** 9 of the 10 games emit
   `start` and `gameover`. Brick Rebound uses a different set: `game_end`, `game_ready`, `game_start`, `level_end`, `level_start`.
   The portal normalises this on its side. Listen for both spellings until it is
   fixed at the source.
