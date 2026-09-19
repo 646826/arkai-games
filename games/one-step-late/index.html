@@ -733,7 +733,9 @@
         // Solved elsewhere, or solved in two tabs at once: the stored result is the one that counts.
         r.solved = true;
         r.solvedMoves = entry.s;
-        // Finished, not abandoned: the tab that solved it sent the `win`.
+        // Finished, not abandoned: normally the tab that solved it sent the
+        // `win` — except when that was a /play/ tab, which has no beacon and
+        // sent nothing at all. Either way this tab's run must not read as `leave`.
         emit('closed', { day: S.day, tier: tier + 1 });
         if (tier === S.tier && !S.practice) {
           S.demo = null;
