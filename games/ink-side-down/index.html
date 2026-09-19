@@ -620,18 +620,42 @@
   // (the quality gate refuses any parent or top access), and a link leaving for
   // the portal is navigation the browser does, the same for a screen reader.
   const onwardLink = document.getElementById('onward');
+  // ---- onward click plan begin ----
+  // What a click (or middle click) on the onward control should do. `event`
+  // carries only the fields a real click event exposes; `available` is
+  // `onward()` — the day on screen is solved and there is a next daily to
+  // hand the player to. A link offered before then is a link that can count
+  // a visit nobody made.
+  //
+  // Ctrl, Cmd or Shift asks for another tab or window: this page stays, the
+  // count gets through on its own, and the browser does what was asked. Alt
+  // asks the browser to download the target instead of visiting it, so it is
+  // not a trip to the next game and does not count. A middle click never
+  // fires `click`, only `auxclick`, and the browser still opens a new tab on
+  // its own — the same intent as Ctrl/Cmd-click — so it counts too.
+  function onwardClickPlan(event, available) {
+    if (!event.isTrusted || !available || event.altKey) return 'ignore';
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.button !== 0) return 'count';
+    return 'navigate';
+  }
+  function onwardAuxclickPlan(event, available) {
+    return event.isTrusted && available && event.button === 1 ? 'count' : 'ignore';
+  }
+  // ---- onward click plan end ----
   if (ONWARD) {
     onwardLink.setAttribute('href', ONWARD.path);
     onwardLink.textContent = `Play ${ONWARD.title}, another daily puzzle`;
-    onwardLink.hidden = false;
-    // Activated by a person: counted first, then followed by goOnward. Ctrl, Cmd,
-    // Shift or Alt asks for another tab or window, so this page stays, the count
-    // gets through on its own, and the browser does what was asked.
+    // Shown once the day on screen is finished — kept in sync every frame in
+    // render(), the same gate the canvas button next to it already used.
     onwardLink.addEventListener('click', (event) => {
-      if (!event.isTrusted) return;
-      if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) { countOnward(); return; }
+      const plan = onwardClickPlan(event, onward());
+      if (plan === 'ignore') return;
+      if (plan === 'count') { countOnward(); return; }
       event.preventDefault();
       goOnward();
+    });
+    onwardLink.addEventListener('auxclick', (event) => {
+      if (onwardAuxclickPlan(event, onward()) === 'count') countOnward();
     });
   }
   const run = () => S.runs[S.tier];
@@ -1176,7 +1200,7 @@
   // on the parent page: navigating on the same tick can unload that page first,
   // losing the count. A tenth of a second is less than a tap takes to feel slow.
   function goOnward() {
-    if (!ONWARD) return;
+    if (!ONWARD || !onward()) return;
     sfx.click();
     countOnward();
     setTimeout(() => onwardLink.click(), 100);
@@ -1914,6 +1938,7 @@
   }
 
   function render() {
+    if (ONWARD) onwardLink.hidden = !onward();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = C.bg;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
