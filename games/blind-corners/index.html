@@ -333,21 +333,25 @@
    * One day's saved results, merged with what this tab holds. Two tabs of the
    * same game write to one store; the later write must not unsolve a puzzle the
    * other tab solved, or lower a count the player already spent.
-   * For an unsolved puzzle the position is this tab's only where `mine[tier]`
-   * says so: the tab changed it and has not saved yet, or the store still holds
-   * what the tab last saw. Otherwise another tab moved on and its position wins.
+   * For an unsolved puzzle the history and the marks are decided separately:
+   * a tab that only marked a cell must not carry an older, stale history over
+   * a beam the other tab fired meanwhile, and a tab that only fired a beam
+   * must not wipe marks the other tab wrote on cells that beam never touched.
+   * `mineInputs`/`mineMarks` say, per tier, whether this tab changed that field
+   * and has not saved yet, or the store still holds what the tab last saw for
+   * it. Otherwise another tab moved on and its side of the entry wins.
    * Entries are { i: history, g: the player's marks, m: spent, s: spent at the solve or 0, p: par at the solve }.
-   * The marks travel with the history: they are notes on those beams.
    */
-  function mergeDay(saved, current, mine) {
+  function mergeDay(saved, current, mineInputs, mineMarks) {
     return current.map((cur, tier) => {
       const old = (Array.isArray(saved) && saved[tier]) || {};
       const m = Math.max(Number(old.m) || 0, cur.m);
       const oldPath = typeof old.i === 'string' ? old.i : null;
       const oldMarks = typeof old.g === 'string' ? old.g : '';
       if (Number(old.s) > 0) return { i: oldPath ?? cur.i, g: oldPath === null ? cur.g : oldMarks, m, s: Number(old.s), p: Number(old.p) || 0 };
-      const ours = !mine || mine[tier] || oldPath === null;
-      return { i: ours ? cur.i : oldPath, g: ours ? cur.g : oldMarks, m, s: cur.s, p: cur.p };
+      const oursInputs = !mineInputs || mineInputs[tier] || oldPath === null;
+      const oursMarks = !mineMarks || mineMarks[tier] || oldPath === null;
+      return { i: oursInputs ? cur.i : oldPath, g: oursMarks ? cur.g : oldMarks, m, s: cur.s, p: cur.p };
     });
   }
 
@@ -383,7 +387,8 @@
     for (const [day, entries] of Object.entries(snapshot.days || {})) {
       if (Number(day) === openDay || !Array.isArray(entries)) continue;
       const was = base && base.days ? base.days[day] : undefined;
-      days[day] = mergeDay(days[day], entries, entries.map((_, tier) => boardKey(entries, tier) !== boardKey(was, tier)));
+      const mine = entries.map((_, tier) => boardKey(entries, tier) !== boardKey(was, tier));
+      days[day] = mergeDay(days[day], entries, mine, mine);
     }
     const from = (Number(snapshot.lastFull) || 0) > (Number(fresh.lastFull) || 0) ? snapshot : fresh;
     return { ...fresh, days, streak: from.streak, lastFull: from.lastFull, best: Math.max(Number(fresh.best) || 0, Number(snapshot.best) || 0) };
@@ -582,7 +587,7 @@
   const S = {
     mode: 'title',          // title | play
     day: 1, today: 1,       // the day on screen, and the newest day it can be
-    puzzles: [], runs: [], seen: [], dirty: [], tier: 0, newDay: false,
+    puzzles: [], runs: [], seenInputs: [], seenMarks: [], dirtyInputs: [], dirtyMarks: [], tier: 0, newDay: false,
     beams: [], fired: new Set(), marks: new Uint8Array(0), sel: -1,
     cursor: { x: 1, y: 0 }, keys: false, // the keyboard cursor, on the ring around the box; drawn once a key has moved it
     help: false, line: null,            // line: the solver's beams, shown on a solved box
@@ -723,7 +728,8 @@
   const onward = () => ONWARD !== null && solvedCount() === TIERS.length;
   const locked = () => run().solved;
   const parOf = (tier) => S.runs[tier].par || puzzleOf(tier).par;
-  const touchTier = () => { S.dirty[S.tier] = true; };
+  const touchInputs = () => { S.dirtyInputs[S.tier] = true; };
+  const touchMarks = () => { S.dirtyMarks[S.tier] = true; };
   const liveStreak = () => (S.lastFull >= S.today - 1 ? S.streak : 0);
   const archive = () => S.day < S.today;
   const dayDate = (day) => new Date(EPOCH_UTC + (day - 1) * DAY_MS).toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'UTC' });
@@ -806,16 +812,20 @@
   function absorb(data) {
     const saved = data.days[S.day];
     const current = S.runs.map((r) => ({ i: r.inputs, g: r.marks, m: r.moves, s: r.solved ? r.solvedMoves : 0, p: r.solved ? r.par : 0 }));
-    const mine = S.runs.map((_, tier) => {
-      const stored = Array.isArray(saved) && saved[tier] && typeof saved[tier].i === 'string' ? saved[tier].i : null;
-      return ownsPosition(stored, S.seen[tier], S.dirty[tier]);
-    });
-    const merged = mergeDay(saved, current, mine);
+    const storedInputs = (tier) => (Array.isArray(saved) && saved[tier] && typeof saved[tier].i === 'string' ? saved[tier].i : null);
+    const storedMarks = (tier) => (Array.isArray(saved) && saved[tier] && typeof saved[tier].g === 'string' ? saved[tier].g : null);
+    // History and marks are owned separately: a tab that only marked a cell
+    // must not carry a stale history over a beam another tab fired meanwhile,
+    // and a tab that only fired a beam must not wipe marks the other tab wrote.
+    const mineInputs = S.runs.map((_, tier) => ownsPosition(storedInputs(tier), S.seenInputs[tier], S.dirtyInputs[tier]));
+    const mineMarks = S.runs.map((_, tier) => ownsPosition(storedMarks(tier), S.seenMarks[tier], S.dirtyMarks[tier]));
+    const merged = mergeDay(saved, current, mineInputs, mineMarks);
     merged.forEach((entry, tier) => {
       const r = S.runs[tier];
       r.moves = entry.m;
+      S.seenInputs[tier] = entry.i;
+      S.seenMarks[tier] = entry.g;
       if (entry.s > 0) {
-        S.seen[tier] = entry.i;
         if (r.solved && r.solvedMoves === entry.s) return;
         // Solved elsewhere, or solved in two tabs at once: the stored result is the one that counts.
         r.solved = true;
@@ -833,8 +843,6 @@
         }
         return;
       }
-      if (mine[tier]) return;
-      S.seen[tier] = entry.i;
       if (entry.i === current[tier].i && entry.g === current[tier].g) return;
       r.inputs = entry.i;
       r.marks = entry.g;
@@ -884,7 +892,10 @@
     data.streak = S.streak; data.best = S.bestStreak; data.lastFull = S.lastFull;
     if (storage.set(STORE, JSON.stringify(data))) {
       unsaved = null;
-      entries.forEach((entry, tier) => { S.seen[tier] = entry.i; S.dirty[tier] = false; });
+      entries.forEach((entry, tier) => {
+        S.seenInputs[tier] = entry.i; S.seenMarks[tier] = entry.g;
+        S.dirtyInputs[tier] = false; S.dirtyMarks[tier] = false;
+      });
     } else {
       unsaved = data;
       unsavedBase = lastRaw;
@@ -915,9 +926,13 @@
     // must still tell its own positions from another tab's later save.
     const stored = unsaved ? parseStore(unsavedBase).days[day] : saved;
     const pathOf = (entries, tier) => (Array.isArray(entries) && entries[tier] && typeof entries[tier].i === 'string' ? entries[tier].i : null);
-    S.seen = TIERS.map((_, tier) => pathOf(stored, tier));
-    // A snapshot board the store does not hold is a change not yet saved.
-    S.dirty = TIERS.map((_, tier) => boardKey(saved, tier) !== boardKey(stored, tier));
+    const marksOf = (entries, tier) => (Array.isArray(entries) && entries[tier] && typeof entries[tier].g === 'string' ? entries[tier].g : null);
+    S.seenInputs = TIERS.map((_, tier) => pathOf(stored, tier));
+    S.seenMarks = TIERS.map((_, tier) => marksOf(stored, tier));
+    // A snapshot board the store does not hold is a change not yet saved,
+    // tracked separately for the history and for the marks.
+    S.dirtyInputs = TIERS.map((_, tier) => pathOf(saved, tier) !== pathOf(stored, tier));
+    S.dirtyMarks = TIERS.map((_, tier) => marksOf(saved, tier) !== marksOf(stored, tier));
     S.runs = TIERS.map((_, tier) => {
       const entry = saved[tier] || {};
       const inputs = typeof entry.i === 'string' ? entry.i : '';
@@ -961,8 +976,10 @@
   function posePicture() {
     S.day = S.today = POSE.day;
     S.puzzles = [];
-    S.dirty = TIERS.map(() => false);
-    S.seen = TIERS.map(() => null);
+    S.dirtyInputs = TIERS.map(() => false);
+    S.dirtyMarks = TIERS.map(() => false);
+    S.seenInputs = TIERS.map(() => null);
+    S.seenMarks = TIERS.map(() => null);
     const hard = puzzleOf(POSE.tier);
     let shown = 0;
     const marks = Array.from(hard.grid, (mirror) => (mirror && shown++ < POSE.marks ? mirror : EMPTY)).join('');
@@ -1058,7 +1075,7 @@
     // puzzle has got, so a player who leaves unfinished leaves a number behind;
     // the portal keeps it to itself until then.
     emit('progress', { moves: run().moves, tier: S.tier + 1, day: S.day, archive: archive() });
-    touchTier();
+    touchInputs();
     writeStore();
     return !run().solved;
   }
@@ -1104,7 +1121,7 @@
     markStart();
     S.marks[cell] = mark;
     run().marks = marksText();
-    touchTier();
+    touchMarks();
     writeStore();
     if (run().solved) return; // solved in another tab meanwhile; the save said so
     if (mark) sfx.mark(); else sfx.unmark();
@@ -1119,7 +1136,7 @@
     if (!markCount()) { sfx.bump(); return; }
     S.marks.fill(EMPTY);
     run().marks = marksText();
-    touchTier();
+    touchMarks();
     writeStore();
     if (run().solved) return;
     sfx.unmark();
@@ -1178,7 +1195,7 @@
     r.solvedMoves = Math.max(1, r.moves);
     r.par = p.par;
     r.marks = marksText();
-    touchTier();
+    touchMarks();
     // The save merges once more; if the store already held a solve of this
     // puzzle, that win was reported by its own tab and stands.
     if (writeStore()) return;

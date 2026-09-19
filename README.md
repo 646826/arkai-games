@@ -4,11 +4,11 @@ Every game from [arkai.win](https://arkai.win) — each one a **single self-cont
 file** you can open from your desktop with no build step, no server, no package
 manager and no network connection.
 
-There are 10 of them. Together they are 561 KB.
+There are 10 of them. Together they are 563 KB.
 
 | Game | Kind | Controls | Size | Play |
 | --- | --- | --- | ---: | --- |
-| **Blind Corners** | Puzzle, Daily | Keyboard, touch & mouse | 95 KB | [play](https://arkai.win/games/blind-corners/) |
+| **Blind Corners** | Puzzle, Daily | Keyboard, touch & mouse | 96 KB | [play](https://arkai.win/games/blind-corners/) |
 | **Ink Side Down** | Puzzle, Daily | Keyboard, touch & mouse | 94 KB | [play](https://arkai.win/games/ink-side-down/) |
 | **Mole Rush** | Arcade, Family | Keyboard, touch & mouse | 55 KB | [play](https://arkai.win/games/mole-rush/) |
 | **One Step Late** | Puzzle, Daily | Keyboard, touch & mouse | 92 KB | [play](https://arkai.win/games/one-step-late/) |
