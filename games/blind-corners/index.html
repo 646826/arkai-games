@@ -365,18 +365,22 @@
   }
 
   /**
-   * What a saved board holds that is the player's own doing: the path, and any
-   * notes written on it. A missing line and an untouched board read the same.
+   * What a saved board holds in one field: the path, or the notes written on
+   * it. A missing line and an untouched board read the same.
    */
-  function boardKey(entries, tier) {
+  function fieldKey(entries, tier, field) {
     const e = Array.isArray(entries) && entries[tier];
-    return e ? `${typeof e.i === 'string' ? e.i : ''}|${typeof e.g === 'string' ? e.g : ''}` : '|';
+    return e && typeof e[field] === 'string' ? e[field] : '';
   }
 
   /**
    * What a tab could not save, carried onto a store another tab has written
    * since. `base` is the store the snapshot was built on: a position this tab
    * changed from it wins, one it did not change is the other tab's to move on.
+   * The history and the marks are decided separately for the same reason
+   * `mergeDay` takes two flags: a tab that only fired a beam here must not
+   * carry a stale mark over one the other tab wrote meanwhile, and one that
+   * only marked must not carry a stale beam over the other tab's.
    * The open day is left to absorb, which holds it in memory. Dropping the
    * snapshot whole lost every unsaved day but the one on screen; letting it win
    * everywhere rolled the other tab back. The streak comes from whichever side
@@ -387,8 +391,9 @@
     for (const [day, entries] of Object.entries(snapshot.days || {})) {
       if (Number(day) === openDay || !Array.isArray(entries)) continue;
       const was = base && base.days ? base.days[day] : undefined;
-      const mine = entries.map((_, tier) => boardKey(entries, tier) !== boardKey(was, tier));
-      days[day] = mergeDay(days[day], entries, mine, mine);
+      const mineInputs = entries.map((_, tier) => fieldKey(entries, tier, 'i') !== fieldKey(was, tier, 'i'));
+      const mineMarks = entries.map((_, tier) => fieldKey(entries, tier, 'g') !== fieldKey(was, tier, 'g'));
+      days[day] = mergeDay(days[day], entries, mineInputs, mineMarks);
     }
     const from = (Number(snapshot.lastFull) || 0) > (Number(fresh.lastFull) || 0) ? snapshot : fresh;
     return { ...fresh, days, streak: from.streak, lastFull: from.lastFull, best: Math.max(Number(fresh.best) || 0, Number(snapshot.best) || 0) };
@@ -514,7 +519,7 @@
   const core = {
     EMPTY, SLASH, BACK, TIERS, OPENING, EPOCH_UTC, DAY_MS, MAX_ATTEMPTS, GAME_SEED,
     portStart, portAt, portRing, ringPort, portName, exitOf, tracePath, pairsOf, candidates, solverLine, draw, makePuzzle, fallbackPuzzle,
-    judge, costOf, replay, mergeDay, ownsPosition, boardKey, carryUnsaved, readKey, dayStep, dayNumber, streakAfter, shareMark, resultText, parNote, solvedNotice, titleDay, readOnward,
+    judge, costOf, replay, mergeDay, ownsPosition, fieldKey, carryUnsaved, readKey, dayStep, dayNumber, streakAfter, shareMark, resultText, parNote, solvedNotice, titleDay, readOnward,
   };
   // ---- puzzle core end ----
 
