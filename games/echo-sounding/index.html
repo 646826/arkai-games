@@ -820,6 +820,13 @@
     announce(S.tapMode === 'ping' ? 'Ping mode.' : 'Mark mode.');
   }
 
+  function toggleMute() {
+    S.muted = !S.muted;
+    storage.set(STORE_MUTE, S.muted ? '1' : '0');
+    if (S.muted) { if (audio) audio.suspend().catch(() => {}); } else ensureAudio();
+    announce(S.muted ? 'Muted.' : 'Sound on.');
+  }
+
   function clearMarks() {
     if (S.mode !== 'play' || locked() || !S.marks.size) return;
     S.marks.clear();
@@ -947,6 +954,41 @@
     addHit(x, y, w, h, action);
   }
 
+  // Same pill chrome as button(), but a hand-drawn glyph instead of a label —
+  // matches the icon-button language the other three daily games use for
+  // home/mute instead of this game's former plain text link (IDEA-BACKLOG.md,
+  // session #241).
+  function iconButton(x, y, w, h, icon, action, active) {
+    ctx.fillStyle = active ? C.accent : C.card;
+    roundRect(x, y, w, h, 10); ctx.fill();
+    ctx.strokeStyle = C.accentDim; ctx.lineWidth = 1; roundRect(x, y, w, h, 10); ctx.stroke();
+    const cx = x + w / 2, cy = y + h / 2;
+    const ink = active ? '#052019' : C.text;
+    ctx.strokeStyle = ink; ctx.fillStyle = ink; ctx.lineWidth = 2; ctx.lineCap = 'round';
+    if (icon === 'home') {
+      ctx.beginPath();
+      ctx.moveTo(cx - 8, cy - 1); ctx.lineTo(cx, cy - 8); ctx.lineTo(cx + 8, cy - 1);
+      ctx.moveTo(cx - 5, cy - 3); ctx.lineTo(cx - 5, cy + 8); ctx.lineTo(cx + 5, cy + 8); ctx.lineTo(cx + 5, cy - 3);
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(cx - 9, cy - 3); ctx.lineTo(cx - 5, cy - 3); ctx.lineTo(cx, cy - 8);
+      ctx.lineTo(cx, cy + 8); ctx.lineTo(cx - 5, cy + 3); ctx.lineTo(cx - 9, cy + 3);
+      ctx.closePath(); ctx.fill();
+      ctx.beginPath();
+      if (S.muted) {
+        ctx.moveTo(cx + 3, cy - 4); ctx.lineTo(cx + 10, cy + 4);
+        ctx.moveTo(cx + 10, cy - 4); ctx.lineTo(cx + 3, cy + 4);
+      } else {
+        ctx.arc(cx + 2, cy, 5, -0.9, 0.9);
+        ctx.moveTo(cx + 6, cy - 8); ctx.arc(cx + 2, cy, 9, -0.9, 0.9);
+      }
+      ctx.stroke();
+    }
+    ctx.lineCap = 'butt';
+    addHit(x, y, w, h, action);
+  }
+
   function drawTitle() {
     ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
     addHit(0, 0, W, H, 'titledefault');
@@ -1039,11 +1081,18 @@
     ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
     const p = puzzle(), r = run();
 
-    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = C.text; ctx.font = `700 15px ${FONT}`;
-    ctx.fillText('‹ Title', 14, 22);
-    addHit(0, 4, 74, 30, 'home');
-    ctx.textAlign = 'right';
+    // 34x32 rather than the sibling games' 48-60: this bar has a centered day
+    // label and a right-aligned move counter squeezing the space, but 30x30
+    // (dual-review, GLM) was under the ~44px touch-target floor and one slip
+    // toggled sound instead of leaving to the title — widened with the gap
+    // kept at 6 so the two hits still can't bleed into each other.
+    iconButton(8, 4, 34, 32, 'home', 'home', false);
+    // Unlike button()'s other toggles, an accent-filled pill here would read as
+    // "sound is on" in this game's own color language — the crossed-out glyph
+    // alone carries the muted state, same as the three sibling daily games.
+    iconButton(48, 4, 34, 32, 'mute', 'mute', false);
+
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
     ctx.fillStyle = r.moves > p.budget ? C.warn : C.text; ctx.font = `700 15px ${FONT}`;
     ctx.fillText(`${r.moves}/${p.budget}`, 466, 22);
     ctx.textAlign = 'center';
@@ -1189,6 +1238,7 @@
       case 'prevday': stepDay(-1); return;
       case 'nextday': stepDay(1); return;
       case 'home': goTitle(); return;
+      case 'mute': toggleMute(); return;
       case 'mode': toggleTapMode(); return;
       case 'check': doCheck(); return;
       case 'clear': clearMarks(); return;
@@ -1251,7 +1301,6 @@
     if (act === 'act') { if (S.mode === 'play') actAt(S.cursor); return; }
     if (act === 'board') { announce(describeBoard()); return; }
     if (act === 'help') { S.help = !S.help; return; }
-    if (act === 'mute') { S.muted = !S.muted; storage.set(STORE_MUTE, S.muted ? '1' : '0'); announce(S.muted ? 'Muted.' : 'Sound on.'); return; }
     handleAction(act);
   });
 
