@@ -1,0 +1,1289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="color-scheme" content="dark">
+<title>Echo Sounding — Arkai</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #061420; overflow: hidden; }
+  body { -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+  /* dvh where it exists: on iOS 100vh is taller than the visible page while the
+     address bar shows, which pushed the buttons under it and offset every tap. */
+  canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; outline: none; cursor: pointer; }
+  canvas:focus-visible { outline: 2px solid rgba(0, 229, 199, 0.5); outline-offset: -2px; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  /* The same actions as the canvas buttons, for screen readers and the Tab key.
+     Hidden until one of them has focus, then shown as a bar. */
+  #controls:focus-within { position: fixed; left: 8px; right: 8px; bottom: 8px; width: auto; height: auto; clip: auto; white-space: normal; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border-radius: 12px; background: #0c2438; border: 1px solid #1f4b63; }
+  #controls button, #controls a { min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center; text-decoration: none; padding: 0 12px; border-radius: 10px; border: 1px solid #1f4b63; background: #0f2c44; color: #e7fbf8; font: 600 15px system-ui, sans-serif; }
+  #controls a[hidden] { display: none; }
+  #controls button:focus, #controls a:focus { outline: 2px solid #00e5c7; }
+  #copybox { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(4, 10, 16, 0.82); }
+  #copybox.open { display: flex; }
+  #copybox .card { width: min(92vw, 420px); box-sizing: border-box; padding: 18px; border-radius: 16px; background: #0c2438; border: 1px solid #1f4b63; color: #e7fbf8; }
+  #copybox p { margin: 0 0 10px; font-size: 15px; line-height: 1.4; }
+  #copybox textarea { width: 100%; height: 100px; box-sizing: border-box; padding: 10px; border-radius: 10px; border: 1px solid #1f4b63; background: #061420; color: #b6fff1; font: 15px/1.45 ui-monospace, Menlo, Consolas, monospace; resize: none; -webkit-user-select: text; user-select: text; }
+  #copybox button { margin-top: 12px; width: 100%; height: 44px; border: 0; border-radius: 10px; background: #00e5c7; color: #052019; font-weight: 700; font-size: 16px; cursor: pointer; }
+</style>
+</head>
+<body>
+<canvas id="game" tabindex="0" role="application" aria-label="Echo Sounding, a daily puzzle. A hidden grid holds a few reflectors. Ping any cell and you learn only the distance to the nearest one. Mark where the reflectors must be, then check. Arrow keys or WASD move the cursor, Space pings or marks depending on the mode, M switches mode, K checks, X clears your marks, L describes the grid, H shows the rules. Comma and period open the previous or next day. Press Tab for buttons."></canvas>
+<div id="status" class="sr" aria-live="polite"></div>
+<div id="controls" class="sr" role="group" aria-label="Game controls">
+  <button type="button" data-act="dir0">Move the cursor up</button>
+  <button type="button" data-act="dir1">Move the cursor right</button>
+  <button type="button" data-act="dir2">Move the cursor down</button>
+  <button type="button" data-act="dir3">Move the cursor left</button>
+  <button type="button" data-act="act">Ping, or mark a reflector, at the cursor</button>
+  <button type="button" data-act="mode">Switch between ping and mark</button>
+  <button type="button" data-act="check">Check your marks</button>
+  <button type="button" data-act="clear">Clear your marks</button>
+  <button type="button" data-act="board">Describe the grid</button>
+  <button type="button" data-act="help">Rules</button>
+  <button type="button" data-act="replay">Replay a solved puzzle for practice</button>
+  <button type="button" data-act="next">Next puzzle</button>
+  <button type="button" data-act="share">Share result</button>
+  <a id="onward" href="#" target="_top" hidden>Play the next daily puzzle</a>
+  <button type="button" data-act="card0">Easy puzzle</button>
+  <button type="button" data-act="card1">Medium puzzle</button>
+  <button type="button" data-act="card2">Hard puzzle</button>
+  <button type="button" data-act="mute">Sound on or off</button>
+  <button type="button" data-act="home">Title screen</button>
+  <button type="button" data-act="prevday">Previous day</button>
+  <button type="button" data-act="nextday">Next day</button>
+</div>
+<div id="copybox" role="dialog" aria-modal="true" aria-labelledby="copytitle">
+  <div class="card">
+    <p id="copytitle">Your browser would not copy by itself. Select the text below, copy it, and paste it anywhere.</p>
+    <textarea id="copytext" readonly></textarea>
+    <button id="copyclose" type="button">Done</button>
+  </div>
+</div>
+<script>
+(() => {
+  'use strict';
+
+  // ---- puzzle core begin ----
+  // Everything between the two markers is pure: no DOM, no clock, no storage.
+  // The one promise a daily puzzle makes is that grid #N hides the same
+  // reflectors for everyone, forever. A change here that renumbers or reshapes
+  // old days breaks every result anyone has already shared.
+
+  const GAME_SEED = 0xec40;
+  const EPOCH_UTC = Date.UTC(2026, 8, 21);
+  const DAY_MS = 86400000;
+  const FREEZE_COOLDOWN = 30;
+
+  // The whole difficulty curve, validated offline (IDEA-BACKLOG.md, 2026-09-21):
+  // reflector count is the dominant knob, not grid size. `par` is the accepted
+  // range for the reference solver's probe count; `budget` is the number shown
+  // as the star threshold, which is its own upper bound.
+  const TIERS = [
+    { name: 'I', label: 'Easy', size: 6, k: 3, budget: 10, par: [4, 10] },
+    { name: 'II', label: 'Medium', size: 7, k: 3, budget: 9, par: [4, 9] },
+    { name: 'III', label: 'Hard', size: 8, k: 4, budget: 10, par: [5, 10] },
+  ];
+  const MAX_ATTEMPTS = 1500;
+  // Above this many still-possible placements, checking every one is skipped for
+  // that probe: cheap early rounds, exact once the field narrows.
+  const BRUTE_CAP = 12000;
+  const SEARCH_SLACK = 5;
+
+  // mulberry32 over an FNV-1a mix of the inputs: integer arithmetic only, so
+  // every engine draws the same grid from the same day.
+  function seeded(...parts) {
+    let h = 2166136261 >>> 0;
+    for (const part of parts) {
+      h = Math.imul(h ^ (part & 0xffff), 16777619) >>> 0;
+      h = Math.imul(h ^ (part >>> 16), 16777619) >>> 0;
+    }
+    let a = h | 0;
+    return () => {
+      a = (a + 0x6d2b79f5) | 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  const manhattan = (a, b, size) => Math.abs((a % size) - (b % size)) + Math.abs(((a / size) | 0) - ((b / size) | 0));
+
+  /** The distance from every cell to the nearest of `cells`: the whole physics in one array. */
+  function responsesFor(size, cells) {
+    const n = size * size, resp = new Uint8Array(n);
+    for (let c = 0; c < n; c++) {
+      let best = 999;
+      for (const r of cells) { const d = manhattan(c, r, size); if (d < best) best = d; }
+      resp[c] = best;
+    }
+    return resp;
+  }
+
+  function nCk(n, k) {
+    if (k < 0 || k > n) return 0;
+    k = Math.min(k, n - k);
+    let r = 1;
+    for (let i = 0; i < k; i++) r = (r * (n - i)) / (i + 1);
+    return Math.round(r);
+  }
+
+  /**
+   * The reference solver's next probe: whichever still-possible cell has the
+   * smallest worst-case distance to the others still possible — the centre of
+   * what is left, not of the grid. It never looks at the hidden reflectors, only
+   * at the elimination done so far, so it picks the same way a careful player
+   * would: pings deep in a shrinking uncertain region are the informative ones.
+   */
+  function pickProbe(possible, size, probed) {
+    let best = -1, bestScore = Infinity;
+    for (const q of possible) {
+      if (probed.has(q)) continue;
+      let worst = 0;
+      for (const c of possible) { const d = manhattan(q, c, size); if (d > worst) worst = d; }
+      if (worst < bestScore) { bestScore = worst; best = q; }
+    }
+    if (best < 0) for (let c = 0; c < size * size; c++) if (!probed.has(c)) return c;
+    return best;
+  }
+
+  /**
+   * How many placements of `k` reflectors among `possible` cells are consistent
+   * with every ping fired so far. Stops past `capAt`: the caller only ever asks
+   * "exactly one?", and a second match answers that without finding a third.
+   */
+  function countConsistent(possible, k, probes, size, capAt) {
+    const n = possible.length, cand = new Int32Array(k);
+    let count = 0;
+    const consistent = () => {
+      for (const probe of probes) {
+        let best = 999;
+        for (let i = 0; i < k; i++) { const d = manhattan(cand[i], probe.cell, size); if (d < best) best = d; }
+        if (best !== probe.dist) return false;
+      }
+      return true;
+    };
+    const rec = (start, depth) => {
+      if (count >= capAt) return;
+      if (depth === k) { if (consistent()) count++; return; }
+      for (let i = start; i <= n - (k - depth); i++) {
+        cand[depth] = possible[i];
+        rec(i + 1, depth + 1);
+        if (count >= capAt) return;
+      }
+    };
+    rec(0, 0);
+    return count;
+  }
+
+  /**
+   * The reference solver: ping the fixed order for this tier, and after every
+   * ping strike out any cell that must be too close to hold a reflector (if it
+   * did, that ping would have come back shorter — a sound elimination, never a
+   * guess). Once few enough cells remain to check exhaustively, count how many
+   * k-of-them placements agree with every ping fired so far. One means the grid
+   * is uniquely determined; `par` is the probe it took.
+   */
+  function solve(size, reflectors, k, maxProbes) {
+    const resp = responsesFor(size, reflectors);
+    let possible = Array.from({ length: size * size }, (_, i) => i);
+    const probes = [], probed = new Set();
+    for (let step = 1; step <= maxProbes; step++) {
+      const cell = pickProbe(possible, size, probed);
+      probed.add(cell);
+      const dist = resp[cell];
+      probes.push({ cell, dist });
+      possible = possible.filter((c) => manhattan(c, cell, size) >= dist);
+      if (nCk(possible.length, k) <= BRUTE_CAP && countConsistent(possible, k, probes, size, 2) === 1) {
+        return { par: step, resp, probes };
+      }
+    }
+    return { par: Infinity, resp, probes };
+  }
+
+  function draw(day, tier, attempt) {
+    const spec = TIERS[tier], cells = spec.size * spec.size;
+    const rand = seeded(GAME_SEED, day, tier, attempt);
+    const order = Array.from({ length: cells }, (_, i) => i);
+    for (let i = cells - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1));
+      const t = order[i]; order[i] = order[j]; order[j] = t;
+    }
+    return order.slice(0, spec.k).sort((a, b) => a - b);
+  }
+
+  const finish = (reflectors, spec, day, tier, attempt, maxProbes) => {
+    const { par, resp, probes } = solve(spec.size, reflectors, spec.k, maxProbes);
+    return { size: spec.size, k: spec.k, budget: spec.budget, reflectors, resp, par, probes, day, tier, attempt };
+  };
+
+  /** A grid that always works, for a day the generator cannot fill: the corners, and past four, the centre. */
+  function fallbackPuzzle(day, tier) {
+    const spec = TIERS[tier], n = spec.size;
+    const spots = [0, n - 1, n * (n - 1), n * n - 1, ((n / 2) | 0) * n + ((n / 2) | 0)];
+    const reflectors = spots.slice(0, spec.k).sort((a, b) => a - b);
+    return finish(reflectors, spec, day, tier, -1, spec.size * spec.size);
+  }
+
+  /** The puzzle for a day and tier. Same arguments, same grid, on any machine. */
+  function makePuzzle(day, tier) {
+    const spec = TIERS[tier], maxProbes = spec.par[1] + SEARCH_SLACK;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      const reflectors = draw(day, tier, attempt);
+      const puzzle = finish(reflectors, spec, day, tier, attempt, maxProbes);
+      if (puzzle.par >= spec.par[0] && puzzle.par <= spec.par[1]) return puzzle;
+    }
+    // Tens of thousands of days were generated in testing and none got here. If
+    // one ever does, a plain grid beats a frozen tab.
+    return fallbackPuzzle(day, tier);
+  }
+
+  /**
+   * The verdict on a player's marks. A guess that answers every cell in the
+   * grid exactly as the hidden layout does cannot be told apart from it by
+   * anything the grid allows, so it counts as solved — and because a ping
+   * straight at a reflector always reads zero, that can only happen when the
+   * marks are the reflectors themselves. Otherwise the answer names a cell
+   * that shows the difference: one never pinged ('unproved'), or, only once
+   * every difference has already been pinged, one that has ('wrong').
+   */
+  function judge(puzzle, marks, probed) {
+    if (marks.length !== puzzle.k) return { ok: false, reason: 'count', cell: -1 };
+    const markResp = responsesFor(puzzle.size, marks);
+    let wrong = -1;
+    for (let c = 0; c < markResp.length; c++) {
+      if (markResp[c] === puzzle.resp[c]) continue;
+      if (!probed.has(c)) return { ok: false, reason: 'unproved', cell: c };
+      if (wrong < 0) wrong = c;
+    }
+    return wrong < 0 ? { ok: true, cell: -1 } : { ok: false, reason: 'wrong', cell: wrong };
+  }
+
+  // A history token is a ping's cell number, or a failed check: 'x' plus the
+  // cell it proved wrong, or a bare 'x' when nothing new was revealed. Joined
+  // by dots, the same convention Blind Corners uses for its own beam history.
+  const tokensOf = (text) => (typeof text === 'string' && text ? text.split('.') : []);
+  function costOf(text) {
+    return tokensOf(text).reduce((sum, token) => sum + (token[0] === 'x' ? 2 : 1), 0);
+  }
+
+  /** What a stored ping history put on screen. Stops at the first entry the game could not have written. */
+  function replay(puzzle, text) {
+    const cells = puzzle.size * puzzle.size, pings = [], probed = new Set(), kept = [];
+    let moves = 0;
+    for (const token of tokensOf(text)) {
+      const m = /^(x?)(\d{0,2})$/.exec(token);
+      if (!m || (!m[1] && !m[2])) break; // only a corrupt store gets here
+      if (m[2]) {
+        const cell = Number(m[2]);
+        if (cell >= cells || probed.has(cell)) break;
+        pings.push({ cell, dist: puzzle.resp[cell] });
+        probed.add(cell);
+      }
+      moves += m[1] ? 2 : 1;
+      kept.push(token);
+    }
+    return { pings, probed, moves, inputs: kept.join('.') };
+  }
+
+  const marksOf = (text) => (typeof text === 'string' && text ? text.split('.').map(Number).filter((n) => Number.isInteger(n) && n >= 0) : []);
+
+  // Movement is positional: arrows, and WASD by where the keys sit, so ZQSD
+  // walks on AZERTY. Commands are read by the printed letter, so Z undoes on
+  // QWERTZ; a non-Latin letter falls back to the Latin one on the same key.
+  const KEY_DIRS = { ArrowUp: 0, KeyW: 0, ArrowRight: 1, KeyD: 1, ArrowDown: 2, KeyS: 2, ArrowLeft: 3, KeyA: 3 };
+  const ARROW_DIRS = { ArrowUp: 0, ArrowRight: 1, ArrowDown: 2, ArrowLeft: 3 };
+  const PUNCT_KEYS = { Comma: ',', Period: '.' };
+  const own = (table, name) => Object.prototype.hasOwnProperty.call(table, name);
+
+  function readKey(rawCode, rawKey) {
+    const code = String(rawCode || ''), key = String(rawKey || '');
+    let dir = own(ARROW_DIRS, key) ? ARROW_DIRS[key] : own(KEY_DIRS, code) ? KEY_DIRS[code] : -1;
+    const digit = /^Digit[123]$/.test(code) || (/^Numpad[123]$/.test(code) && /^[123]$/.test(key)) ? Number(code.slice(-1)) - 1 : -1;
+    let letter = key.length === 1 ? key.toLowerCase() : key;
+    if (/^[\p{L}\p{M}]+$/u.test(key) && /[^\p{Script=Latin}\p{Script=Inherited}\p{Script=Common}]/u.test(key)) {
+      if (/^Key[A-Z]$/.test(code)) letter = code.slice(3).toLowerCase();
+      else if (own(PUNCT_KEYS, code)) letter = PUNCT_KEYS[code];
+    }
+    return { dir, digit, letter: dir >= 0 ? '' : letter };
+  }
+
+  function dayStep(letter) {
+    if (letter === ',' || letter === '<' || letter === '[') return -1;
+    if (letter === '.' || letter === '>' || letter === ']') return 1;
+    return 0;
+  }
+
+  function dayNumber(date) {
+    const utc = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+    return Math.max(1, Math.floor((utc - EPOCH_UTC) / DAY_MS) + 1);
+  }
+
+  function streakAfter(streak, lastFull, day, today, freezeAvailable) {
+    if (day !== today || lastFull >= day) return null;
+    if (lastFull === day - 1) return { streak: streak + 1, lastFull: day };
+    if (freezeAvailable && lastFull === day - 2) return { streak: streak + 1, lastFull: day, freezeUsed: true };
+    return { streak: 1, lastFull: day };
+  }
+
+  function titleDay(day, date, past) {
+    return past ? `Day ${day} · ${date}` : `Day ${day} · three new puzzles every day`;
+  }
+
+  function shareMark(result, par) {
+    if (!result) return '⬛';
+    const over = result - par;
+    if (over < 0) return '⭐' + over;
+    if (over === 0) return '⭐';
+    if (over <= 2) return '🟢+' + over;
+    if (over <= 6) return '🟡+' + over;
+    return '🔴+' + over;
+  }
+
+  function parNote(moves, par) {
+    const over = moves - par;
+    return over < 0 ? `★ ${-over} under par` : over === 0 ? '★ par' : `par ${par}, +${over}`;
+  }
+
+  function solvedNotice(over, allDone) {
+    const verdict = over < 0 ? `${-over} under par: you beat the solver!` : over === 0 ? 'Par! A star.' : `Solved, ${over} over par.`;
+    return `${verdict} ${allDone ? 'All three done.' : 'Next when ready.'}`;
+  }
+
+  function readOnward(fragment, self) {
+    const params = new URLSearchParams(String(fragment || '').replace(/^#/, ''));
+    const slug = params.get('next') || '', title = params.get('title') || '';
+    if (slug === self || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(slug) || !/^[A-Za-z0-9][A-Za-z0-9 '’-]{0,23}$/.test(title)) return null;
+    return { slug, title, path: `/games/${slug}/` };
+  }
+
+  /**
+   * One day's saved results, merged with what this tab holds. Two tabs of the
+   * same game write to one store; the later write must not unsolve a puzzle
+   * the other tab solved, or lower a count the player already spent. Entries
+   * are { i: ping history, g: the player's marks, m: spent, s: spent at the
+   * solve or 0, p: par at the solve }. `mineInputs`/`mineMarks` say, per tier,
+   * whether this tab changed that field and has not saved yet; null (as the
+   * front page's own reader passes) means "current always wins".
+   */
+  function mergeDay(saved, current, mineInputs, mineMarks) {
+    return current.map((cur, tier) => {
+      const old = (Array.isArray(saved) && saved[tier]) || {};
+      const m = Math.max(Number(old.m) || 0, cur.m);
+      const oldPath = typeof old.i === 'string' ? old.i : null;
+      const oldMarks = typeof old.g === 'string' ? old.g : '';
+      if (Number(old.s) > 0) return { i: oldPath ?? cur.i, g: oldPath === null ? cur.g : oldMarks, m, s: Number(old.s), p: Number(old.p) || 0 };
+      const oursInputs = !mineInputs || mineInputs[tier] || oldPath === null;
+      const oursMarks = !mineMarks || mineMarks[tier] || oldPath === null;
+      return { i: oursInputs ? cur.i : oldPath, g: oursMarks ? cur.g : oldMarks, m, s: cur.s, p: cur.p };
+    });
+  }
+
+  const core = {
+    GAME_SEED, EPOCH_UTC, DAY_MS, TIERS, MAX_ATTEMPTS, BRUTE_CAP,
+    seeded, manhattan, responsesFor, nCk, pickProbe, countConsistent, solve, draw, finish, fallbackPuzzle, makePuzzle,
+    judge, costOf, replay, marksOf, mergeDay, readKey, dayStep, dayNumber, streakAfter, shareMark, parNote, solvedNotice, titleDay, readOnward,
+  };
+  // ---- puzzle core end ----
+
+  // ---- layout & state ----
+  const W = 480, H = 720;
+  const GRID_TOP = 132, GRID_MAX = 420;
+  const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+  const SLUG = 'echo-sounding';
+  const STORE = 'arkai:echo-sounding:v1', STORE_MUTE = 'arkai:echo-sounding:muted';
+  const SHARE_URL = 'https:' + '//arkai.win/games/echo-sounding/?ref=share';
+  const COLS_LETTERS = 'ABCDEFGH';
+
+  const C = {
+    bg: '#061420', card: '#0e2c46',
+    cell: '#0d2740', pinged: '#173a5c', hit: '#ff8a5b', hitText: '#2a0f04',
+    accent: '#00e5c7', accentDim: '#0a5c50', cursor: '#ffd166',
+    text: '#e7fbf8', muted: '#8fb3c4', good: '#6ee7a8', warn: '#fbbf24', bad: '#f87171',
+  };
+
+  function gridMetrics(size) {
+    const px = Math.min(GRID_MAX, size * 76);
+    const cell = px / size;
+    return { cell, gx: (W - px) / 2, gy: GRID_TOP };
+  }
+  function cellCenter(size, index) {
+    const { cell, gx, gy } = gridMetrics(size);
+    return { x: gx + (index % size) * cell + cell / 2, y: gy + ((index / size) | 0) * cell + cell / 2 };
+  }
+  const cellName = (size, cell) => `${COLS_LETTERS[cell % size]}${((cell / size) | 0) + 1}`;
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const statusEl = document.getElementById('status');
+  const controls = document.getElementById('controls');
+  const copyBox = document.getElementById('copybox');
+  const copyText = document.getElementById('copytext');
+  const copyClose = document.getElementById('copyclose');
+  const coarseQuery = window.matchMedia ? window.matchMedia('(pointer: coarse)') : null;
+  const calmQuery = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  const touch = () => !!(coarseQuery && coarseQuery.matches);
+  const calm = () => !!(calmQuery && calmQuery.matches);
+
+  // Set by the portal's picture generator (site/scripts/lib/picture-flag.mjs).
+  const PICTURE = window.__arkaiPicture === true;
+
+  const storage = {
+    get(key) { if (PICTURE) return null; try { return localStorage.getItem(key); } catch { return null; } },
+    set(key, value) { if (PICTURE) return true; try { localStorage.setItem(key, value); return true; } catch { return false; } },
+  };
+
+  const S = {
+    mode: 'title',
+    day: 1, today: 1,
+    puzzles: [], runs: [], tier: 0, newDay: false,
+    cursor: 0, tapMode: 'ping', marks: new Set(),
+    practice: false, practiceRun: null,
+    help: false,
+    streak: 0, bestStreak: 0, lastFull: 0, freezeUsedDay: 0, storageWarned: false,
+    muted: storage.get(STORE_MUTE) === '1',
+    clock: 0, dayCheck: 5, shake: 0, flash: 0,
+    parts: [], floats: [], toast: null, hidden: false,
+  };
+  const started = new Set();
+
+  // ---- portal events (same-origin parent only) ----
+  const emit = (event, data) => {
+    if (PICTURE) return; // a photograph is not a play session
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: 'game-event', event, data: data || {} }, location.origin);
+      }
+    } catch { /* not embedded */ }
+  };
+  const reportFocus = () => emit('focus', { day: S.day, tier: S.tier + 1 });
+
+  let announceTimer = 0, pending = '';
+  const announce = (message) => {
+    pending = pending ? `${pending} ${message}` : message;
+    statusEl.textContent = '';
+    clearTimeout(announceTimer);
+    announceTimer = setTimeout(() => { statusEl.textContent = pending; pending = ''; }, 60);
+  };
+
+  // ---- sound (generated, no assets) ----
+  let audio = null;
+  const ensureAudio = () => {
+    if (S.muted) return;
+    if (!audio) {
+      try { const Ctx = window.AudioContext || window.webkitAudioContext; if (Ctx) audio = new Ctx(); } catch { audio = null; }
+    }
+    if (audio && audio.state === 'suspended') audio.resume().catch(() => {});
+  };
+  const tone = (freq, dur = 0.08, type = 'sine', vol = 0.04, delay = 0, slide = 0) => {
+    if (S.muted || !audio || audio.state !== 'running') return;
+    const t = audio.currentTime + delay;
+    const osc = audio.createOscillator(), gain = audio.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t);
+    if (slide) osc.frequency.exponentialRampToValueAtTime(Math.max(40, freq + slide), t + dur);
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(vol, t + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(gain); gain.connect(audio.destination);
+    osc.start(t); osc.stop(t + dur + 0.02);
+  };
+  const sfx = {
+    ping: (dist) => tone(760 - Math.min(dist, 12) * 40, 0.16, 'sine', 0.045, 0, -60),
+    hit: () => [880, 1180].forEach((f, i) => tone(f, 0.12, 'triangle', 0.05, i * 0.06)),
+    mark: () => tone(520, 0.05, 'square', 0.03),
+    unmark: () => tone(340, 0.05, 'square', 0.025),
+    bump: () => tone(130, 0.08, 'square', 0.025),
+    fail: () => tone(300, 0.3, 'sawtooth', 0.035, 0, -180),
+    win: () => [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.16, 'triangle', 0.045, i * 0.09)),
+    click: () => tone(700, 0.035, 'sine', 0.025),
+    mode: () => tone(600, 0.05, 'triangle', 0.03, 0, 80),
+  };
+
+  // ---- canvas letterbox ----
+  let view = { dpr: 1, cssW: W, cssH: H, scale: 1, ox: 0, oy: 0 };
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const cssW = Math.max(1, canvas.clientWidth), cssH = Math.max(1, canvas.clientHeight);
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    const scale = Math.min(cssW / W, cssH / H);
+    view = { dpr, cssW, cssH, scale, ox: (cssW - W * scale) / 2, oy: (cssH - H * scale) / 2 };
+  }
+  function toLogical(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    return { x: (clientX - rect.left - view.ox) / view.scale, y: (clientY - rect.top - view.oy) / view.scale };
+  }
+
+  // ---- helpers ----
+  const puzzle = () => S.puzzles[S.tier];
+  const run = () => (S.practice ? S.practiceRun : S.runs[S.tier]);
+  const solvedCount = () => S.runs.filter((r) => r.solved).length;
+  const locked = () => run().solved && !S.practice;
+  const archive = () => S.day < S.today;
+  const dayDate = (day) => new Date(EPOCH_UTC + (day - 1) * DAY_MS).toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'UTC' });
+  const ONWARD = !PICTURE && /^https?:$/.test(location.protocol) ? readOnward(location.hash, SLUG) : null;
+  const onwardLink = document.getElementById('onward');
+  const onward = () => ONWARD !== null && solvedCount() === TIERS.length;
+  // ---- onward click plan begin ----
+  // What a click (or middle click) on the onward control should do. `event`
+  // carries only the fields a real click event exposes; `available` is
+  // `onward()` — the day on screen is solved and there is a next daily to
+  // hand the player to.
+  function onwardClickPlan(event, available) {
+    if (!event.isTrusted || !available || event.altKey) return 'ignore';
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.button !== 0) return 'count';
+    return 'navigate';
+  }
+  function onwardAuxclickPlan(event, available) {
+    return event.isTrusted && available && event.button === 1 ? 'count' : 'ignore';
+  }
+  // ---- onward click plan end ----
+  if (ONWARD) {
+    onwardLink.addEventListener('click', (event) => {
+      const plan = onwardClickPlan(event, onward());
+      if (plan === 'ignore') return;
+      if (plan === 'count') { countOnward(); return; }
+      event.preventDefault();
+      goOnward();
+    });
+    onwardLink.addEventListener('auxclick', (event) => {
+      if (onwardAuxclickPlan(event, onward()) === 'count') countOnward();
+    });
+  }
+  function countOnward() { emit('next_game', { day: S.day }); }
+  // A message runs as a task on the parent page: navigating on the same tick
+  // can unload that page first, losing the count.
+  function goOnward() {
+    if (!ONWARD || !onward()) return;
+    sfx.click();
+    countOnward();
+    setTimeout(() => onwardLink.click(), 100);
+  }
+  const titleSummary = () => `Day ${S.day}${archive() ? `, ${dayDate(S.day)}, from the archive` : ''}. ${solvedCount()} of 3 puzzles solved.`;
+
+  const toast = (message, spoken = message) => { S.toast = { text: message, t: 0 }; announce(spoken); };
+  const float = (x, y, message, color) => S.floats.push({ x, y, text: message, color, t: 0 });
+  const shake = (amount) => { if (!calm()) S.shake = amount; };
+  function spawnParts(x, y, color, count, speed = 160) {
+    if (calm()) return;
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2, s = speed * (0.3 + Math.random() * 0.7);
+      S.parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.5 + Math.random() * 0.4, t: 0, color });
+    }
+  }
+
+  function describeBoard() {
+    const p = puzzle(), r = run();
+    const pings = r.pings.length ? r.pings.map(({ cell, dist }) => `${cellName(p.size, cell)} ${dist}`).join(', ') : 'none yet';
+    const marks = S.marks.size ? Array.from(S.marks).map((c) => cellName(p.size, c)).join(', ') : 'none';
+    return `Grid ${p.size} by ${p.size}, ${p.k} reflectors hidden. Pings: ${pings}. Marks: ${marks}. Cursor at ${cellName(p.size, S.cursor)}.`;
+  }
+
+  // ---- persistence (single tab: no cross-tab merge, kept deliberately simple) ----
+  function parseStore(raw) {
+    try {
+      const data = JSON.parse(raw || 'null');
+      return data && typeof data === 'object' && data.days && typeof data.days === 'object' ? data : { days: {} };
+    } catch { return { days: {} }; }
+  }
+  const readStore = () => parseStore(storage.get(STORE));
+
+  function entryFor(tier) {
+    const r = S.runs[tier];
+    return { i: r.inputs, g: Array.from(r.marks).join('.'), m: r.moves, s: r.solved ? r.solvedMoves : 0, p: r.solved ? r.par : 0 };
+  }
+
+  function writeStore() {
+    const data = readStore();
+    // Merged, not overwritten: a solved entry another tab saved since this tab
+    // last read must not be regressed by this tab's own (older) view of a tier.
+    data.days[S.day] = mergeDay(data.days[S.day], S.runs.map((_, tier) => entryFor(tier)), null, null);
+    if (solvedCount() === TIERS.length) {
+      const freezeAvailable = !S.freezeUsedDay || S.day - S.freezeUsedDay >= FREEZE_COOLDOWN;
+      const next = streakAfter(S.streak, S.lastFull, S.day, S.today, freezeAvailable);
+      if (next) {
+        S.streak = next.streak; S.lastFull = next.lastFull; S.bestStreak = Math.max(S.bestStreak, S.streak);
+        if (next.freezeUsed) { S.freezeUsedDay = S.day; toast('Missed a day — your streak freeze covered it.'); }
+      }
+    }
+    data.streak = S.streak; data.best = S.bestStreak; data.lastFull = S.lastFull; data.freezeUsedDay = S.freezeUsedDay;
+    if (!storage.set(STORE, JSON.stringify(data)) && !S.storageWarned) {
+      S.storageWarned = true;
+      toast('This browser is not keeping your progress.');
+    }
+  }
+
+  /** Takes in what another tab saved: a solve this tab has not seen, and the streak. */
+  function absorb(data) {
+    const saved = data.days[S.day];
+    if (Array.isArray(saved)) {
+      const current = S.runs.map((r) => ({ i: r.inputs, g: Array.from(r.marks).join('.'), m: r.moves, s: r.solved ? r.solvedMoves : 0, p: r.solved ? r.par : 0 }));
+      const merged = mergeDay(saved, current, null, null);
+      merged.forEach((entry, tier) => {
+        const r = S.runs[tier];
+        r.moves = entry.m;
+        if (entry.s > 0 && !(r.solved && r.solvedMoves === entry.s)) {
+          const state = replay(S.puzzles[tier], entry.i);
+          r.solved = true;
+          r.solvedMoves = entry.s;
+          r.par = entry.p;
+          r.inputs = state.inputs;
+          r.pings = state.pings;
+          r.probed = state.probed;
+          r.marks = new Set(marksOf(entry.g));
+          // Finished elsewhere, not abandoned: this tab's own beacon must not report `leave`.
+          emit('closed', { day: S.day, tier: tier + 1 });
+          if (tier === S.tier) {
+            S.marks = new Set(r.marks);
+            toast(`${TIERS[tier].label} was solved in another tab, in ${entry.s}.`);
+          }
+        }
+      });
+    }
+    S.streak = Number(data.streak) || 0;
+    S.bestStreak = Math.max(S.bestStreak, Number(data.best) || 0);
+    S.lastFull = Number(data.lastFull) || 0;
+    S.freezeUsedDay = Number(data.freezeUsedDay) || 0;
+  }
+
+  function selectTier(tier) {
+    S.tier = tier;
+    S.practice = false;
+    S.practiceRun = null;
+    S.help = false;
+    S.parts = []; S.floats = []; S.flash = 0; S.shake = 0;
+    S.marks = new Set(run().marks);
+    S.cursor = 0;
+  }
+
+  /** Opens a day's three puzzles: today, or any earlier day back to day 1. */
+  function loadDay(day) {
+    S.today = dayNumber(new Date());
+    day = Math.min(Math.max(1, day), S.today);
+    S.day = day;
+    S.newDay = false;
+    S.puzzles = TIERS.map((_, tier) => makePuzzle(day, tier));
+    const data = readStore();
+    const saved = Array.isArray(data.days[day]) ? data.days[day] : [];
+    S.streak = Number(data.streak) || 0;
+    S.bestStreak = Number(data.best) || 0;
+    S.lastFull = Number(data.lastFull) || 0;
+    S.freezeUsedDay = Number(data.freezeUsedDay) || 0;
+    S.runs = S.puzzles.map((p, tier) => {
+      const entry = saved[tier] || {};
+      const state = replay(p, entry.i);
+      const solvedMoves = Number(entry.s) || 0;
+      return {
+        inputs: state.inputs, pings: state.pings, probed: state.probed,
+        marks: new Set(marksOf(entry.g)),
+        moves: Math.max(Number(entry.m) || 0, state.moves),
+        solved: solvedMoves > 0, solvedMoves, par: Number(entry.p) || 0,
+      };
+    });
+    const firstOpen = S.runs.findIndex((r) => !r.solved);
+    selectTier(firstOpen < 0 ? 0 : firstOpen);
+  }
+
+  const POSE = { day: 40, tier: 1 };
+  function posePicture() {
+    S.day = S.today = POSE.day;
+    S.puzzles = TIERS.map((_, tier) => makePuzzle(POSE.day, tier));
+    S.runs = S.puzzles.map((p, tier) => {
+      if (tier < POSE.tier) return { inputs: '', pings: [], probed: new Set(), marks: new Set(), moves: p.par, solved: true, solvedMoves: p.par, par: p.par };
+      if (tier === POSE.tier) {
+        const pings = p.probes.slice(0, Math.max(1, Math.min(5, p.par - 1)));
+        return { inputs: pings.map((pp) => pp.cell).join('.'), pings, probed: new Set(pings.map((pp) => pp.cell)), marks: new Set(), moves: pings.length, solved: false, solvedMoves: 0, par: 0 };
+      }
+      return { inputs: '', pings: [], probed: new Set(), marks: new Set(), moves: 0, solved: false, solvedMoves: 0, par: 0 };
+    });
+    selectTier(POSE.tier);
+    S.mode = 'play';
+  }
+
+  function markStart() {
+    const key = `${S.day}:${S.tier}`;
+    if (run().solved || started.has(key)) return;
+    started.add(key);
+    emit('start', { game: SLUG, day: S.day, tier: S.tier + 1, archive: archive() });
+  }
+
+  function followToday() {
+    const today = dayNumber(new Date());
+    if (today === S.today) return false;
+    if (S.day !== S.today) { S.today = today; return false; }
+    loadDay(today);
+    return true;
+  }
+
+  function checkDay() {
+    if (PICTURE || dayNumber(new Date()) === S.today) return;
+    if (S.mode === 'play' && S.day === S.today) {
+      if (!S.newDay) { S.newDay = true; toast(touch() ? 'New puzzles are out. Tap the home button.' : 'New puzzles are out. Press Esc.'); }
+      return;
+    }
+    followToday();
+  }
+
+  function stepDay(delta) {
+    const target = S.day + delta;
+    if (target < 1 || target > dayNumber(new Date())) {
+      sfx.bump();
+      announce(target < 1 ? 'Day 1 is the first day.' : 'This is today. New puzzles come at midnight.');
+      return;
+    }
+    S.mode = 'title'; S.help = false; S.toast = null;
+    loadDay(target);
+    sfx.click();
+    announce(titleSummary());
+  }
+
+  // ---- game flow ----
+  function startPlay(tier) {
+    ensureAudio();
+    followToday();
+    if (tier !== undefined && tier !== S.tier) selectTier(tier);
+    else { S.practice = false; S.practiceRun = null; S.marks = new Set(run().marks); }
+    S.mode = 'play';
+    S.help = false; S.toast = null;
+    sfx.click();
+    markStart();
+    announce(`Day ${S.day}, ${TIERS[S.tier].label} puzzle, par ${puzzle().par}. ${describeBoard()}`);
+    reportFocus();
+  }
+
+  function goTitle() {
+    S.mode = 'title';
+    S.help = false;
+    followToday();
+    sfx.click();
+    announce(titleSummary());
+  }
+
+  function setTier(tier) {
+    if (S.mode !== 'play' || tier === S.tier) return;
+    selectTier(tier);
+    markStart();
+    sfx.click();
+    announce(`${TIERS[tier].label}. Par ${puzzle().par}. ${describeBoard()}`);
+    reportFocus();
+  }
+
+  function moveCursor(dir) {
+    const size = puzzle().size;
+    let x = S.cursor % size, y = (S.cursor / size) | 0;
+    if (dir === 0) y = Math.max(0, y - 1);
+    else if (dir === 1) x = Math.min(size - 1, x + 1);
+    else if (dir === 2) y = Math.min(size - 1, y + 1);
+    else x = Math.max(0, x - 1);
+    const next = y * size + x;
+    if (next === S.cursor) { sfx.bump(); return; }
+    S.cursor = next;
+    sfx.click();
+  }
+
+  function pingAt(cell) {
+    if (S.mode !== 'play' || locked()) return;
+    const r = run();
+    if (r.probed.has(cell)) { sfx.click(); return; }
+    ensureAudio();
+    const p = puzzle(), dist = p.resp[cell];
+    r.pings.push({ cell, dist });
+    r.probed.add(cell);
+    r.inputs = r.inputs ? `${r.inputs}.${cell}` : String(cell);
+    r.moves++;
+    if (!S.practice) { emit('progress', { moves: run().moves, tier: S.tier + 1, day: S.day, archive: archive() }); writeStore(); }
+    sfx.ping(dist);
+    const { x, y } = cellCenter(p.size, cell);
+    if (dist === 0) { sfx.hit(); spawnParts(x, y, C.hit, 10, 120); float(x, y - 18, 'hit!', C.hit); }
+    announce(`${cellName(p.size, cell)}: ${dist}.`);
+  }
+
+  function toggleMark(cell) {
+    if (S.mode !== 'play' || locked()) return;
+    const p = puzzle();
+    if (S.marks.has(cell)) { S.marks.delete(cell); sfx.unmark(); }
+    else {
+      if (S.marks.size >= p.k) { toast(`Mark up to ${p.k} cells. Clear one first.`); sfx.bump(); return; }
+      S.marks.add(cell); sfx.mark();
+    }
+    if (!S.practice) { run().marks = new Set(S.marks); writeStore(); }
+    announce(`${S.marks.has(cell) ? 'Marked' : 'Unmarked'} ${cellName(p.size, cell)}.`);
+  }
+
+  const actAt = (cell) => (S.tapMode === 'mark' ? toggleMark(cell) : pingAt(cell));
+
+  function toggleTapMode() {
+    S.tapMode = S.tapMode === 'ping' ? 'mark' : 'ping';
+    sfx.mode();
+    announce(S.tapMode === 'ping' ? 'Ping mode.' : 'Mark mode.');
+  }
+
+  function clearMarks() {
+    if (S.mode !== 'play' || locked() || !S.marks.size) return;
+    S.marks.clear();
+    if (!S.practice) { run().marks = new Set(); writeStore(); }
+    sfx.click();
+    announce('Marks cleared.');
+  }
+
+  function doCheck() {
+    if (S.mode !== 'play' || locked()) return;
+    const p = puzzle(), r = run();
+    const verdict = judge(p, Array.from(S.marks), r.probed);
+    if (verdict.ok) { solvedNow(); return; }
+    if (verdict.reason === 'count') { toast(`Mark exactly ${p.k} cells first.`); sfx.bump(); return; }
+    ensureAudio();
+    if (verdict.reason === 'unproved') {
+      const dist = p.resp[verdict.cell];
+      r.pings.push({ cell: verdict.cell, dist });
+      r.probed.add(verdict.cell);
+      r.inputs = r.inputs ? `${r.inputs}.x${verdict.cell}` : `x${verdict.cell}`;
+      r.moves += 2;
+      const { x, y } = cellCenter(p.size, verdict.cell);
+      spawnParts(x, y, C.bad, 8, 100);
+      toast(`Not quite. ${cellName(p.size, verdict.cell)} pings ${dist} — that rules your marks out. Cost 2.`);
+    } else {
+      r.inputs = r.inputs ? `${r.inputs}.x` : 'x';
+      r.moves += 2;
+      toast('Not quite. Your marks already contradict a ping you have. Cost 2.');
+    }
+    if (!S.practice) writeStore();
+    sfx.fail(); shake(5);
+  }
+
+  function celebrate(p) {
+    sfx.win();
+    if (!calm()) S.flash = 0.5;
+    const mid = ((p.size / 2) | 0) * p.size + ((p.size / 2) | 0);
+    const { x, y } = cellCenter(p.size, mid);
+    spawnParts(x, y, C.accent, 26, 200);
+  }
+
+  function solvedNow() {
+    const p = puzzle(), r = run();
+    if (S.practice) {
+      celebrate(p);
+      const over = r.moves - p.par;
+      toast(`Practice solved in ${r.moves}. ${over <= 0 ? 'Par!' : `${over} over par.`}`);
+      return;
+    }
+    r.solved = true; r.solvedMoves = r.moves; r.par = p.par;
+    writeStore();
+    celebrate(p);
+    const over = r.solvedMoves - p.par;
+    emit('gameover', { won: true, score: r.solvedMoves, par: p.par, tier: S.tier + 1, day: S.day, archive: archive() });
+    toast(solvedNotice(over, solvedCount() === TIERS.length));
+  }
+
+  function startPractice() {
+    if (!run().solved) return;
+    S.practice = true;
+    S.practiceRun = { inputs: '', pings: [], probed: new Set(), marks: new Set(), moves: 0, solved: false, solvedMoves: 0, par: puzzle().par };
+    S.marks = new Set();
+    S.mode = 'play';
+    sfx.click();
+    announce('Practice run. Nothing here is saved.');
+  }
+
+  function goNext() {
+    const nextTier = S.runs.findIndex((r, i) => i > S.tier && !r.solved);
+    selectTier(nextTier < 0 ? (S.tier + 1) % TIERS.length : nextTier);
+    S.mode = 'play';
+    markStart();
+    sfx.click();
+    announce(`${TIERS[S.tier].label}. Par ${puzzle().par}. ${describeBoard()}`);
+    reportFocus();
+  }
+
+  function shareText() {
+    const marks = S.runs.map((r, tier) => shareMark(r.solvedMoves, S.puzzles[tier].par));
+    return `Echo Sounding #${S.day}${archive() ? ' (archive)' : ''}\n${marks.join('  ')}\n${SHARE_URL}`;
+  }
+  function openCopyBox(message) {
+    copyText.value = message;
+    copyBox.classList.add('open');
+    copyText.focus(); copyText.select();
+  }
+  function share() {
+    const message = shareText();
+    sfx.click();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(message).then(() => toast('Copied! Paste it anywhere.'), () => openCopyBox(message));
+    } else openCopyBox(message);
+  }
+  copyClose.addEventListener('click', () => { copyBox.classList.remove('open'); canvas.focus(); });
+
+  // ---- rendering ----
+  let hitRegions = [];
+  const addHit = (x, y, w, h, action) => hitRegions.push({ x, y, w, h, action });
+  function hitTest(x, y) {
+    for (let i = hitRegions.length - 1; i >= 0; i--) {
+      const r = hitRegions[i];
+      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return r.action;
+    }
+    return null;
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function button(x, y, w, h, label, action, active) {
+    ctx.fillStyle = active ? C.accent : C.card;
+    roundRect(x, y, w, h, 10); ctx.fill();
+    ctx.strokeStyle = C.accentDim; ctx.lineWidth = 1; roundRect(x, y, w, h, 10); ctx.stroke();
+    ctx.fillStyle = active ? '#052019' : C.text;
+    ctx.font = `700 15px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(label, x + w / 2, y + h / 2 + 1);
+    addHit(x, y, w, h, action);
+  }
+
+  function drawTitle() {
+    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+    addHit(0, 0, W, H, 'titledefault');
+
+    const prevOk = S.day > 1, nextOk = S.day < S.today;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = prevOk ? C.text : C.muted; ctx.font = `700 22px ${FONT}`;
+    ctx.fillText('‹', 32, 40);
+    addHit(10, 20, 44, 40, 'prevday');
+    ctx.fillStyle = nextOk ? C.text : C.muted;
+    ctx.fillText('›', 448, 40);
+    addHit(426, 20, 44, 40, 'nextday');
+    ctx.fillStyle = C.muted; ctx.font = `600 15px ${FONT}`;
+    ctx.fillText(titleDay(S.day, dayDate(S.day), archive()), 240, 40);
+
+    ctx.fillStyle = C.accent; ctx.font = `800 38px ${FONT}`;
+    ctx.fillText('Echo Sounding', 240, 90);
+    ctx.fillStyle = C.muted; ctx.font = `400 15px ${FONT}`;
+    ctx.fillText('Ping the dark. Deduce the echoes.', 240, 118);
+
+    const cardY = [154, 274, 394], cardH = 108;
+    TIERS.forEach((t, tier) => {
+      const y = cardY[tier], p = S.puzzles[tier], r = S.runs[tier];
+      ctx.fillStyle = C.card;
+      roundRect(40, y, 400, cardH, 14); ctx.fill();
+      ctx.strokeStyle = r.solved ? C.good : C.accentDim; ctx.lineWidth = 2;
+      roundRect(40, y, 400, cardH, 14); ctx.stroke();
+      ctx.fillStyle = C.text; ctx.font = `800 22px ${FONT}`; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(t.label, 62, y + 38);
+      ctx.fillStyle = C.muted; ctx.font = `400 14px ${FONT}`;
+      ctx.fillText(`${t.size}×${t.size} grid · ${t.k} reflectors · par ${p.par === Infinity ? t.budget : p.par}`, 62, y + 60);
+      ctx.textAlign = 'right';
+      if (r.solved) {
+        ctx.fillStyle = r.solvedMoves - r.par <= 0 ? C.good : C.warn;
+        ctx.font = `700 16px ${FONT}`;
+        ctx.fillText(parNote(r.solvedMoves, r.par), 418, y + 38);
+        ctx.fillStyle = C.muted; ctx.font = `400 13px ${FONT}`;
+        ctx.fillText(`${r.solvedMoves} pings spent`, 418, y + 60);
+      } else {
+        ctx.fillStyle = C.accent; ctx.font = `700 16px ${FONT}`;
+        ctx.fillText(r.moves ? 'In progress' : 'Not started', 418, y + 38);
+      }
+      ctx.textAlign = 'center';
+      addHit(40, y, 400, cardH, `card${tier}`);
+    });
+
+    ctx.fillStyle = C.muted; ctx.font = `400 14px ${FONT}`;
+    ctx.fillText(`Streak ${S.streak}${S.bestStreak > S.streak ? ` · best ${S.bestStreak}` : ''}`, 240, 528);
+    const pulse = calm() ? 1 : 0.75 + 0.25 * Math.sin(S.clock * 2.4);
+    ctx.globalAlpha = pulse;
+    ctx.fillStyle = C.accent; ctx.font = `600 15px ${FONT}`;
+    ctx.fillText('Tap or press Space to play', 240, 560);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = C.muted; ctx.font = `400 12px ${FONT}`;
+    ctx.fillText('Missed a day? The arrows above open every earlier one.', 240, 588);
+
+    if (onward()) {
+      ctx.fillStyle = C.accent; ctx.font = `600 14px ${FONT}`;
+      ctx.fillText(`Play ${ONWARD.title} next →`, 240, 616);
+      addHit(120, 602, 240, 26, 'onward');
+    }
+  }
+
+  function drawGrid(p, r) {
+    const { cell, gx, gy } = gridMetrics(p.size);
+    const pingMap = new Map(r.pings.map((pp) => [pp.cell, pp.dist]));
+    for (let i = 0; i < p.size * p.size; i++) {
+      const cx = gx + (i % p.size) * cell, cy = gy + ((i / p.size) | 0) * cell;
+      const dist = pingMap.get(i);
+      ctx.fillStyle = dist === undefined ? C.cell : dist === 0 ? C.hit : C.pinged;
+      roundRect(cx + 1.5, cy + 1.5, cell - 3, cell - 3, 6); ctx.fill();
+      if (dist !== undefined) {
+        ctx.fillStyle = dist === 0 ? C.hitText : C.text;
+        ctx.font = `700 ${Math.floor(cell * 0.36)}px ${FONT}`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(String(dist), cx + cell / 2, cy + cell / 2 + 1);
+      }
+      if (S.marks.has(i)) {
+        ctx.strokeStyle = C.accent; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(cx + cell / 2, cy + cell / 2, cell * 0.3, 0, Math.PI * 2); ctx.stroke();
+      }
+      addHit(cx, cy, cell, cell, `cell${i}`);
+    }
+    const cx = gx + (S.cursor % p.size) * cell, cy = gy + ((S.cursor / p.size) | 0) * cell;
+    ctx.strokeStyle = C.cursor; ctx.lineWidth = 3;
+    roundRect(cx + 2, cy + 2, cell - 4, cell - 4, 6); ctx.stroke();
+  }
+
+  function drawPlay() {
+    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+    const p = puzzle(), r = run();
+
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = C.text; ctx.font = `700 15px ${FONT}`;
+    ctx.fillText('‹ Title', 14, 22);
+    addHit(0, 4, 74, 30, 'home');
+    ctx.textAlign = 'right';
+    ctx.fillStyle = r.moves > p.budget ? C.warn : C.text; ctx.font = `700 15px ${FONT}`;
+    ctx.fillText(`${r.moves}/${p.budget}`, 466, 22);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = C.muted; ctx.font = `600 13px ${FONT}`;
+    ctx.fillText(`Day ${S.day} · ${TIERS[S.tier].label}${S.practice ? ' · practice' : ''}`, 240, 22);
+
+    const tabY = 40, tabW = 152, tabH = 30;
+    TIERS.forEach((t, tier) => {
+      const x = 12 + tier * (tabW + 6), active = tier === S.tier;
+      ctx.fillStyle = active ? C.accent : C.card;
+      roundRect(x, tabY, tabW, tabH, 8); ctx.fill();
+      ctx.fillStyle = active ? '#052019' : C.text; ctx.font = `700 13px ${FONT}`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(t.label, x + tabW / 2, tabY + tabH / 2 + 1);
+      addHit(x, tabY, tabW, tabH, `card${tier}`);
+    });
+
+    const btnY = 76, btnW = 110, btnH = 30, gap = 6;
+    button(12, btnY, btnW, btnH, S.tapMode === 'ping' ? 'Ping' : 'Mark', 'mode', S.tapMode === 'mark');
+    button(12 + (btnW + gap), btnY, btnW, btnH, 'Check', 'check');
+    button(12 + (btnW + gap) * 2, btnY, btnW, btnH, 'Clear', 'clear');
+    button(12 + (btnW + gap) * 3, btnY, btnW, btnH, 'Share', 'share');
+
+    drawGrid(p, r);
+
+    const gridBottom = GRID_TOP + gridMetrics(p.size).cell * p.size;
+    ctx.textAlign = 'center'; ctx.fillStyle = C.muted; ctx.font = `400 13px ${FONT}`;
+    ctx.fillText(`Par ${p.par === Infinity ? p.budget : p.par} · mark ${p.k} reflector${p.k === 1 ? '' : 's'}`, 240, gridBottom + 24);
+
+    if (locked()) {
+      ctx.fillStyle = C.good; ctx.font = `700 15px ${FONT}`;
+      ctx.fillText('Solved! Replay or Next.', 240, gridBottom + 48);
+      button(120, gridBottom + 60, 110, 30, 'Replay', 'replay');
+      button(250, gridBottom + 60, 110, 30, 'Next', 'next');
+    }
+  }
+
+  function wrapText(text, x, y, maxW, lh) {
+    const words = text.split(' ');
+    let line = '';
+    const lines = [];
+    for (const w of words) {
+      const test = line ? `${line} ${w}` : w;
+      if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = w; } else line = test;
+    }
+    lines.push(line);
+    const startY = y - ((lines.length - 1) * lh) / 2;
+    lines.forEach((l, i) => ctx.fillText(l, x, startY + i * lh));
+  }
+
+  function drawHelp() {
+    ctx.fillStyle = 'rgba(4,10,16,0.92)'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = C.accent; ctx.font = `800 24px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText('How to play', 240, 70);
+    const lines = [
+      'A hidden grid holds a few reflectors.',
+      'Ping any cell: it answers with one number —',
+      'the distance to the nearest reflector.',
+      'Mark cells you deduce hold a reflector.',
+      'Check once every reflector is marked.',
+      'A wrong check pings the cell that proves it, for 2.',
+      'Every ping costs 1 — beat the par for a star.',
+      '',
+      'Arrows or WASD move the cursor.',
+      'Space pings, or marks in Mark mode. M switches.',
+      'K checks, X clears marks, C shares, H closes this.',
+    ];
+    ctx.font = `400 15px ${FONT}`; ctx.fillStyle = C.text;
+    lines.forEach((l, i) => ctx.fillText(l, 240, 114 + i * 26));
+    addHit(0, 0, W, H, 'closehelp');
+  }
+
+  function drawEffects(dt) {
+    if (!S.hidden) {
+      S.parts = S.parts.filter((pt) => { pt.t += dt; pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.vy += 240 * dt; return pt.t < pt.life; });
+      S.floats = S.floats.filter((f) => { f.t += dt; return f.t < 0.9; });
+      if (S.flash > 0) S.flash = Math.max(0, S.flash - dt * 1.5);
+      if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 20);
+    }
+    for (const pt of S.parts) {
+      ctx.globalAlpha = Math.max(0, 1 - pt.t / pt.life);
+      ctx.fillStyle = pt.color;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, 3, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    for (const f of S.floats) {
+      ctx.globalAlpha = Math.max(0, 1 - f.t / 0.9);
+      ctx.fillStyle = f.color; ctx.font = `700 14px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(f.text, f.x, f.y - f.t * 30);
+    }
+    ctx.globalAlpha = 1;
+    if (S.flash > 0) { ctx.fillStyle = `rgba(0,229,199,${S.flash * 0.3})`; ctx.fillRect(0, 0, W, H); }
+    if (S.toast) {
+      S.toast.t += dt;
+      if (S.toast.t < 2.6) {
+        ctx.fillStyle = 'rgba(6,20,32,0.92)';
+        roundRect(40, H - 74, W - 80, 46, 12); ctx.fill();
+        ctx.fillStyle = C.text; ctx.font = `600 14px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        wrapText(S.toast.text, W / 2, H - 51, W - 110, 16);
+      } else S.toast = null;
+    }
+  }
+
+  function syncOnward() {
+    if (!ONWARD) return;
+    onwardLink.hidden = !onward();
+    if (onward()) { onwardLink.href = ONWARD.path; onwardLink.textContent = `Play ${ONWARD.title}, another daily puzzle`; }
+  }
+
+  function render(dt) {
+    hitRegions = [];
+    ctx.setTransform(view.dpr * view.scale, 0, 0, view.dpr * view.scale, view.dpr * view.ox, view.dpr * view.oy);
+    ctx.clearRect(-view.ox / view.scale, -view.oy / view.scale, view.cssW / view.scale, view.cssH / view.scale);
+    if (S.mode === 'title') drawTitle(); else drawPlay();
+    if (S.help) drawHelp();
+    drawEffects(dt);
+    syncOnward();
+  }
+
+  // ---- input ----
+  function handleAction(action) {
+    if (!action) return;
+    if (action === 'titledefault') {
+      const first = S.runs.findIndex((r) => !r.solved);
+      startPlay(first < 0 ? 0 : first);
+      return;
+    }
+    if (action.startsWith('card')) {
+      const tier = Number(action.slice(4));
+      if (S.mode === 'title') startPlay(tier);
+      else setTier(tier);
+      return;
+    }
+    if (action.startsWith('cell')) {
+      const cell = Number(action.slice(4));
+      S.cursor = cell;
+      actAt(cell);
+      return;
+    }
+    switch (action) {
+      case 'prevday': stepDay(-1); return;
+      case 'nextday': stepDay(1); return;
+      case 'home': goTitle(); return;
+      case 'mode': toggleTapMode(); return;
+      case 'check': doCheck(); return;
+      case 'clear': clearMarks(); return;
+      case 'share': share(); return;
+      case 'replay': startPractice(); return;
+      case 'next': goNext(); return;
+      case 'onward': goOnward(); return;
+      case 'closehelp': S.help = false; return;
+    }
+  }
+
+  canvas.addEventListener('pointerdown', (e) => {
+    canvas.focus();
+    const { x, y } = toLogical(e.clientX, e.clientY);
+    handleAction(hitTest(x, y));
+  });
+
+  window.addEventListener('keydown', (e) => {
+    const holdable = e.code === 'ArrowUp' || e.code === 'ArrowDown' || e.code === 'ArrowLeft' || e.code === 'ArrowRight' ||
+      e.code === 'KeyW' || e.code === 'KeyA' || e.code === 'KeyS' || e.code === 'KeyD';
+    if (e.repeat && !holdable) return;
+    const { dir, digit, letter } = readKey(e.code, e.key);
+    if (dir >= 0) {
+      e.preventDefault();
+      if (S.mode === 'play') moveCursor(dir);
+      return;
+    }
+    if (digit >= 0 && digit < TIERS.length) {
+      e.preventDefault();
+      if (S.mode === 'title') startPlay(digit);
+      else setTier(digit);
+      return;
+    }
+    const dayD = dayStep(letter);
+    if (dayD) { e.preventDefault(); stepDay(dayD); return; }
+    switch (letter) {
+      case ' ':
+        e.preventDefault();
+        if (S.help) { S.help = false; return; }
+        if (S.mode === 'title') handleAction('titledefault'); else actAt(S.cursor);
+        return;
+      case 'm': if (S.mode === 'play') toggleTapMode(); return;
+      case 'k': doCheck(); return;
+      case 'x': clearMarks(); return;
+      case 'c': share(); return;
+      case 'l': announce(describeBoard()); return;
+      case 'h': S.help = !S.help; sfx.click(); return;
+      case 'r': startPractice(); return;
+      case 'n': if (S.mode === 'play') goNext(); return;
+      case 'escape': if (S.help) S.help = false; else if (S.mode === 'play') goTitle(); return;
+    }
+  });
+
+  controls.addEventListener('click', (e) => {
+    const btn = e.target.closest('button,a');
+    if (!btn) return;
+    const act = btn.dataset.act;
+    if (!act) return;
+    if (act.startsWith('dir')) { if (S.mode === 'play') moveCursor(Number(act.slice(3))); return; }
+    if (act === 'act') { if (S.mode === 'play') actAt(S.cursor); return; }
+    if (act === 'board') { announce(describeBoard()); return; }
+    if (act === 'help') { S.help = !S.help; return; }
+    if (act === 'mute') { S.muted = !S.muted; storage.set(STORE_MUTE, S.muted ? '1' : '0'); announce(S.muted ? 'Muted.' : 'Sound on.'); return; }
+    handleAction(act);
+  });
+
+  window.addEventListener('resize', resize);
+  document.addEventListener('visibilitychange', () => {
+    S.hidden = document.hidden;
+    if (S.hidden && audio) audio.suspend().catch(() => {});
+  });
+
+  // Another tab of this game saved something: take it in, so neither tab
+  // overwrites the other's solved puzzles.
+  window.addEventListener('storage', (event) => {
+    if (event.key === STORE && S.runs.length) absorb(readStore());
+  });
+
+  // ---- run ----
+  let lastT = 0;
+  function frame(now) {
+    const dt = Math.min(0.05, lastT ? (now - lastT) / 1000 : 0);
+    lastT = now;
+    S.clock += dt;
+    if (!PICTURE) {
+      S.dayCheck -= dt;
+      if (S.dayCheck <= 0) { S.dayCheck = 5; checkDay(); }
+    }
+    render(S.hidden ? 0 : dt);
+    // The generator waits for this before it photographs (POSED_FLAG in picture-flag.mjs).
+    if (PICTURE) window.__arkaiPosed = true;
+    requestAnimationFrame(frame);
+  }
+
+  resize();
+  if (PICTURE) posePicture(); else loadDay(dayNumber(new Date()));
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

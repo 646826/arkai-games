@@ -1,0 +1,22 @@
+{
+  "slug": "echo-sounding",
+  "title": "Echo Sounding",
+  "tagline": "Ping a hidden grid, deduce the echoes",
+  "description": "A daily deduction puzzle: three new grids every day, the same for everyone. A hidden layout of reflectors sits somewhere in the grid. Ping any cell and the only thing you learn is the distance, in steps, from that cell to the nearest one. Narrow the reflectors down from a handful of pings, mark where they must be, and check your answer. Each ping costs a point, so find them in as few as the par, then share your result without spoiling the grid. Missed a day? Every earlier day stays playable.",
+  "categories": ["Puzzle", "Daily"],
+  "controls": "Keyboard, touch & mouse",
+  "instructions": [
+    "The game opens on today's Easy grid. The tabs above it, or the keys 1, 2 and 3, switch between Easy, Medium and Hard.",
+    "Tap any cell to ping it. The grid answers with one number: the distance, in steps up and across, from that cell to the nearest hidden reflector.",
+    "Tap Mode (or press M) to switch the same tap into marking a cell as a reflector instead; tap a marked cell again to unmark it. Marks cost nothing.",
+    "Press Check (or K) once every reflector is marked. A wrong guess pings the cell that proves it and costs 2; any set of marks the grid cannot tell from the truth counts as solved.",
+    "Every ping costs 1. Spend no more than the par, which is what the portal's own solver needed, for a star.",
+    "With a keyboard: arrows or WASD move the cursor, Space pings or marks depending on the mode, M switches mode, X clears your marks.",
+    "Press Share (or C) to copy a spoiler-free result, and come back after midnight for the next three.",
+    "Missed a day? The arrows beside the day on the title screen (or the comma and period keys) open every earlier day. Those do not count toward your streak."
+  ],
+  "daily": { "store": "arkai:echo-sounding:v1", "epoch": "2026-09-21", "puzzles": 3 },
+  "palette": ["#061420", "#00e5c7"],
+  "added": "2026-09-21",
+  "updated": "2026-09-21"
+}

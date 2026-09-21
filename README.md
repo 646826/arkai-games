@@ -4,10 +4,11 @@ Every game from [arkai.win](https://arkai.win) — each one a **single self-cont
 file** you can open from your desktop with no build step, no server, no package
 manager and no network connection.
 
-There are 10 of them. Together they are 566 KB.
+There are 11 of them. Together they are 621 KB.
 
 | Game | Kind | Controls | Size | Play |
 | --- | --- | --- | ---: | --- |
+| **Echo Sounding** | Puzzle, Daily | Keyboard, touch & mouse | 56 KB | [play](https://arkai.win/games/echo-sounding/) |
 | **Blind Corners** | Puzzle, Daily | Keyboard, touch & mouse | 98 KB | [play](https://arkai.win/games/blind-corners/) |
 | **Ink Side Down** | Puzzle, Daily | Keyboard, touch & mouse | 94 KB | [play](https://arkai.win/games/ink-side-down/) |
 | **Mole Rush** | Arcade, Family | Keyboard, touch & mouse | 55 KB | [play](https://arkai.win/games/mole-rush/) |
@@ -78,11 +79,11 @@ Two details that are easy to get wrong, so they are stated rather than implied:
   framing page is served from the same origin as the game file. Host the file
   yourself and it works; frame it from another domain and you get silence, by
   design.
-- **The event vocabulary is not uniform yet.** 9 of the 10 games emit
+- **The event vocabulary is not uniform yet.** 10 of the 11 games emit
   `start` and `gameover`. Brick Rebound uses a different set: `game_end`, `game_ready`, `game_start`, `level_end`, `level_start`.
   The portal normalises this on its side. Listen for both spellings until it is
   fixed at the source.
-- **A few send more than that.** Blind Corners, Ink Side Down, One Step Late also send `closed`, `focus`, `next_game`, `progress`, `share`. None of these end the game; a host listening only for `start`/`gameover`/`win` can ignore the rest.
+- **A few send more than that.** Echo Sounding also sends `closed`, `focus`, `next_game`, `progress`. Blind Corners, Ink Side Down, One Step Late also send `closed`, `focus`, `next_game`, `progress`, `share`. None of these end the game; a host listening only for `start`/`gameover`/`win` can ignore the rest.
 
 The score, where a game reports one, is in `data` — not in the event name.
 
