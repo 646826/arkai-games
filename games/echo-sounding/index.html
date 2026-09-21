@@ -917,8 +917,9 @@
   function share() {
     const message = shareText();
     sfx.click();
+    const shared = () => emit('share', { day: S.day, score: solvedCount() });
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(message).then(() => toast('Copied! Paste it anywhere.'), () => openCopyBox(message));
+      navigator.clipboard.writeText(message).then(() => { shared(); toast('Copied! Paste it anywhere.'); }, () => openCopyBox(message));
     } else openCopyBox(message);
   }
   copyClose.addEventListener('click', () => { copyBox.classList.remove('open'); canvas.focus(); });

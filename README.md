@@ -84,7 +84,7 @@ Two details that are easy to get wrong, so they are stated rather than implied:
   `start` and `gameover`. Brick Rebound uses a different set: `game_end`, `game_ready`, `game_start`, `level_end`, `level_start`.
   The portal normalises this on its side. Listen for both spellings until it is
   fixed at the source.
-- **A few send more than that.** Bearing also sends `closed`, `focus`, `next_game`, `progress`. Echo Sounding also sends `closed`, `focus`, `next_game`, `practice`, `progress`. Blind Corners also sends `closed`, `focus`, `next_game`, `progress`, `share`. Ink Side Down, One Step Late also send `closed`, `focus`, `next_game`, `practice`, `progress`, `share`. None of these end the game; a host listening only for `start`/`gameover`/`win` can ignore the rest.
+- **A few send more than that.** Bearing, Blind Corners also send `closed`, `focus`, `next_game`, `progress`, `share`. Echo Sounding, Ink Side Down, One Step Late also send `closed`, `focus`, `next_game`, `practice`, `progress`, `share`. None of these end the game; a host listening only for `start`/`gameover`/`win` can ignore the rest.
 
 The score, where a game reports one, is in `data` — not in the event name.
 
