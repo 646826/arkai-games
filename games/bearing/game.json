@@ -1,0 +1,23 @@
+{
+  "slug": "bearing",
+  "title": "Bearing",
+  "tagline": "Rotate, listen, triangulate the hidden sources",
+  "description": "A daily direction-finding puzzle, new every day. Two or three sound sources sit somewhere around a 16-point compass. Rotate to face any heading, then listen: each source pulls left or right the way a real ear would hear it, and the game tells you exactly what that pull means, in words, next to the dial. One listen alone is ambiguous — the same pull matches a source ahead of your heading or its mirror behind it — so listen again from a different heading to triangulate the truth. Mark every source's true bearing on the dial and check. Each listen costs a point, so find them in as few as the par, then share your result. Missed a day? Every earlier day stays playable.",
+  "categories": ["Puzzle", "Daily"],
+  "controls": "Keyboard, touch & mouse",
+  "instructions": [
+    "The game opens on today's Two-source puzzle. The tab above it, or the 1 and 2 keys, switches to Three sources.",
+    "Rotate your heading with the ‹ › buttons or the Left/Right arrow keys (also A/D).",
+    "Press Listen (or Space) to hear every source once, in order, from your current heading. Headphones or stereo speakers work best — a quick sound check runs the first time.",
+    "Each source pulls left or right like a real ear would hear it; the same pull always matches two possible bearings, mirrored across your heading, until a second listen from a different heading narrows it to one. The exact pair is also printed next to the dial.",
+    "Tap or click a compass point to mark it as a source's bearing; tap again to unmark. Marks cost nothing.",
+    "Press Check (or K) once you have marked one bearing per source. A wrong guess costs 2.",
+    "Every listen costs 1. Spend no more than the par, which is what a careful two-heading triangulation needs, for a star.",
+    "Press Share (or C) to copy a spoiler-free result, and come back after midnight for the next puzzle.",
+    "Missed a day? The arrows beside the day on the title screen (or the comma and period keys) open every earlier day. Those do not count toward your streak."
+  ],
+  "daily": { "store": "arkai:bearing:v1", "epoch": "2026-09-21", "puzzles": 2 },
+  "palette": ["#0a0f1e", "#7dd3fc"],
+  "added": "2026-09-21",
+  "updated": "2026-09-21"
+}

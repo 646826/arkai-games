@@ -1,0 +1,1290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="color-scheme" content="dark">
+<title>Bearing — Arkai</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a0f1e; overflow: hidden; }
+  body { -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+  canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; outline: none; cursor: pointer; }
+  canvas:focus-visible { outline: 2px solid rgba(125, 211, 252, 0.5); outline-offset: -2px; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  #controls:focus-within { position: fixed; left: 8px; right: 8px; bottom: 8px; width: auto; height: auto; clip: auto; white-space: normal; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border-radius: 12px; background: #111a2e; border: 1px solid #233250; }
+  #controls button, #controls a { min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center; text-decoration: none; padding: 0 12px; border-radius: 10px; border: 1px solid #233250; background: #16223c; color: #eaf2ff; font: 600 15px system-ui, sans-serif; }
+  #controls a[hidden] { display: none; }
+  #controls button:focus, #controls a:focus { outline: 2px solid #7dd3fc; }
+  #copybox { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(4, 8, 16, 0.82); }
+  #copybox.open { display: flex; }
+  #copybox .card { width: min(92vw, 420px); box-sizing: border-box; padding: 18px; border-radius: 16px; background: #111a2e; border: 1px solid #233250; color: #eaf2ff; }
+  #copybox p { margin: 0 0 10px; font-size: 15px; line-height: 1.4; }
+  #copybox textarea { width: 100%; height: 100px; box-sizing: border-box; padding: 10px; border-radius: 10px; border: 1px solid #233250; background: #0a0f1e; color: #cdeeff; font: 15px/1.45 ui-monospace, Menlo, Consolas, monospace; resize: none; -webkit-user-select: text; user-select: text; }
+  #copybox button { margin-top: 12px; width: 100%; height: 44px; border: 0; border-radius: 10px; background: #7dd3fc; color: #06222f; font-weight: 700; font-size: 16px; cursor: pointer; }
+</style>
+</head>
+<body>
+<canvas id="game" tabindex="0" role="application" aria-label="Bearing, a daily direction-finding puzzle. Two or three sound sources sit around a 16-point compass. Rotate your heading and listen: each source's left-right pull matches two possible bearings, mirrored across your heading, until a second listen from another heading narrows it to one. Left and right arrow keys rotate, Space listens, mark a compass point by tapping it, K checks, X clears your marks, L describes the puzzle, H shows the rules. Comma and period open the previous or next day. Press Tab for buttons."></canvas>
+<div id="status" class="sr" aria-live="polite"></div>
+<div id="controls" class="sr" role="group" aria-label="Game controls">
+  <button type="button" data-act="rotateccw">Rotate heading left</button>
+  <button type="button" data-act="rotatecw">Rotate heading right</button>
+  <button type="button" data-act="listen">Listen from the current heading</button>
+  <button type="button" data-act="check">Check your marks</button>
+  <button type="button" data-act="clear">Clear your marks</button>
+  <button type="button" data-act="describe">Describe the puzzle</button>
+  <button type="button" data-act="help">Rules</button>
+  <button type="button" data-act="share">Share result</button>
+  <a id="onward" href="#" target="_top" hidden>Play the next daily puzzle</a>
+  <button type="button" data-act="card0">Two-source puzzle</button>
+  <button type="button" data-act="card1">Three-source puzzle</button>
+  <button type="button" data-act="mute">Sound on or off</button>
+  <button type="button" data-act="home">Title screen</button>
+  <button type="button" data-act="prevday">Previous day</button>
+  <button type="button" data-act="nextday">Next day</button>
+  <button type="button" data-act="opengate">Open the sound check</button>
+  <button type="button" data-act="gateleft">Sound check: I heard it on the left</button>
+  <button type="button" data-act="gateright">Sound check: I heard it on the right</button>
+  <button type="button" data-act="gatetone">Sound check: play the tone again</button>
+  <button type="button" data-act="gateskip">Sound check: continue without it</button>
+</div>
+<div id="copybox" role="dialog" aria-modal="true" aria-labelledby="copytitle">
+  <div class="card">
+    <p id="copytitle">Your browser would not copy by itself. Select the text below, copy it, and paste it anywhere.</p>
+    <textarea id="copytext" readonly></textarea>
+    <button id="copyclose" type="button">Done</button>
+  </div>
+</div>
+<script>
+(() => {
+  'use strict';
+
+  // ---- puzzle core begin ----
+  // Everything between the two markers is pure: no DOM, no clock, no storage,
+  // no audio. The one promise a daily puzzle makes is that puzzle #N hides the
+  // same bearings for everyone, forever. A change here that renumbers or
+  // reshapes old days breaks every result anyone has already shared.
+
+  const GAME_SEED = 0xbea4;
+  const EPOCH_UTC = Date.UTC(2026, 8, 21);
+  const DAY_MS = 86400000;
+  const DIAL = 16; // 22.5° per stop, a real compass rose vocabulary
+  const MIN_SEP = 4; // 90° minimum between any two sources — generous margin (IDEA-BACKLOG.md 2026-09-21)
+  const POINTS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+
+  // Fixed per tier, not searched per puzzle: the offline simulation (session
+  // #246 continuation, IDEA-BACKLOG.md) found separation and dial size barely
+  // move the solve rate, and any valid placement is triangulated by the same
+  // two-heading strategy in at most two listens under perfect listening. The
+  // slack above that theoretical minimum is the simulation's own evidence-based
+  // answer to the one thing it could not resolve: real per-listen perceptual
+  // error on real headphones. Extra listens are insurance, not a penalty for
+  // making them — no hard cap, only a cost.
+  const TIERS = [
+    { name: 'I', label: 'Two', k: 2, par: 3 },
+    { name: 'II', label: 'Three', k: 3, par: 5 },
+  ];
+  const MAX_ATTEMPTS = 1500;
+
+  // mulberry32 over an FNV-1a mix of the inputs: integer arithmetic only, so
+  // every engine draws the same puzzle from the same day.
+  function seeded(...parts) {
+    let h = 2166136261 >>> 0;
+    for (const part of parts) {
+      h = Math.imul(h ^ (part & 0xffff), 16777619) >>> 0;
+      h = Math.imul(h ^ (part >>> 16), 16777619) >>> 0;
+    }
+    let a = h | 0;
+    return () => {
+      a = (a + 0x6d2b79f5) | 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  const norm16 = (n) => ((n % DIAL) + DIAL) % DIAL;
+  const circDist = (a, b) => { const d = Math.abs(a - b) % DIAL; return Math.min(d, DIAL - d); };
+
+  /**
+   * The two compass stops a single listen cannot tell apart: the true bearing,
+   * and its mirror across the axis perpendicular to `heading` (the classic
+   * front-back "cone of confusion" of plain interaural cues — a source ahead of
+   * you and its mirror behind you pull the same way). `bearing` is only ever
+   * the puzzle's own hidden value here, exactly as `responsesFor` in this
+   * portal's other daily puzzles computes an honest reading from the truth.
+   */
+  function candidatesFor(bearing, heading) {
+    const rel = norm16(bearing - heading);
+    const mirrorRel = norm16(DIAL / 2 - rel);
+    return [bearing, norm16(heading + mirrorRel)];
+  }
+
+  /**
+   * `k` distinct stops, every pair at least `minSep` apart. Rejection sampling
+   * that restarts the whole placement on a dead end instead of looping inside
+   * it — the exact bug the offline simulation hit and fixed (IDEA-BACKLOG.md,
+   * session #246 continuation): a partial placement can paint itself into a
+   * corner where no stop satisfies the remaining separation, and looping for a
+   * next candidate inside that corner never terminates.
+   */
+  function placeSources(rand, k, minSep) {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const stops = [];
+      let ok = true;
+      for (let i = 0; i < k; i++) {
+        let found = -1;
+        for (let tries = 0; tries < 64; tries++) {
+          const c = Math.floor(rand() * DIAL);
+          if (stops.every((s) => circDist(s, c) >= minSep)) { found = c; break; }
+        }
+        if (found < 0) { ok = false; break; }
+        stops.push(found);
+      }
+      if (ok) return stops.sort((a, b) => a - b);
+    }
+    return null;
+  }
+
+  /** A placement that always satisfies MIN_SEP, for a day the generator cannot fill. */
+  function fallbackBearings(k) {
+    return k === 2 ? [4, 12] : [0, 6, 11];
+  }
+
+  /** The puzzle for a day and tier. Same arguments, same bearings, on any machine. */
+  function makePuzzle(day, tier) {
+    const spec = TIERS[tier];
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      const rand = seeded(GAME_SEED, day, tier, attempt);
+      const bearings = placeSources(rand, spec.k, MIN_SEP);
+      if (bearings) return { k: spec.k, par: spec.par, bearings, day, tier };
+    }
+    // Tens of thousands of days were generated in testing (see the offline
+    // simulation write-up) and none got here; a fixed placement beats a frozen tab.
+    return { k: spec.k, par: spec.par, bearings: fallbackBearings(spec.k), day, tier };
+  }
+
+  /** True only when the marks are exactly the hidden bearings — nothing else survives every listen. */
+  function judge(puzzle, marks) {
+    if (marks.length !== puzzle.k) return { ok: false, reason: 'count' };
+    const want = new Set(puzzle.bearings);
+    return { ok: marks.every((m) => want.has(m)) };
+  }
+
+  // A history token is a heard heading (0-15), or a failed check: a bare 'x'.
+  // Joined by dots, the same convention Echo Sounding uses for its ping history.
+  const tokensOf = (text) => (typeof text === 'string' && text ? text.split('.') : []);
+  function costOf(text) {
+    return tokensOf(text).reduce((sum, token) => sum + (token[0] === 'x' ? 2 : 1), 0);
+  }
+
+  /** What a stored listen history put on screen. Stops at the first entry the game could not have written. */
+  function replay(text) {
+    const listens = [];
+    const kept = [];
+    for (const token of tokensOf(text)) {
+      const m = /^(x?)(\d{0,2})$/.exec(token);
+      if (!m || (!m[1] && !m[2])) break; // only a corrupt store gets here
+      if (m[2]) {
+        const heading = Number(m[2]);
+        if (heading >= DIAL) break;
+        listens.push(heading);
+      }
+      kept.push(token);
+    }
+    return { listens, moves: costOf(kept.join('.')), inputs: kept.join('.') };
+  }
+
+  const marksOf = (text) => (typeof text === 'string' && text ? text.split('.').map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n < DIAL) : []);
+
+  // Movement is positional: arrows, and WASD by where the keys sit, so ZQSD
+  // rotates on AZERTY. Commands are read by the printed letter, so Z undoes on
+  // QWERTZ; a non-Latin letter falls back to the Latin one on the same key.
+  const KEY_DIRS = { ArrowUp: 0, KeyW: 0, ArrowRight: 1, KeyD: 1, ArrowDown: 2, KeyS: 2, ArrowLeft: 3, KeyA: 3 };
+  const ARROW_DIRS = { ArrowUp: 0, ArrowRight: 1, ArrowDown: 2, ArrowLeft: 3 };
+  const PUNCT_KEYS = { Comma: ',', Period: '.' };
+  const own = (table, name) => Object.prototype.hasOwnProperty.call(table, name);
+
+  function readKey(rawCode, rawKey) {
+    const code = String(rawCode || ''), key = String(rawKey || '');
+    let dir = own(ARROW_DIRS, key) ? ARROW_DIRS[key] : own(KEY_DIRS, code) ? KEY_DIRS[code] : -1;
+    const digit = /^Digit[12]$/.test(code) || (/^Numpad[12]$/.test(code) && /^[12]$/.test(key)) ? Number(code.slice(-1)) - 1 : -1;
+    let letter = key.length === 1 ? key.toLowerCase() : key;
+    if (/^[\p{L}\p{M}]+$/u.test(key) && /[^\p{Script=Latin}\p{Script=Inherited}\p{Script=Common}]/u.test(key)) {
+      if (/^Key[A-Z]$/.test(code)) letter = code.slice(3).toLowerCase();
+      else if (own(PUNCT_KEYS, code)) letter = PUNCT_KEYS[code];
+    }
+    return { dir, digit, letter: dir >= 0 ? '' : letter };
+  }
+
+  function dayStep(letter) {
+    if (letter === ',' || letter === '<' || letter === '[') return -1;
+    if (letter === '.' || letter === '>' || letter === ']') return 1;
+    return 0;
+  }
+
+  function dayNumber(date) {
+    const utc = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+    return Math.max(1, Math.floor((utc - EPOCH_UTC) / DAY_MS) + 1);
+  }
+
+  function streakAfter(streak, lastFull, day, today) {
+    if (day !== today || lastFull >= day) return null;
+    if (lastFull === day - 1) return { streak: streak + 1, lastFull: day };
+    return { streak: 1, lastFull: day };
+  }
+
+  function titleDay(day, date, past) {
+    return past ? `Day ${day} · ${date}` : `Day ${day} · a new puzzle every day`;
+  }
+
+  function shareMark(result, par) {
+    if (!result) return '⬛';
+    const over = result - par;
+    if (over < 0) return '⭐' + over;
+    if (over === 0) return '⭐';
+    if (over <= 2) return '🟢+' + over;
+    if (over <= 6) return '🟡+' + over;
+    return '🔴+' + over;
+  }
+
+  function parNote(moves, par) {
+    const over = moves - par;
+    return over < 0 ? `★ ${-over} under par` : over === 0 ? '★ par' : `par ${par}, +${over}`;
+  }
+
+  function readOnward(fragment, self) {
+    const params = new URLSearchParams(String(fragment || '').replace(/^#/, ''));
+    const slug = params.get('next') || '', title = params.get('title') || '';
+    if (slug === self || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(slug) || !/^[A-Za-z0-9][A-Za-z0-9 '’-]{0,23}$/.test(title)) return null;
+    return { slug, title, path: `/games/${slug}/` };
+  }
+
+  /**
+   * One day's saved results, merged with what this tab holds. Two tabs of the
+   * same game write to one store; the later write must not unsolve a puzzle
+   * the other tab solved, or lower a count the player already spent. Entries
+   * are { i: listen/check history, g: the player's marks, m: spent, s: spent
+   * at the solve or 0, p: par at the solve }. `mineInputs`/`mineMarks` say, per
+   * tier, whether this tab changed that field and has not saved yet; null (as
+   * the front page's own reader passes) means "current always wins".
+   */
+  function mergeDay(saved, current, mineInputs, mineMarks) {
+    return current.map((cur, tier) => {
+      const old = (Array.isArray(saved) && saved[tier]) || {};
+      const m = Math.max(Number(old.m) || 0, cur.m);
+      const oldPath = typeof old.i === 'string' ? old.i : null;
+      const oldMarks = typeof old.g === 'string' ? old.g : '';
+      if (Number(old.s) > 0) return { i: oldPath ?? cur.i, g: oldPath === null ? cur.g : oldMarks, m, s: Number(old.s), p: Number(old.p) || 0 };
+      const oursInputs = !mineInputs || mineInputs[tier] || oldPath === null;
+      const oursMarks = !mineMarks || mineMarks[tier] || oldPath === null;
+      return { i: oursInputs ? cur.i : oldPath, g: oursMarks ? cur.g : oldMarks, m, s: cur.s, p: cur.p };
+    });
+  }
+
+  const core = {
+    GAME_SEED, EPOCH_UTC, DAY_MS, DIAL, MIN_SEP, POINTS, TIERS, MAX_ATTEMPTS,
+    seeded, norm16, circDist, candidatesFor, placeSources, fallbackBearings, makePuzzle,
+    judge, costOf, replay, marksOf, mergeDay, readKey, dayStep, dayNumber, streakAfter, shareMark, parNote, titleDay, readOnward,
+  };
+  // ---- puzzle core end ----
+
+  // ---- layout & state ----
+  const W = 480, H = 720;
+  const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+  const SLUG = 'bearing';
+  const STORE = 'arkai:bearing:v1', STORE_MUTE = 'arkai:bearing:muted', STORE_GATE = 'arkai:bearing:gateok';
+  const SHARE_URL = 'https:' + '//arkai.win/games/bearing/?ref=share';
+  const RING_CX = 240, RING_CY = 316, RING_R = 132;
+
+  const C = {
+    bg: '#0a0f1e', card: '#111a2e',
+    ring: '#1c2b4a', ringDim: '#233250',
+    accent: '#7dd3fc', accentDim: '#1c5270', cursor: '#facc15',
+    text: '#eaf2ff', muted: '#8ea3c4', good: '#6ee7a8', warn: '#fbbf24', bad: '#f87171',
+    src: ['#7dd3fc', '#fb923c', '#c9a2fb'],
+  };
+
+  const stopAngle = (stop) => (stop * Math.PI) / (DIAL / 2) - Math.PI / 2;
+  const stopPoint = (stop, r) => ({ x: RING_CX + r * Math.cos(stopAngle(stop)), y: RING_CY + r * Math.sin(stopAngle(stop)) });
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const statusEl = document.getElementById('status');
+  const controls = document.getElementById('controls');
+  const copyBox = document.getElementById('copybox');
+  const copyText = document.getElementById('copytext');
+  const copyClose = document.getElementById('copyclose');
+  const coarseQuery = window.matchMedia ? window.matchMedia('(pointer: coarse)') : null;
+  const calmQuery = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  const touch = () => !!(coarseQuery && coarseQuery.matches);
+  const calm = () => !!(calmQuery && calmQuery.matches);
+
+  // Set by the portal's picture generator (site/scripts/lib/picture-flag.mjs).
+  const PICTURE = window.__arkaiPicture === true;
+
+  const storage = {
+    get(key) { if (PICTURE) return null; try { return localStorage.getItem(key); } catch { return null; } },
+    set(key, value) { if (PICTURE) return true; try { localStorage.setItem(key, value); return true; } catch { return false; } },
+  };
+
+  const S = {
+    mode: 'title',
+    day: 1, today: 1,
+    puzzles: [], runs: [], tier: 0, newDay: false,
+    heading: 0, marks: new Set(),
+    help: false,
+    streak: 0, bestStreak: 0, lastFull: 0, storageWarned: false,
+    muted: storage.get(STORE_MUTE) === '1',
+    gatePassed: storage.get(STORE_GATE) === '1', gateSide: null, gateAttempts: 0,
+    listening: false, listenStep: -1,
+    clock: 0, dayCheck: 5, flash: 0, shake: 0, toast: null,
+    hidden: false,
+  };
+  const started = new Set();
+
+  // ---- portal events (same-origin parent only) ----
+  const emit = (event, data) => {
+    if (PICTURE) return; // a photograph is not a play session
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: 'game-event', event, data: data || {} }, location.origin);
+      }
+    } catch { /* not embedded */ }
+  };
+  const reportFocus = () => emit('focus', { day: S.day, tier: S.tier + 1 });
+
+  let announceTimer = 0, pending = '';
+  const announce = (message) => {
+    pending = pending ? `${pending} ${message}` : message;
+    statusEl.textContent = '';
+    clearTimeout(announceTimer);
+    announceTimer = setTimeout(() => { statusEl.textContent = pending; pending = ''; }, 60);
+  };
+
+  // ---- sound ----
+  let audio = null;
+  const ensureAudio = () => {
+    if (S.muted) return;
+    if (!audio) {
+      try { const Ctx = window.AudioContext || window.webkitAudioContext; if (Ctx) audio = new Ctx(); } catch { audio = null; }
+    }
+    if (audio && audio.state === 'suspended') audio.resume().catch(() => {});
+  };
+  const tone = (freq, dur = 0.08, type = 'sine', vol = 0.04, delay = 0, slide = 0) => {
+    if (S.muted || !audio || audio.state !== 'running') return;
+    const t = audio.currentTime + delay;
+    const osc = audio.createOscillator(), gain = audio.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t);
+    if (slide) osc.frequency.exponentialRampToValueAtTime(Math.max(40, freq + slide), t + dur);
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(vol, t + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(gain); gain.connect(audio.destination);
+    osc.start(t); osc.stop(t + dur + 0.02);
+  };
+  const sfx = {
+    mark: () => tone(520, 0.05, 'square', 0.03),
+    unmark: () => tone(340, 0.05, 'square', 0.025),
+    bump: () => tone(130, 0.08, 'square', 0.025),
+    fail: () => tone(300, 0.3, 'sawtooth', 0.035, 0, -180),
+    win: () => [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.16, 'triangle', 0.045, i * 0.09)),
+    click: () => tone(700, 0.035, 'sine', 0.025),
+    mode: () => tone(600, 0.05, 'triangle', 0.03, 0, 80),
+  };
+
+  // The one channel that carries real spatial information: StereoPannerNode for
+  // amplitude panning, plus a manual interaural-time-difference pair (split the
+  // panned stereo signal, delay whichever channel is on the far side of the
+  // source up to ~0.65ms). A hard pan value alone is ILD-only and a strictly
+  // weaker cue than real hearing; the Bearing spec (IDEA-BACKLOG.md) calls for
+  // both explicitly so a stereo-headphone listener gets an honest cue, not a
+  // synthetic shortcut.
+  const MAX_ITD = 0.00065;
+  function spatialTone(pan, atTime, freq = 440, dur = 0.55) {
+    if (S.muted || !audio || audio.state !== 'running') return;
+    const t = atTime, p = Math.max(-1, Math.min(1, pan));
+    const osc = audio.createOscillator(), gain = audio.createGain(), panner = audio.createStereoPanner();
+    const splitter = audio.createChannelSplitter(2), merger = audio.createChannelMerger(2);
+    const delayL = audio.createDelay(0.01), delayR = audio.createDelay(0.01);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, t);
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.09, t + 0.03);
+    gain.gain.setValueAtTime(0.09, t + Math.max(0.03, dur - 0.1));
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    panner.pan.setValueAtTime(p, t);
+    delayL.delayTime.setValueAtTime(Math.max(0, p) * MAX_ITD, t);
+    delayR.delayTime.setValueAtTime(Math.max(0, -p) * MAX_ITD, t);
+    osc.connect(gain); gain.connect(panner); panner.connect(splitter);
+    splitter.connect(delayL, 0); splitter.connect(delayR, 1);
+    delayL.connect(merger, 0, 0); delayR.connect(merger, 0, 1);
+    merger.connect(audio.destination);
+    osc.start(t); osc.stop(t + dur + 0.03);
+  }
+
+  // ---- canvas letterbox ----
+  let view = { dpr: 1, cssW: W, cssH: H, scale: 1, ox: 0, oy: 0 };
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const cssW = Math.max(1, canvas.clientWidth), cssH = Math.max(1, canvas.clientHeight);
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    const scale = Math.min(cssW / W, cssH / H);
+    view = { dpr, cssW, cssH, scale, ox: (cssW - W * scale) / 2, oy: (cssH - H * scale) / 2 };
+  }
+  function toLogical(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    return { x: (clientX - rect.left - view.ox) / view.scale, y: (clientY - rect.top - view.oy) / view.scale };
+  }
+
+  // ---- helpers ----
+  const puzzle = () => S.puzzles[S.tier];
+  const run = () => S.runs[S.tier];
+  const solvedCount = () => S.runs.filter((r) => r.solved).length;
+  const locked = () => run().solved;
+  const archive = () => S.day < S.today;
+  const dayDate = (day) => new Date(EPOCH_UTC + (day - 1) * DAY_MS).toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'UTC' });
+  const ONWARD = !PICTURE && /^https?:$/.test(location.protocol) ? readOnward(location.hash, SLUG) : null;
+  const onwardLink = document.getElementById('onward');
+  const onward = () => ONWARD !== null && solvedCount() === TIERS.length;
+  // ---- onward click plan begin ----
+  // What a click (or middle click) on the onward control should do. `event`
+  // carries only the fields a real click event exposes; `available` is
+  // `onward()` — the day on screen is solved and there is a next daily to
+  // hand the player to.
+  function onwardClickPlan(event, available) {
+    if (!event.isTrusted || !available || event.altKey) return 'ignore';
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.button !== 0) return 'count';
+    return 'navigate';
+  }
+  function onwardAuxclickPlan(event, available) {
+    return event.isTrusted && available && event.button === 1 ? 'count' : 'ignore';
+  }
+  // ---- onward click plan end ----
+  if (ONWARD) {
+    onwardLink.addEventListener('click', (event) => {
+      const plan = onwardClickPlan(event, onward());
+      if (plan === 'ignore') return;
+      if (plan === 'count') { countOnward(); return; }
+      event.preventDefault();
+      goOnward();
+    });
+    onwardLink.addEventListener('auxclick', (event) => {
+      if (onwardAuxclickPlan(event, onward()) === 'count') countOnward();
+    });
+  }
+  function countOnward() { emit('next_game', { day: S.day }); }
+  function goOnward() {
+    if (!ONWARD || !onward()) return;
+    sfx.click();
+    countOnward();
+    setTimeout(() => onwardLink.click(), 100);
+  }
+  const titleSummary = () => `Day ${S.day}${archive() ? `, ${dayDate(S.day)}, from the archive` : ''}. ${solvedCount()} of 2 puzzles solved.`;
+
+  const toast = (message, spoken = message) => { S.toast = { text: message, t: 0 }; announce(spoken); };
+  const shake = (amount) => { if (!calm()) S.shake = amount; };
+
+  /** Every source's accumulated candidate set, from this run's listen history — the same reading a listen gives, replayed. */
+  function candidateSets(p, listens) {
+    return Array.from({ length: p.k }, (_, i) => {
+      let set = null;
+      for (const heading of listens) {
+        const pair = new Set(candidatesFor(p.bearings[i], heading));
+        set = set ? new Set([...set].filter((x) => pair.has(x))) : pair;
+      }
+      return set || new Set();
+    });
+  }
+
+  function describeState() {
+    const p = puzzle(), r = run();
+    const heading = `facing ${POINTS[S.heading]}`;
+    const cand = candidateSets(p, r.listens);
+    const readouts = cand.map((set, i) => `source ${i + 1}: ${set.size ? [...set].map((s) => POINTS[s]).join(' or ') : 'not listened yet'}`).join('. ');
+    const marks = S.marks.size ? Array.from(S.marks).map((s) => POINTS[s]).join(', ') : 'none';
+    return `${p.k} sources, ${heading}, ${r.listens.length} listens spent. ${readouts}. Marks: ${marks}.`;
+  }
+
+  // ---- persistence ----
+  function parseStore(raw) {
+    try {
+      const data = JSON.parse(raw || 'null');
+      return data && typeof data === 'object' && data.days && typeof data.days === 'object' ? data : { days: {} };
+    } catch { return { days: {} }; }
+  }
+  const readStore = () => parseStore(storage.get(STORE));
+
+  function entryFor(tier) {
+    const r = S.runs[tier];
+    return { i: r.inputs, g: Array.from(r.marks ?? []).join('.'), m: r.moves, s: r.solved ? r.solvedMoves : 0, p: r.solved ? r.par : 0 };
+  }
+
+  function currentEntries() {
+    return S.runs.map((r, tier) => (tier === S.tier ? { i: r.inputs, g: Array.from(S.marks).join('.'), m: r.moves, s: r.solved ? r.solvedMoves : 0, p: r.solved ? r.par : 0 } : entryFor(tier)));
+  }
+
+  function writeStore() {
+    const data = readStore();
+    data.days[S.day] = mergeDay(data.days[S.day], currentEntries(), null, null);
+    if (solvedCount() === TIERS.length) {
+      const next = streakAfter(S.streak, S.lastFull, S.day, S.today);
+      if (next) { S.streak = next.streak; S.lastFull = next.lastFull; S.bestStreak = Math.max(S.bestStreak, S.streak); }
+    }
+    data.streak = S.streak; data.best = S.bestStreak; data.lastFull = S.lastFull;
+    if (!storage.set(STORE, JSON.stringify(data)) && !S.storageWarned) {
+      S.storageWarned = true;
+      toast('This browser is not keeping your progress.');
+    }
+  }
+
+  function absorb(data) {
+    const saved = data.days[S.day];
+    if (Array.isArray(saved)) {
+      const merged = mergeDay(saved, currentEntries(), null, null);
+      merged.forEach((entry, tier) => {
+        const r = S.runs[tier];
+        r.moves = entry.m;
+        if (entry.s > 0 && !(r.solved && r.solvedMoves === entry.s)) {
+          const state = replay(entry.i);
+          r.solved = true; r.solvedMoves = entry.s; r.par = entry.p;
+          r.inputs = state.inputs; r.listens = state.listens;
+          r.marks = new Set(marksOf(entry.g));
+          emit('closed', { day: S.day, tier: tier + 1 });
+          if (tier === S.tier) { S.marks = new Set(r.marks); toast(`${TIERS[tier].label} was solved in another tab, in ${entry.s}.`); }
+        }
+      });
+    }
+    S.streak = Number(data.streak) || 0;
+    S.bestStreak = Math.max(S.bestStreak, Number(data.best) || 0);
+    S.lastFull = Number(data.lastFull) || 0;
+  }
+
+  function selectTier(tier) {
+    S.tier = tier;
+    S.help = false;
+    S.flash = 0; S.shake = 0;
+    S.heading = 0;
+    S.marks = new Set(run().marks);
+  }
+
+  /** Opens a day's two puzzles: today, or any earlier day back to day 1. */
+  function loadDay(day) {
+    S.today = dayNumber(new Date());
+    day = Math.min(Math.max(1, day), S.today);
+    S.day = day;
+    S.newDay = false;
+    S.puzzles = TIERS.map((_, tier) => makePuzzle(day, tier));
+    const data = readStore();
+    const saved = Array.isArray(data.days[day]) ? data.days[day] : [];
+    S.streak = Number(data.streak) || 0;
+    S.bestStreak = Number(data.best) || 0;
+    S.lastFull = Number(data.lastFull) || 0;
+    S.runs = S.puzzles.map((p, tier) => {
+      const entry = saved[tier] || {};
+      const state = replay(entry.i);
+      const solvedMoves = Number(entry.s) || 0;
+      return {
+        inputs: state.inputs, listens: state.listens,
+        marks: new Set(marksOf(entry.g)),
+        moves: Math.max(Number(entry.m) || 0, state.moves),
+        solved: solvedMoves > 0, solvedMoves, par: Number(entry.p) || 0,
+      };
+    });
+    const firstOpen = S.runs.findIndex((r) => !r.solved);
+    selectTier(firstOpen < 0 ? 0 : firstOpen);
+  }
+
+  const POSE = { day: 40, tier: 1 };
+  function posePicture() {
+    S.day = S.today = POSE.day;
+    S.puzzles = TIERS.map((_, tier) => makePuzzle(POSE.day, tier));
+    S.runs = S.puzzles.map((p, tier) => {
+      if (tier < POSE.tier) return { inputs: '', listens: [], marks: new Set(), moves: p.par, solved: true, solvedMoves: p.par, par: p.par };
+      if (tier === POSE.tier) {
+        const listens = [0];
+        return { inputs: '0', listens, marks: new Set([p.bearings[0]]), moves: 1, solved: false, solvedMoves: 0, par: 0 };
+      }
+      return { inputs: '', listens: [], marks: new Set(), moves: 0, solved: false, solvedMoves: 0, par: 0 };
+    });
+    S.gatePassed = true;
+    selectTier(POSE.tier);
+    S.marks = new Set(S.runs[POSE.tier].marks);
+    S.mode = 'play';
+  }
+
+  function markStart() {
+    const key = `${S.day}:${S.tier}`;
+    if (run().solved || started.has(key)) return;
+    started.add(key);
+    emit('start', { game: SLUG, day: S.day, tier: S.tier + 1, archive: archive() });
+  }
+
+  function followToday() {
+    const today = dayNumber(new Date());
+    if (today === S.today) return false;
+    if (S.day !== S.today) { S.today = today; return false; }
+    loadDay(today);
+    return true;
+  }
+
+  function checkDay() {
+    if (PICTURE || dayNumber(new Date()) === S.today) return;
+    if (S.mode === 'play' && S.day === S.today) {
+      if (!S.newDay) { S.newDay = true; toast(touch() ? 'A new puzzle is out. Tap the home button.' : 'A new puzzle is out. Press Esc.'); }
+      return;
+    }
+    followToday();
+  }
+
+  function stepDay(delta) {
+    const target = S.day + delta;
+    if (target < 1 || target > dayNumber(new Date())) {
+      sfx.bump();
+      announce(target < 1 ? 'Day 1 is the first day.' : 'This is today. A new puzzle comes at midnight.');
+      return;
+    }
+    S.mode = 'title'; S.help = false; S.toast = null;
+    loadDay(target);
+    sfx.click();
+    announce(titleSummary());
+  }
+
+  // ---- game flow ----
+  function goTitle() {
+    S.mode = 'title';
+    S.help = false;
+    followToday();
+    sfx.click();
+    announce(titleSummary());
+  }
+
+  function startPlay(tier) {
+    ensureAudio();
+    followToday();
+    if (tier !== undefined && tier !== S.tier) selectTier(tier);
+    else S.marks = new Set(run().marks);
+    S.mode = 'play';
+    S.help = false; S.toast = null;
+    sfx.click();
+    markStart();
+    announce(`Day ${S.day}, ${TIERS[S.tier].label}-source puzzle, par ${puzzle().par}. ${describeState()}`);
+    reportFocus();
+  }
+
+  function setTier(tier) {
+    if (S.mode !== 'play' || tier === S.tier) return;
+    selectTier(tier);
+    markStart();
+    sfx.click();
+    announce(`${TIERS[tier].label}. Par ${puzzle().par}. ${describeState()}`);
+    reportFocus();
+  }
+
+  function rotate(delta) {
+    if (S.mode !== 'play') return;
+    S.heading = norm16(S.heading + delta);
+    sfx.click();
+    announce(`Facing ${POINTS[S.heading]}.`);
+  }
+
+  function doListen() {
+    if (S.mode !== 'play' || locked() || S.listening) return;
+    ensureAudio();
+    const p = puzzle(), r = run();
+    const heading = S.heading;
+    r.listens.push(heading);
+    r.inputs = r.inputs ? `${r.inputs}.${heading}` : String(heading);
+    r.moves++;
+    emit('progress', { moves: run().moves, tier: S.tier + 1, day: S.day, archive: archive() });
+    writeStore();
+    S.listening = true; S.listenStep = 0;
+    const t0 = audio && audio.state === 'running' ? audio.currentTime + 0.05 : 0;
+    const GAP = 0.85;
+    p.bearings.forEach((bearing, i) => {
+      const rel = norm16(bearing - heading);
+      const pan = Math.sin((rel * Math.PI) / (DIAL / 2));
+      if (t0) spatialTone(pan, t0 + i * GAP, 420 + i * 70, 0.5);
+      setTimeout(() => { S.listenStep = i; }, i * GAP * 1000);
+    });
+    setTimeout(() => { S.listening = false; S.listenStep = -1; }, p.bearings.length * GAP * 1000 + 200);
+    const cand = candidateSets(p, r.listens);
+    const readouts = cand.map((set, i) => `source ${i + 1}: ${[...set].map((s) => POINTS[s]).join(' or ')}`).join('. ');
+    announce(`Listened from ${POINTS[heading]}. ${readouts}.`);
+  }
+
+  function toggleMark(stop) {
+    if (S.mode !== 'play' || locked()) return;
+    const p = puzzle();
+    if (S.marks.has(stop)) { S.marks.delete(stop); sfx.unmark(); }
+    else {
+      if (S.marks.size >= p.k) { toast(`Mark up to ${p.k} points. Clear one first.`); sfx.bump(); return; }
+      S.marks.add(stop); sfx.mark();
+    }
+    run().marks = new Set(S.marks);
+    writeStore();
+    announce(`${S.marks.has(stop) ? 'Marked' : 'Unmarked'} ${POINTS[stop]}.`);
+  }
+
+  function clearMarks() {
+    if (S.mode !== 'play' || locked() || !S.marks.size) return;
+    S.marks.clear();
+    run().marks = new Set();
+    writeStore();
+    sfx.click();
+    announce('Marks cleared.');
+  }
+
+  function toggleMute() {
+    S.muted = !S.muted;
+    storage.set(STORE_MUTE, S.muted ? '1' : '0');
+    if (S.muted) { if (audio) audio.suspend().catch(() => {}); } else ensureAudio();
+    announce(S.muted ? 'Muted.' : 'Sound on.');
+  }
+
+  function celebrate() {
+    sfx.win();
+    if (!calm()) S.flash = 0.5;
+  }
+
+  function solvedNow() {
+    const p = puzzle(), r = run();
+    r.solved = true; r.solvedMoves = r.moves; r.par = p.par;
+    writeStore();
+    celebrate();
+    const over = r.solvedMoves - p.par;
+    emit('gameover', { won: true, score: r.solvedMoves, par: p.par, tier: S.tier + 1, day: S.day, archive: archive() });
+    const verdict = over < 0 ? `${-over} under par: a very clean triangulation.` : over === 0 ? 'Par! A star.' : `Solved, ${over} over par.`;
+    toast(`${verdict} ${solvedCount() === TIERS.length ? 'Both done.' : 'The other puzzle is next when ready.'}`);
+  }
+
+  function doCheck() {
+    if (S.mode !== 'play' || locked()) return;
+    const p = puzzle(), r = run();
+    const verdict = judge(p, Array.from(S.marks));
+    if (verdict.ok) { solvedNow(); return; }
+    if (verdict.reason === 'count') { toast(`Mark exactly ${p.k} points first.`); sfx.bump(); return; }
+    ensureAudio();
+    r.inputs = r.inputs ? `${r.inputs}.x` : 'x';
+    r.moves += 2;
+    writeStore();
+    toast('Not quite. Listen again from a different heading to narrow it down. Cost 2.');
+    sfx.fail(); shake(5);
+  }
+
+  function goNext() {
+    const nextTier = S.runs.findIndex((r, i) => i > S.tier && !r.solved);
+    selectTier(nextTier < 0 ? (S.tier + 1) % TIERS.length : nextTier);
+    S.mode = 'play';
+    markStart();
+    sfx.click();
+    announce(`${TIERS[S.tier].label}. Par ${puzzle().par}. ${describeState()}`);
+    reportFocus();
+  }
+
+  function shareText() {
+    const marks = S.runs.map((r, tier) => shareMark(r.solvedMoves, S.puzzles[tier].par));
+    return `Bearing #${S.day}${archive() ? ' (archive)' : ''}\n${marks.join('  ')}\n${SHARE_URL}`;
+  }
+  function openCopyBox(message) {
+    copyText.value = message;
+    copyBox.classList.add('open');
+    copyText.focus(); copyText.select();
+  }
+  function share() {
+    const message = shareText();
+    sfx.click();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(message).then(() => toast('Copied! Paste it anywhere.'), () => openCopyBox(message));
+    } else openCopyBox(message);
+  }
+  copyClose.addEventListener('click', () => { copyBox.classList.remove('open'); canvas.focus(); });
+
+  // ---- sound-check gate ----
+  // A standalone, optional screen — not inserted into the start flow (a
+  // deliberate divergence from the letter of the spec, with reason: the
+  // portal's own smoke test requires every game to go from a start gesture
+  // straight to a playable, event-reporting state, and a gate in front of that
+  // — even a softened one a player can skip — breaks that contract for anyone
+  // driving the game without a human answering it, automated checks included).
+  // Reachable any time from the title screen; doubles as a first-gesture
+  // AudioContext unlock and an honest "this plays best with headphones" note
+  // for anyone who never opens it.
+  function openGate() {
+    S.gateAttempts = 0;
+    S.mode = 'gate';
+    S.help = false;
+    playGateTone();
+  }
+  function playGateTone() {
+    ensureAudio();
+    S.gateSide = Math.random() < 0.5 ? -1 : 1;
+    if (audio && audio.state === 'running') spatialTone(S.gateSide, audio.currentTime + 0.05, 523, 0.7);
+    announce('Playing a tone panned hard left or right.');
+  }
+  function answerGate(side) {
+    if (side === S.gateSide) {
+      S.gatePassed = true;
+      storage.set(STORE_GATE, '1');
+      sfx.win();
+      toast('Sound check passed.');
+      goTitle();
+      return;
+    }
+    S.gateAttempts++;
+    sfx.bump();
+    announce(`Not quite. ${S.gateAttempts >= 2 ? 'You can continue without headphones, or try again.' : 'Try again.'}`);
+    playGateTone();
+  }
+  function skipGate() {
+    sfx.click();
+    goTitle();
+  }
+
+  // ---- rendering ----
+  let hitRegions = [];
+  const addHit = (x, y, w, h, action) => hitRegions.push({ x, y, w, h, action });
+  function hitTest(x, y) {
+    for (let i = hitRegions.length - 1; i >= 0; i--) {
+      const r = hitRegions[i];
+      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return r.action;
+    }
+    return null;
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function button(x, y, w, h, label, action, active, enabled = true) {
+    ctx.fillStyle = active ? C.accent : C.card;
+    roundRect(x, y, w, h, 10); ctx.fill();
+    ctx.strokeStyle = C.accentDim; ctx.lineWidth = 1; roundRect(x, y, w, h, 10); ctx.stroke();
+    ctx.fillStyle = !enabled ? C.muted : active ? '#06222f' : C.text;
+    ctx.font = `700 15px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(label, x + w / 2, y + h / 2 + 1);
+    if (enabled) addHit(x, y, w, h, action);
+  }
+
+  function iconButton(x, y, w, h, icon, action) {
+    ctx.fillStyle = C.card;
+    roundRect(x, y, w, h, 10); ctx.fill();
+    ctx.strokeStyle = C.accentDim; ctx.lineWidth = 1; roundRect(x, y, w, h, 10); ctx.stroke();
+    const cx = x + w / 2, cy = y + h / 2;
+    ctx.strokeStyle = C.text; ctx.fillStyle = C.text; ctx.lineWidth = 2; ctx.lineCap = 'round';
+    if (icon === 'home') {
+      ctx.beginPath();
+      ctx.moveTo(cx - 8, cy - 1); ctx.lineTo(cx, cy - 8); ctx.lineTo(cx + 8, cy - 1);
+      ctx.moveTo(cx - 5, cy - 3); ctx.lineTo(cx - 5, cy + 8); ctx.lineTo(cx + 5, cy + 8); ctx.lineTo(cx + 5, cy - 3);
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(cx - 9, cy - 3); ctx.lineTo(cx - 5, cy - 3); ctx.lineTo(cx, cy - 8);
+      ctx.lineTo(cx, cy + 8); ctx.lineTo(cx - 5, cy + 3); ctx.lineTo(cx - 9, cy + 3);
+      ctx.closePath(); ctx.fill();
+      ctx.beginPath();
+      if (S.muted) {
+        ctx.moveTo(cx + 3, cy - 4); ctx.lineTo(cx + 10, cy + 4);
+        ctx.moveTo(cx + 10, cy - 4); ctx.lineTo(cx + 3, cy + 4);
+      } else {
+        ctx.arc(cx + 2, cy, 5, -0.9, 0.9);
+        ctx.moveTo(cx + 6, cy - 8); ctx.arc(cx + 2, cy, 9, -0.9, 0.9);
+      }
+      ctx.stroke();
+    }
+    ctx.lineCap = 'butt';
+    addHit(x, y, w, h, action);
+  }
+
+  function wrapText(text, x, y, maxW, lineH) {
+    const words = text.split(' ');
+    let line = '', ly = y;
+    for (const w of words) {
+      const test = line ? `${line} ${w}` : w;
+      if (ctx.measureText(test).width > maxW && line) { ctx.fillText(line, x, ly); line = w; ly += lineH; }
+      else line = test;
+    }
+    if (line) ctx.fillText(line, x, ly);
+    return ly;
+  }
+
+  function drawTitle() {
+    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+    addHit(0, 0, W, H, 'titledefault');
+
+    iconButton(W - 10 - 34, 4, 34, 32, 'mute', 'mute');
+
+    const prevOk = S.day > 1, nextOk = S.day < S.today;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = prevOk ? C.text : C.muted; ctx.font = `700 22px ${FONT}`;
+    ctx.fillText('‹', 32, 40);
+    addHit(10, 20, 44, 40, 'prevday');
+    ctx.fillStyle = nextOk ? C.text : C.muted;
+    ctx.fillText('›', 448, 40);
+    addHit(426, 20, 44, 40, 'nextday');
+    ctx.fillStyle = C.muted; ctx.font = `600 15px ${FONT}`;
+    ctx.fillText(titleDay(S.day, dayDate(S.day), archive()), 240, 40);
+
+    ctx.fillStyle = C.accent; ctx.font = `800 38px ${FONT}`;
+    ctx.fillText('Bearing', 240, 90);
+    ctx.fillStyle = C.muted; ctx.font = `400 15px ${FONT}`;
+    ctx.fillText('Rotate. Listen. Triangulate the hidden sources.', 240, 118);
+    ctx.font = `400 13px ${FONT}`;
+    ctx.fillText('Best with headphones or stereo speakers.', 240, 138);
+
+    const cardY = [172, 300], cardH = 108;
+    TIERS.forEach((t, tier) => {
+      const y = cardY[tier], r = S.runs[tier];
+      ctx.fillStyle = C.card;
+      roundRect(40, y, 400, cardH, 14); ctx.fill();
+      ctx.strokeStyle = r.solved ? C.good : C.accentDim; ctx.lineWidth = 2;
+      roundRect(40, y, 400, cardH, 14); ctx.stroke();
+      ctx.fillStyle = C.text; ctx.font = `800 22px ${FONT}`; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(t.label, 62, y + 38);
+      ctx.fillStyle = C.muted; ctx.font = `400 14px ${FONT}`;
+      ctx.fillText(`${t.k} sources · 16-point compass · par ${t.par}`, 62, y + 60);
+      ctx.textAlign = 'right';
+      if (r.solved) {
+        ctx.fillStyle = r.solvedMoves - r.par <= 0 ? C.good : C.warn;
+        ctx.font = `700 16px ${FONT}`;
+        ctx.fillText(parNote(r.solvedMoves, r.par), 418, y + 38);
+        ctx.fillStyle = C.muted; ctx.font = `400 13px ${FONT}`;
+        ctx.fillText(`${r.solvedMoves} listens spent`, 418, y + 60);
+      } else {
+        ctx.fillStyle = C.accent; ctx.font = `700 16px ${FONT}`;
+        ctx.fillText(r.moves ? 'In progress' : 'Not started', 418, y + 38);
+      }
+      ctx.textAlign = 'center';
+      addHit(40, y, 400, cardH, `card${tier}`);
+    });
+
+    if (solvedCount() === TIERS.length) {
+      ctx.fillStyle = S.streak > 0 ? C.good : C.muted; ctx.font = `700 15px ${FONT}`;
+      ctx.fillText(S.streak > 0 ? `Streak ${S.streak}${S.bestStreak > S.streak ? ` · best ${S.bestStreak}` : ''}` : 'Both puzzles solved.', 240, 428);
+    }
+
+    button(40, 452, 400, 48, 'Share', 'share', false);
+    button(40, 512, 190, 44, 'How to play', 'help', false);
+    button(250, 512, 190, 44, S.gatePassed ? 'Sound check ✓' : 'Sound check', 'opengate', false);
+    ctx.fillStyle = C.muted; ctx.font = `400 12px ${FONT}`; ctx.fillText('Self-contained, no network. Made by an AI agent.', 240, 686);
+  }
+
+  function drawGate() {
+    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = C.accent; ctx.font = `800 28px ${FONT}`;
+    ctx.fillText('Sound check', 240, 120);
+    ctx.fillStyle = C.muted; ctx.font = `400 15px ${FONT}`; ctx.textBaseline = 'middle';
+    wrapText('Bearing is heard, not just seen. Put on headphones or sit between stereo speakers, then press play and say which side the tone came from.', 240, 168, 380, 22);
+
+    button(140, 240, 200, 52, 'Play the tone', 'gatetone', false);
+
+    button(60, 340, 165, 90, 'LEFT', 'gateleft', false);
+    button(255, 340, 165, 90, 'RIGHT', 'gateright', false);
+
+    ctx.fillStyle = C.muted; ctx.font = `400 13px ${FONT}`; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(S.gateAttempts >= 2 ? 'Missed twice — that is fine.' : 'A quick tap is all it takes.', 240, 460);
+
+    button(140, 500, 200, 44, 'Continue without it', 'gateskip', false);
+  }
+
+  function drawDial() {
+    const p = puzzle(), r = run();
+    const cand = candidateSets(p, r.listens);
+
+    ctx.strokeStyle = C.ring; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(RING_CX, RING_CY, RING_R, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = C.ringDim; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(RING_CX, RING_CY, RING_R - 26, 0, Math.PI * 2); ctx.stroke();
+
+    for (let s = 0; s < DIAL; s++) {
+      const cardinal = s % 4 === 0;
+      const outer = stopPoint(s, RING_R + (cardinal ? 14 : 8));
+      const inner = stopPoint(s, RING_R - (cardinal ? 10 : 4));
+      ctx.strokeStyle = cardinal ? C.accentDim : C.ringDim;
+      ctx.lineWidth = cardinal ? 2 : 1;
+      ctx.beginPath(); ctx.moveTo(inner.x, inner.y); ctx.lineTo(outer.x, outer.y); ctx.stroke();
+      if (cardinal) {
+        const label = stopPoint(s, RING_R + 26);
+        ctx.fillStyle = C.muted; ctx.font = `700 13px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(POINTS[s], label.x, label.y);
+      }
+      const hit = stopPoint(s, RING_R);
+      addHit(hit.x - 18, hit.y - 18, 36, 36, `stop${s}`);
+    }
+
+    // Candidate ticks: every source's accumulated reading, small and colored per source.
+    cand.forEach((set, i) => {
+      const color = C.src[i % C.src.length];
+      for (const stop of set) {
+        const pt = stopPoint(stop, RING_R - 26 - i * 8);
+        ctx.fillStyle = color;
+        ctx.beginPath(); ctx.arc(pt.x, pt.y, 4.5, 0, Math.PI * 2); ctx.fill();
+      }
+    });
+
+    // The player's marks: filled disks on the ring itself.
+    for (const stop of S.marks) {
+      const pt = stopPoint(stop, RING_R);
+      ctx.fillStyle = C.cursor;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, 9, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = C.bg; ctx.lineWidth = 2; ctx.stroke();
+    }
+
+    // Heading needle.
+    const tip = stopPoint(S.heading, RING_R - 30);
+    ctx.strokeStyle = C.accent; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(RING_CX, RING_CY); ctx.lineTo(tip.x, tip.y); ctx.stroke();
+    ctx.lineCap = 'butt';
+    ctx.fillStyle = C.accent;
+    ctx.beginPath(); ctx.arc(RING_CX, RING_CY, 5, 0, Math.PI * 2); ctx.fill();
+
+    if (S.listening && S.listenStep >= 0) {
+      const color = C.src[S.listenStep % C.src.length];
+      const pt = stopPoint(p.bearings[S.listenStep], RING_R + 20);
+      ctx.strokeStyle = color; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, 10, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+
+  function drawPlay() {
+    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+
+    iconButton(10, 4, 34, 32, 'home', 'home');
+    iconButton(W - 10 - 34, 4, 34, 32, 'mute', 'mute');
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = C.text; ctx.font = `700 16px ${FONT}`;
+    ctx.fillText(`Day ${S.day} · ${TIERS[S.tier].label}`, 240, 22);
+
+    const p = puzzle(), r = run();
+    ctx.fillStyle = C.muted; ctx.font = `400 13px ${FONT}`;
+    ctx.fillText(`Facing ${POINTS[S.heading]} · ${r.listens.length} listen${r.listens.length === 1 ? '' : 's'} spent · par ${p.par}`, 240, 46);
+
+    drawDial();
+
+    // Per-source readouts, in words, next to the dial — the exact equivalent of
+    // what a listen conveys, for anyone who cannot rely on stereo hearing alone.
+    const cand = candidateSets(p, r.listens);
+    ctx.textAlign = 'left'; ctx.font = `600 13px ${FONT}`;
+    cand.forEach((set, i) => {
+      ctx.fillStyle = C.src[i % C.src.length];
+      const text = `Source ${i + 1}: ${set.size ? [...set].map((s) => POINTS[s]).join(' or ') : 'not listened yet'}`;
+      ctx.fillText(text, 30, 470 + i * 20);
+    });
+
+    button(30, 540, 200, 50, locked() ? 'Solved' : 'Listen', 'listen', false, !locked());
+    button(250, 540, 100, 50, '‹', 'rotateccw', false);
+    button(350, 540, 100, 50, '›', 'rotatecw', false);
+
+    button(30, 602, 120, 44, 'Check', 'check', false, !locked());
+    button(160, 602, 120, 44, 'Clear', 'clear', false, !locked());
+    button(290, 602, 160, 44, S.tier === 0 ? 'Three-source' : 'Two-source', `card${1 - S.tier}`, false);
+
+    ctx.fillStyle = C.muted; ctx.font = `400 12px ${FONT}`;
+    ctx.fillText('', 0, 0); // no-op keeps text state consistent for the next draw call
+  }
+
+  function drawHelp() {
+    ctx.fillStyle = 'rgba(4,8,16,0.92)'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = C.card;
+    roundRect(30, 70, W - 60, H - 140, 16); ctx.fill();
+    ctx.strokeStyle = C.accentDim; ctx.lineWidth = 1; roundRect(30, 70, W - 60, H - 140, 16); ctx.stroke();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = C.accent; ctx.font = `800 22px ${FONT}`;
+    ctx.fillText('How to play', 240, 106);
+    ctx.fillStyle = C.text; ctx.font = `400 14px ${FONT}`; ctx.textAlign = 'left';
+    const lines = [
+      'Two or three sound sources sit at fixed compass',
+      'points, hidden. Rotate your heading, then listen.',
+      '',
+      'Each source pulls left or right the way a real ear',
+      'hears it. That pull always matches two possible',
+      'bearings, mirrored across your heading — the same',
+      'pull comes from a source ahead of you or behind it.',
+      '',
+      'Listen again from a different heading: the new pair',
+      'and the old pair share exactly one bearing. That is',
+      'the truth. Mark it, and every other source, then',
+      'press Check.',
+      '',
+      'Every listen costs 1. A wrong check costs 2. No hard',
+      'limit — extra listens are always worth it if unsure.',
+    ];
+    lines.forEach((l, i) => ctx.fillText(l, 56, 140 + i * 24));
+    addHit(0, 0, W, H, 'closehelp');
+  }
+
+  function drawEffects(dt) {
+    if (!S.hidden) {
+      if (S.flash > 0) S.flash = Math.max(0, S.flash - dt * 1.5);
+      if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 20);
+    }
+    if (S.flash > 0) { ctx.fillStyle = `rgba(125,211,252,${S.flash * 0.3})`; ctx.fillRect(0, 0, W, H); }
+    if (S.toast) {
+      S.toast.t += dt;
+      if (S.toast.t < 2.6) {
+        ctx.fillStyle = 'rgba(10,15,30,0.92)';
+        roundRect(40, H - 74, W - 80, 46, 12); ctx.fill();
+        ctx.fillStyle = C.text; ctx.font = `600 14px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        wrapText(S.toast.text, W / 2, H - 51, W - 110, 16);
+      } else S.toast = null;
+    }
+  }
+
+  function syncOnward() {
+    if (!ONWARD) return;
+    onwardLink.hidden = !onward();
+    if (onward()) { onwardLink.href = ONWARD.path; onwardLink.textContent = `Play ${ONWARD.title}, another daily puzzle`; }
+  }
+
+  function render(dt) {
+    hitRegions = [];
+    ctx.setTransform(view.dpr * view.scale, 0, 0, view.dpr * view.scale, view.dpr * view.ox, view.dpr * view.oy);
+    ctx.clearRect(-view.ox / view.scale, -view.oy / view.scale, view.cssW / view.scale, view.cssH / view.scale);
+    if (S.mode === 'title') drawTitle();
+    else if (S.mode === 'gate') drawGate();
+    else drawPlay();
+    if (S.help) drawHelp();
+    drawEffects(dt);
+    syncOnward();
+  }
+
+  // ---- input ----
+  function handleAction(action) {
+    if (!action) return;
+    if (action === 'titledefault') {
+      const first = S.runs.findIndex((r) => !r.solved);
+      startPlay(first < 0 ? 0 : first);
+      return;
+    }
+    if (action.startsWith('card')) {
+      const tier = Number(action.slice(4));
+      if (S.mode === 'title') startPlay(tier);
+      else if (S.mode === 'play') setTier(tier);
+      return;
+    }
+    if (action.startsWith('stop')) {
+      const stop = Number(action.slice(4));
+      toggleMark(stop);
+      return;
+    }
+    switch (action) {
+      case 'prevday': stepDay(-1); return;
+      case 'nextday': stepDay(1); return;
+      case 'home': goTitle(); return;
+      case 'mute': toggleMute(); return;
+      case 'listen': doListen(); return;
+      case 'rotateccw': rotate(-1); return;
+      case 'rotatecw': rotate(1); return;
+      case 'check': doCheck(); return;
+      case 'clear': clearMarks(); return;
+      case 'share': share(); return;
+      case 'onward': goOnward(); return;
+      case 'closehelp': S.help = false; return;
+      case 'opengate': if (S.mode === 'title') openGate(); return;
+      case 'gateleft': answerGate(-1); return;
+      case 'gateright': answerGate(1); return;
+      case 'gatetone': playGateTone(); return;
+      case 'gateskip': skipGate(); return;
+    }
+  }
+
+  canvas.addEventListener('pointerdown', (e) => {
+    canvas.focus();
+    const { x, y } = toLogical(e.clientX, e.clientY);
+    handleAction(hitTest(x, y));
+  });
+
+  window.addEventListener('keydown', (e) => {
+    const holdable = e.code === 'ArrowLeft' || e.code === 'ArrowRight' || e.code === 'KeyA' || e.code === 'KeyD';
+    if (e.repeat && !holdable) return;
+    const { dir, digit, letter } = readKey(e.code, e.key);
+    if (dir === 1 || dir === 3) {
+      e.preventDefault();
+      if (S.mode === 'play') rotate(dir === 1 ? 1 : -1);
+      return;
+    }
+    if (dir === 0 || dir === 2) return;
+    if (digit >= 0 && digit < TIERS.length) {
+      e.preventDefault();
+      if (S.mode === 'title') startPlay(digit);
+      else if (S.mode === 'play') setTier(digit);
+      return;
+    }
+    const dayD = dayStep(letter);
+    if (dayD && S.mode === 'title') { e.preventDefault(); stepDay(dayD); return; }
+    switch (letter) {
+      case ' ':
+        e.preventDefault();
+        if (S.help) { S.help = false; return; }
+        if (S.mode === 'title') handleAction('titledefault');
+        else if (S.mode === 'play') doListen();
+        return;
+      case 'k': if (S.mode === 'play') doCheck(); return;
+      case 'x': if (S.mode === 'play') clearMarks(); return;
+      case 'c': share(); return;
+      case 'l': if (S.mode === 'play') announce(describeState()); return;
+      case 'h': S.help = !S.help; sfx.click(); return;
+      case 'n': if (S.mode === 'play') goNext(); return;
+      case 'g': if (S.mode === 'title') openGate(); return;
+      case 'escape':
+        if (S.help) { S.help = false; return; }
+        if (S.mode === 'gate') { goTitle(); return; }
+        if (S.mode === 'play') goTitle();
+        return;
+    }
+  });
+
+  controls.addEventListener('click', (e) => {
+    const btn = e.target.closest('button,a');
+    if (!btn) return;
+    const act = btn.dataset.act;
+    if (!act) return;
+    if (act === 'rotateccw') { if (S.mode === 'play') rotate(-1); return; }
+    if (act === 'rotatecw') { if (S.mode === 'play') rotate(1); return; }
+    if (act === 'describe') { announce(describeState()); return; }
+    if (act === 'help') { S.help = !S.help; return; }
+    handleAction(act);
+  });
+
+  window.addEventListener('resize', resize);
+  document.addEventListener('visibilitychange', () => {
+    S.hidden = document.hidden;
+    if (S.hidden && audio) audio.suspend().catch(() => {});
+  });
+
+  window.addEventListener('storage', (event) => {
+    if (event.key === STORE && S.runs.length) absorb(readStore());
+  });
+
+  // ---- run ----
+  let lastT = 0;
+  function frame(now) {
+    const dt = Math.min(0.05, lastT ? (now - lastT) / 1000 : 0);
+    lastT = now;
+    S.clock += dt;
+    if (!PICTURE) {
+      S.dayCheck -= dt;
+      if (S.dayCheck <= 0) { S.dayCheck = 5; checkDay(); }
+    }
+    render(S.hidden ? 0 : dt);
+    if (PICTURE) window.__arkaiPosed = true;
+    requestAnimationFrame(frame);
+  }
+
+  resize();
+  if (PICTURE) posePicture(); else loadDay(dayNumber(new Date()));
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
