@@ -83,6 +83,8 @@
   // Day 1 is the launch date. Moving it renumbers every puzzle ever shared.
   const EPOCH_UTC = Date.UTC(2026, 8, 16);
   const DAY_MS = 86400000;
+  // A missed day need not always end the streak: one grace per this many days, spent automatically.
+  const FREEZE_COOLDOWN = 30;
 
   // The whole difficulty curve. `lead` is how many rolls the ink must add to
   // the walk that simply visits every mark: a board where the inked side can be
@@ -355,7 +357,7 @@
       days[day] = mergeDay(days[day], entries, entries.map((_, tier) => boardKey(entries, tier) !== boardKey(was, tier)));
     }
     const from = (Number(snapshot.lastFull) || 0) > (Number(fresh.lastFull) || 0) ? snapshot : fresh;
-    return { ...fresh, days, streak: from.streak, lastFull: from.lastFull, best: Math.max(Number(fresh.best) || 0, Number(snapshot.best) || 0) };
+    return { ...fresh, days, streak: from.streak, lastFull: from.lastFull, freezeUsedDay: from.freezeUsedDay, best: Math.max(Number(fresh.best) || 0, Number(snapshot.best) || 0) };
   }
 
   // Movement is positional: arrows, and WASD by where the keys sit, so ZQSD
@@ -408,11 +410,15 @@
    * The streak once all three puzzles of `day` are solved, or null if it does
    * not change. Only on the day itself: finishing yesterday from the archive
    * would buy a missed day back. Only forward: a day already counted, by this
-   * tab or another, is not counted again.
+   * tab or another, is not counted again. A single missed day still extends
+   * the streak, and marks `freezeUsed`, if a freeze is available — anything
+   * missed longer than that spends no freeze and starts over, same as before.
    */
-  function streakAfter(streak, lastFull, day, today) {
+  function streakAfter(streak, lastFull, day, today, freezeAvailable) {
     if (day !== today || lastFull >= day) return null;
-    return { streak: lastFull === day - 1 ? streak + 1 : 1, lastFull: day };
+    if (lastFull === day - 1) return { streak: streak + 1, lastFull: day };
+    if (freezeAvailable && lastFull === day - 2) return { streak: streak + 1, lastFull: day, freezeUsed: true };
+    return { streak: 1, lastFull: day };
   }
 
   /**
@@ -534,7 +540,7 @@
     practice: false, practiceMoves: 0, practiceInputs: [],
     demo: null,             // { path, i, t } while the par line plays
     help: false, inkWarned: false,
-    streak: 0, bestStreak: 0, lastFull: 0, storageWarned: false,
+    streak: 0, bestStreak: 0, lastFull: 0, freezeUsedDay: 0, storageWarned: false,
     muted: storage.get(STORE_MUTE) === '1',
     clock: 0, dayCheck: 0, shake: 0, flash: 0,
     cubeAnim: null, stamps: new Map(),
@@ -782,6 +788,7 @@
     if (lastFull > S.lastFull) {
       S.lastFull = lastFull;
       S.streak = Number(data.streak) || 0;
+      S.freezeUsedDay = Number(data.freezeUsedDay) || 0;
     }
     S.bestStreak = Math.max(S.bestStreak, Number(data.best) || 0);
     // While nothing of ours can be saved, the snapshot is the store: the open
@@ -796,11 +803,16 @@
   // rules (today only, forward only) are in the core, as streakAfter.
   function completeDay() {
     if (solvedCount() !== TIERS.length) return;
-    const next = streakAfter(S.streak, S.lastFull, S.day, S.today);
+    const freezeAvailable = !S.freezeUsedDay || S.day - S.freezeUsedDay >= FREEZE_COOLDOWN;
+    const next = streakAfter(S.streak, S.lastFull, S.day, S.today, freezeAvailable);
     if (!next) return;
     S.streak = next.streak;
     S.lastFull = next.lastFull;
     S.bestStreak = Math.max(S.bestStreak, S.streak);
+    if (next.freezeUsed) {
+      S.freezeUsedDay = S.day;
+      toast('Missed a day — your streak freeze covered it.');
+    }
   }
 
   /**
@@ -816,7 +828,7 @@
     completeDay();
     // Nothing is ever pruned: a daily player adds about 200 bytes a day, some
     // 73 KB a year, against a quota of megabytes.
-    data.streak = S.streak; data.best = S.bestStreak; data.lastFull = S.lastFull;
+    data.streak = S.streak; data.best = S.bestStreak; data.lastFull = S.lastFull; data.freezeUsedDay = S.freezeUsedDay;
     if (storage.set(STORE, JSON.stringify(data))) {
       unsaved = null;
       entries.forEach((entry, tier) => { S.seen[tier] = entry.i; S.dirty[tier] = false; });
@@ -846,6 +858,7 @@
     S.streak = Number(data.streak) || 0;
     S.bestStreak = Number(data.best) || 0;
     S.lastFull = Number(data.lastFull) || 0;
+    S.freezeUsedDay = Number(data.freezeUsedDay) || 0;
     // Seen means what the store holds: a day opened from an unsaved snapshot
     // must still tell its own positions from another tab's later save.
     const stored = unsaved ? parseStore(unsavedBase).days[day] : saved;

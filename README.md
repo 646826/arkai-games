@@ -4,14 +4,14 @@ Every game from [arkai.win](https://arkai.win) — each one a **single self-cont
 file** you can open from your desktop with no build step, no server, no package
 manager and no network connection.
 
-There are 10 of them. Together they are 563 KB.
+There are 10 of them. Together they are 566 KB.
 
 | Game | Kind | Controls | Size | Play |
 | --- | --- | --- | ---: | --- |
-| **Blind Corners** | Puzzle, Daily | Keyboard, touch & mouse | 97 KB | [play](https://arkai.win/games/blind-corners/) |
+| **Blind Corners** | Puzzle, Daily | Keyboard, touch & mouse | 98 KB | [play](https://arkai.win/games/blind-corners/) |
 | **Ink Side Down** | Puzzle, Daily | Keyboard, touch & mouse | 94 KB | [play](https://arkai.win/games/ink-side-down/) |
 | **Mole Rush** | Arcade, Family | Keyboard, touch & mouse | 55 KB | [play](https://arkai.win/games/mole-rush/) |
-| **One Step Late** | Puzzle, Daily | Keyboard, touch & mouse | 92 KB | [play](https://arkai.win/games/one-step-late/) |
+| **One Step Late** | Puzzle, Daily | Keyboard, touch & mouse | 93 KB | [play](https://arkai.win/games/one-step-late/) |
 | **Pair Flip** | Cards, Family | Keyboard, touch & mouse | 46 KB | [play](https://arkai.win/games/pair-flip/) |
 | **Slide Merge** | Puzzle, Numbers | Keyboard, touch & swipe | 39 KB | [play](https://arkai.win/games/slide-merge/) |
 | **Sudoku Sixes** | Logic, Puzzle | Keyboard, touch & mouse | 53 KB | [play](https://arkai.win/games/sudoku-sixes/) |
