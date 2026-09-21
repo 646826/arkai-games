@@ -1,0 +1,22 @@
+{
+  "slug": "trunk-line",
+  "title": "Trunk Line",
+  "tagline": "Ping the hidden network, trace every line",
+  "description": "A daily deduction puzzle: three hidden networks every day, the same for everyone. Five stations sit behind a switchboard, wired together by one random tree — four lines connecting all five, hidden. Ping any two stations and the only thing you learn is how many hops separate them along the hidden wiring, never which stations the line runs through. Narrow the four true lines down from a handful of pings, mark them, and check your answer. Every ping costs a point, so trace it in as few as the par, then share your result without spoiling the network. Missed a day? Every earlier day stays playable.",
+  "categories": ["Puzzle", "Daily"],
+  "controls": "Keyboard, touch & mouse",
+  "instructions": [
+    "The game opens on today's first line. The tabs above it, or the keys 1, 2 and 3, switch between Line 1, 2 and 3 — three independent daily networks, same rules, same difficulty.",
+    "Tap any two stations to ping them. The network answers with one number: how many hops separate them along the hidden wiring — never which stations the path runs through.",
+    "Tap Mode (or press M) to switch the same two taps into marking a line between two stations instead; tap the same pair again to unmark it. Marks cost nothing.",
+    "Press Check (or K) once all four lines are marked. A wrong guess costs 2.",
+    "Every ping costs 1. Spend no more than the par, which is what the portal's own solver needed for that day's specific hidden network, for a star.",
+    "With a keyboard: Q, W, E, D and F select stations A through E, or arrow keys move a cursor and Enter selects it. M switches mode, K checks, X clears your marks, R replays a solved network for practice.",
+    "Press Share (or C) to copy a spoiler-free result, and come back after midnight for the next three.",
+    "Missed a day? The arrows beside the day on the title screen (or the comma and period keys) open every earlier day. Those do not count toward your streak."
+  ],
+  "daily": { "store": "arkai:trunk-line:v1", "epoch": "2026-09-21", "puzzles": 3 },
+  "palette": ["#0a130a", "#9ae64c"],
+  "added": "2026-09-21",
+  "updated": "2026-09-21"
+}

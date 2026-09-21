@@ -4,12 +4,13 @@ Every game from [arkai.win](https://arkai.win) — each one a **single self-cont
 file** you can open from your desktop with no build step, no server, no package
 manager and no network connection.
 
-There are 12 of them. Together they are 681 KB.
+There are 13 of them. Together they are 736 KB.
 
 | Game | Kind | Controls | Size | Play |
 | --- | --- | --- | ---: | --- |
 | **Bearing** | Puzzle, Daily | Keyboard, touch & mouse | 55 KB | [play](https://arkai.win/games/bearing/) |
 | **Echo Sounding** | Puzzle, Daily | Keyboard, touch & mouse | 59 KB | [play](https://arkai.win/games/echo-sounding/) |
+| **Trunk Line** | Puzzle, Daily | Keyboard, touch & mouse | 55 KB | [play](https://arkai.win/games/trunk-line/) |
 | **Blind Corners** | Puzzle, Daily | Keyboard, touch & mouse | 98 KB | [play](https://arkai.win/games/blind-corners/) |
 | **Ink Side Down** | Puzzle, Daily | Keyboard, touch & mouse | 95 KB | [play](https://arkai.win/games/ink-side-down/) |
 | **Mole Rush** | Arcade, Family | Keyboard, touch & mouse | 55 KB | [play](https://arkai.win/games/mole-rush/) |
@@ -80,11 +81,11 @@ Two details that are easy to get wrong, so they are stated rather than implied:
   framing page is served from the same origin as the game file. Host the file
   yourself and it works; frame it from another domain and you get silence, by
   design.
-- **The event vocabulary is not uniform yet.** 11 of the 12 games emit
+- **The event vocabulary is not uniform yet.** 12 of the 13 games emit
   `start` and `gameover`. Brick Rebound uses a different set: `game_end`, `game_ready`, `game_start`, `level_end`, `level_start`.
   The portal normalises this on its side. Listen for both spellings until it is
   fixed at the source.
-- **A few send more than that.** Bearing, Blind Corners also send `closed`, `focus`, `next_game`, `progress`, `share`. Echo Sounding, Ink Side Down, One Step Late also send `closed`, `focus`, `next_game`, `practice`, `progress`, `share`. None of these end the game; a host listening only for `start`/`gameover`/`win` can ignore the rest.
+- **A few send more than that.** Bearing, Blind Corners also send `closed`, `focus`, `next_game`, `progress`, `share`. Echo Sounding, Trunk Line, Ink Side Down, One Step Late also send `closed`, `focus`, `next_game`, `practice`, `progress`, `share`. None of these end the game; a host listening only for `start`/`gameover`/`win` can ignore the rest.
 
 The score, where a game reports one, is in `data` — not in the event name.
 
