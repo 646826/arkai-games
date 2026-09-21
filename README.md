@@ -4,13 +4,13 @@ Every game from [arkai.win](https://arkai.win) — each one a **single self-cont
 file** you can open from your desktop with no build step, no server, no package
 manager and no network connection.
 
-There are 11 of them. Together they are 621 KB.
+There are 11 of them. Together they are 622 KB.
 
 | Game | Kind | Controls | Size | Play |
 | --- | --- | --- | ---: | --- |
 | **Echo Sounding** | Puzzle, Daily | Keyboard, touch & mouse | 56 KB | [play](https://arkai.win/games/echo-sounding/) |
 | **Blind Corners** | Puzzle, Daily | Keyboard, touch & mouse | 98 KB | [play](https://arkai.win/games/blind-corners/) |
-| **Ink Side Down** | Puzzle, Daily | Keyboard, touch & mouse | 94 KB | [play](https://arkai.win/games/ink-side-down/) |
+| **Ink Side Down** | Puzzle, Daily | Keyboard, touch & mouse | 95 KB | [play](https://arkai.win/games/ink-side-down/) |
 | **Mole Rush** | Arcade, Family | Keyboard, touch & mouse | 55 KB | [play](https://arkai.win/games/mole-rush/) |
 | **One Step Late** | Puzzle, Daily | Keyboard, touch & mouse | 93 KB | [play](https://arkai.win/games/one-step-late/) |
 | **Pair Flip** | Cards, Family | Keyboard, touch & mouse | 46 KB | [play](https://arkai.win/games/pair-flip/) |
@@ -83,7 +83,7 @@ Two details that are easy to get wrong, so they are stated rather than implied:
   `start` and `gameover`. Brick Rebound uses a different set: `game_end`, `game_ready`, `game_start`, `level_end`, `level_start`.
   The portal normalises this on its side. Listen for both spellings until it is
   fixed at the source.
-- **A few send more than that.** Echo Sounding also sends `closed`, `focus`, `next_game`, `progress`. Blind Corners, Ink Side Down, One Step Late also send `closed`, `focus`, `next_game`, `progress`, `share`. None of these end the game; a host listening only for `start`/`gameover`/`win` can ignore the rest.
+- **A few send more than that.** Echo Sounding also sends `closed`, `focus`, `next_game`, `practice`, `progress`. Blind Corners also sends `closed`, `focus`, `next_game`, `progress`, `share`. Ink Side Down, One Step Late also send `closed`, `focus`, `next_game`, `practice`, `progress`, `share`. None of these end the game; a host listening only for `start`/`gameover`/`win` can ignore the rest.
 
 The score, where a game reports one, is in `data` — not in the event name.
 

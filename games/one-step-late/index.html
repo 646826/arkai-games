@@ -1106,9 +1106,15 @@
     const p = puzzle();
     if (run().solved) {
       // A solved puzzle stays solved. Replaying it is practice, scored apart.
+      // Unlike echo-sounding, run() here never swaps to a separate practice
+      // record, so run().solved stays true for the rest of the practice
+      // session: without this check, re-rolling mid-practice (the R key/
+      // button work at any time) would emit `practice` again on every click.
+      const enteringPractice = !S.practice;
       S.practice = true;
       S.practiceMoves = 0;
       S.practiceInputs = [];
+      if (enteringPractice) emit('practice', { tier: S.tier + 1, day: S.day, archive: archive() });
       toast('Practice run. Your result is already saved.');
     } else {
       run().inputs = [];

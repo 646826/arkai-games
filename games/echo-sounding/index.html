@@ -884,6 +884,7 @@
     S.marks = new Set();
     S.mode = 'play';
     sfx.click();
+    emit('practice', { tier: S.tier + 1, day: S.day, archive: archive() });
     announce('Practice run. Nothing here is saved.');
   }
 
