@@ -13,11 +13,12 @@
     "Press Check (or K) once every beam is explained. If the mirrors are wrong, the box fires a beam that proves it, and that costs 2. Any layout that no beam could tell from the hidden one counts as solved.",
     "Every beam costs 1. Spend no more than the par, which is what the portal's own solver needed, for a star.",
     "With a keyboard: arrows or WASD move the cursor, Space fires from a port or marks a square, slash and backslash place a mirror, X clears your marks.",
+    "Not sure yet? Shift-Space, a right click, or a long press pencils a dashed, ungraded guess on a square — confirming it, or clearing it, works the same way.",
     "Press Share (or C) to copy a spoiler-free result, and come back after midnight for the next three.",
     "Missed a day? The arrows beside the day on the title screen (or the comma and period keys) open every earlier day. Those do not count toward your streak."
   ],
   "daily": { "store": "arkai:blind-corners:v1", "epoch": "2026-09-18", "puzzles": 3 },
   "palette": ["#0d1321", "#3dd6d0"],
   "added": "2026-09-18",
-  "updated": "2026-09-18"
+  "updated": "2026-09-21"
 }

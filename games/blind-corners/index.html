@@ -28,7 +28,7 @@
 </style>
 </head>
 <body>
-<canvas id="game" tabindex="0" role="application" aria-label="Blind Corners, a daily puzzle. A dark box hides mirrors. Fire a beam into it from any port on the edge and you learn only where it comes out. Mark where the mirrors must be, then check. Arrow keys or WASD move the cursor, Space fires a beam from a port or marks a square, slash and backslash place a mirror, K checks, X clears your marks, L describes the box, H shows the rules. Comma and period open the previous or next day. Press Tab for buttons."></canvas>
+<canvas id="game" tabindex="0" role="application" aria-label="Blind Corners, a daily puzzle. A dark box hides mirrors. Fire a beam into it from any port on the edge and you learn only where it comes out. Mark where the mirrors must be, then check. Arrow keys or WASD move the cursor, Space fires a beam from a port or marks a square, slash and backslash place a mirror, Shift-Space or a right click pencils an ungraded guess, K checks, X clears your marks, L describes the box, H shows the rules. Comma and period open the previous or next day. Press Tab for buttons."></canvas>
 <div id="status" class="sr" aria-live="polite"></div>
 <div id="controls" class="sr" role="group" aria-label="Game controls">
   <button type="button" data-act="dir0">Move the cursor up</button>
@@ -36,6 +36,7 @@
   <button type="button" data-act="dir2">Move the cursor down</button>
   <button type="button" data-act="dir3">Move the cursor left</button>
   <button type="button" data-act="act">Fire a beam, or mark a mirror, at the cursor</button>
+  <button type="button" data-act="pencil">Pencil a tentative guess at the cursor, not graded</button>
   <button type="button" data-act="check">Check your mirrors</button>
   <button type="button" data-act="clear">Clear your marks</button>
   <button type="button" data-act="board">Describe the box</button>
@@ -562,6 +563,9 @@
   // A beam takes the same time whatever it met inside: the wait must not leak the length of the path.
   const SHOT_OUT = 0.28, SHOT_TIME = 0.7;
   const MARK_NAMES = ['no mark', 'a slash mirror', 'a backslash mirror'];
+  // A pencilled guess: not graded, not saved, gone with the tab. Shift-Space, a
+  // right click or a long press cycles it, the same way Space cycles a real mark.
+  const TENT_NAMES = ['no pencil mark', 'a pencilled slash', 'a pencilled backslash'];
 
   const C = {
     bg: '#0d1321', box: '#0a0f1c', boxAlt: '#0d1424', grid: 'rgba(150, 180, 230, 0.10)', frame: '#1f2a44',
@@ -599,7 +603,7 @@
     mode: 'title',          // title | play
     day: 1, today: 1,       // the day on screen, and the newest day it can be
     puzzles: [], runs: [], seenInputs: [], seenMarks: [], dirtyInputs: [], dirtyMarks: [], tier: 0, newDay: false,
-    beams: [], fired: new Set(), marks: new Uint8Array(0), sel: -1,
+    beams: [], fired: new Set(), marks: new Uint8Array(0), tent: new Uint8Array(0), sel: -1,
     cursor: { x: 1, y: 0 }, keys: false, // the keyboard cursor, on the ring around the box; drawn once a key has moved it
     help: false, line: null,            // line: the solver's beams, shown on a solved box
     streak: 0, bestStreak: 0, lastFull: 0, freezeUsedDay: 0, storageWarned: false,
@@ -669,6 +673,8 @@
     fire: () => { tone(320, 0.12, 'sawtooth', 0.025, 0, 380); tone(880, 0.1, 'sine', 0.04, SHOT_OUT); },
     mark: () => tone(520, 0.04, 'triangle', 0.04),
     unmark: () => tone(360, 0.04, 'triangle', 0.035),
+    pencil: () => tone(520, 0.03, 'sine', 0.03),
+    unpencil: () => tone(360, 0.03, 'sine', 0.025),
     bump: () => tone(130, 0.08, 'square', 0.025),
     refuse: () => { tone(300, 0.07, 'square', 0.025); tone(220, 0.1, 'square', 0.025, 0.07); },
     wrong: () => { tone(260, 0.12, 'square', 0.03); tone(196, 0.18, 'square', 0.03, 0.12); },
@@ -747,6 +753,7 @@
   const titleSummary = () => `Day ${S.day}${archive() ? `, ${dayDate(S.day)}, from the archive` : ''}. ${solvedCount()} of 3 puzzles solved.`;
   const wave = (speed, phase = 0) => (calm() ? 0 : Math.sin(S.clock * speed + phase));
   const markCount = () => S.marks.reduce((sum, mark) => sum + (mark ? 1 : 0), 0);
+  const tentCount = () => S.tent.reduce((sum, mark) => sum + (mark ? 1 : 0), 0);
   const marksText = () => Array.from(S.marks).join('');
   const readMarks = (text, n) => Uint8Array.from({ length: n * n }, (_, c) => { const mark = Number(typeof text === 'string' ? text[c] : 0); return mark === SLASH || mark === BACK ? mark : EMPTY; });
   const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
@@ -774,11 +781,14 @@
     const n = size(), p = spec();
     const marks = [];
     S.marks.forEach((mark, cell) => { if (mark) marks.push(`${cellName(cell)} ${mark === SLASH ? 'slash' : 'backslash'}`); });
+    const pencilled = [];
+    S.tent.forEach((mark, cell) => { if (mark) pencilled.push(`${cellName(cell)} ${mark === SLASH ? 'slash' : 'backslash'}`); });
     const last = String.fromCharCode(64 + n);
     return `A ${n} by ${n} box hiding ${p.mirrors} mirrors. Columns A to ${last} run left to right, rows 1 to ${n} run downward. ` +
       `Ports are named by side: top and bottom A to ${last}, left and right 1 to ${n}. ` +
       `${S.beams.length ? S.beams.map(describeBeam).join(' ') : 'No beam fired yet.'} ` +
-      `Your marks: ${marks.length ? marks.join(', ') : 'none'}. ${describeCursor()}`;
+      `Your marks: ${marks.length ? marks.join(', ') : 'none'}. ` +
+      `${pencilled.length ? `Pencilled, not graded: ${pencilled.join(', ')}. ` : ''}${describeCursor()}`;
   }
 
   function describeCursor() {
@@ -789,7 +799,8 @@
       return `Cursor on port ${portName(n, port)}, ${k >= 0 ? `an end of beam ${k + 1}` : 'not fired'}.`;
     }
     const cell = (y - 1) * n + (x - 1);
-    return `Cursor on square ${cellName(cell)}, ${MARK_NAMES[S.marks[cell]]}.`;
+    const tent = S.tent[cell] ? `, ${TENT_NAMES[S.tent[cell]]}` : '';
+    return `Cursor on square ${cellName(cell)}, ${MARK_NAMES[S.marks[cell]]}${tent}.`;
   }
 
   // ---- persistence ----
@@ -980,6 +991,9 @@
     S.beams = state.beams;
     S.fired = state.fired;
     S.marks = readMarks(r.marks, p.size);
+    // Pencil marks are scratch only: never saved, never carried from one puzzle
+    // or tier to the next, so there is nothing to merge across tabs either.
+    S.tent = new Uint8Array(p.size * p.size);
     S.sel = S.beams.length - 1;
     S.shot = null;
   }
@@ -1138,6 +1152,7 @@
     ensureAudio();
     markStart();
     S.marks[cell] = mark;
+    if (S.tent[cell]) S.tent[cell] = EMPTY; // confirming a square settles any guess pencilled on it
     run().marks = marksText();
     touchMarks();
     writeStore();
@@ -1149,10 +1164,38 @@
 
   const cycleMark = (cell) => setMark(cell, (S.marks[cell] + 1) % 3);
 
+  /**
+   * A pencilled guess: same three-way cycle as a real mark, but graded on
+   * nothing, saved nowhere and gone the moment the puzzle leaves screen. A
+   * square already holding a real mark has no room for a guess too — confirm
+   * or clear that mark first, the same square cannot show both at once.
+   */
+  function setTent(cell, mark) {
+    if (S.mode !== 'play' || locked()) return;
+    S.help = false;
+    if (S.marks[cell]) { sfx.bump(); return; }
+    if (S.tent[cell] === mark) return;
+    ensureAudio();
+    markStart();
+    S.tent[cell] = mark;
+    if (mark) sfx.pencil(); else sfx.unpencil();
+    announce(`${cellName(cell)}: ${TENT_NAMES[mark]}, not graded.`);
+  }
+
+  const cycleTent = (cell) => setTent(cell, (S.tent[cell] + 1) % 3);
+
+  function cycleTentAtCursor() {
+    const n = size(), { x, y } = S.cursor;
+    if (S.mode !== 'play' || ringPort(n, x, y) >= 0) return;
+    S.keys = true;
+    cycleTent((y - 1) * n + (x - 1));
+  }
+
   function clearMarks() {
     if (S.mode !== 'play' || locked()) return;
-    if (!markCount()) { sfx.bump(); return; }
+    if (!markCount() && !tentCount()) { sfx.bump(); return; }
     S.marks.fill(EMPTY);
+    S.tent.fill(EMPTY);
     run().marks = marksText();
     touchMarks();
     writeStore();
@@ -1273,6 +1316,13 @@
     if (S.mode !== 'play' || ringPort(n, x, y) >= 0) return;
     S.keys = true;
     setMark((y - 1) * n + (x - 1), mark);
+  }
+
+  function tentAtCursor(mark) {
+    const n = size(), { x, y } = S.cursor;
+    if (S.mode !== 'play' || ringPort(n, x, y) >= 0) return;
+    S.keys = true;
+    setTent((y - 1) * n + (x - 1), mark);
   }
 
   function toggleMute() {
@@ -1571,6 +1621,20 @@
     });
   }
 
+  /** Pencilled guesses: dashed and dimmer, told apart from a real mark by shape, not only tone. */
+  function drawTent() {
+    const n = size(), px = cellPx();
+    if (locked()) return; // a solved box shows real marks only
+    ctx.setLineDash([4, 4]);
+    ctx.globalAlpha = 0.6;
+    S.tent.forEach((mark, cell) => {
+      if (!mark) return;
+      drawMirror(ringX((cell % n) + 1), ringY(Math.floor(cell / n) + 1), px, mark, C.muted, px > 70 ? 4 : 3.5);
+    });
+    ctx.globalAlpha = 1;
+    ctx.setLineDash([]);
+  }
+
   function drawPorts() {
     const n = size(), px = cellPx(), inset = Math.max(4, px * 0.09);
     const hidden = S.shot && S.shot.t < SHOT_OUT ? S.shot.exit : -1;
@@ -1866,6 +1930,7 @@
     drawBox();
     drawBeams();
     drawMarks();
+    drawTent();
     drawPorts();
     drawCursor();
     drawParts();
@@ -2013,6 +2078,7 @@
     else if (id === 'best') toggleLine();
     else if (id === 'check') check();
     else if (id === 'clear') clearMarks();
+    else if (id === 'pencil') cycleTentAtCursor();
     else if (id === 'help') toggleHelp();
     else if (id === 'prevday') stepDay(-1);
     else if (id === 'nextday') stepDay(1);
@@ -2026,6 +2092,13 @@
     }
   }
 
+  // A touch or pen held this long on a square pencils a guess instead of
+  // confirming one — the same secondary-action convention as a long press
+  // opening a context menu elsewhere, so nothing needs teaching. Mouse users
+  // get the real context menu instead (see the contextmenu listener below);
+  // a plain click stays a fast, un-hesitant confirm on every input.
+  const LONG_PRESS_MS = 450;
+
   canvas.addEventListener('pointerdown', (event) => {
     // Only the first finger, and only the main mouse button: a second finger or
     // a right click must never become a counted roll.
@@ -2034,7 +2107,7 @@
     ensureAudio();
     const at = toLogical(event);
     const b = hitButton(at.x, at.y);
-    S.press = { id: b ? b.id : null, x: at.x, y: at.y, pointer: event.pointerId };
+    S.press = { id: b ? b.id : null, x: at.x, y: at.y, pointer: event.pointerId, type: event.pointerType, at: performance.now() };
     try { canvas.setPointerCapture(event.pointerId); } catch { /* not supported */ }
   });
 
@@ -2052,9 +2125,18 @@
     ensureAudio();
     const at = toLogical(event);
     if (start.id) {
+      // A contextmenu already pencilled this same press (Android/Windows fire it on
+      // a held touch, and macOS ctrl+click reports button 0 here but still fires
+      // one): without this, the release below would cycle the guess a second time.
+      if (start.tented) return;
       // Pressed and released on the same thing: a finger that slid off a port did not fire it.
       const b = hitButton(at.x, at.y);
-      if (b && b.id === start.id) press(b.id);
+      if (!b || b.id !== start.id) return;
+      if (start.type !== 'mouse' && b.id.startsWith('cell') && performance.now() - start.at >= LONG_PRESS_MS) {
+        cycleTent(Number(b.id.slice(4)));
+      } else {
+        press(b.id);
+      }
       return;
     }
     if (S.mode === 'title') { startPlay(); return; }
@@ -2063,6 +2145,24 @@
 
   canvas.addEventListener('pointercancel', (event) => {
     if (S.press && S.press.pointer === event.pointerId) S.press = null;
+  });
+
+  // The desktop half of the same secondary action: a right click pencils a
+  // guess instead of opening the browser's menu, which a game board has no
+  // use for. Only cells take one — a right click on a port or a button does
+  // nothing, same as it always has. Outside play (the title screen, the help
+  // overlay) the browser's own menu is left alone: there is nothing here for
+  // a right click to do yet.
+  canvas.addEventListener('contextmenu', (event) => {
+    if (S.mode !== 'play' || S.help) return;
+    event.preventDefault();
+    const at = toLogical(event);
+    const b = hitBoard(at.x, at.y);
+    if (b && b.id.startsWith('cell')) {
+      ensureAudio();
+      cycleTent(Number(b.id.slice(4)));
+      if (S.press) S.press.tented = true;
+    }
   });
 
   window.addEventListener('keydown', (event) => {
@@ -2097,6 +2197,8 @@
       else if (digit >= 0) startPlay(digit);
       return;
     }
+    if (event.shiftKey && space) { cycleTentAtCursor(); return; }
+    if (event.shiftKey && (letter === 'Backspace' || letter === 'Delete')) { tentAtCursor(EMPTY); return; }
     if (space || letter === 'Enter') { if (locked()) nextPuzzle(); else act(); return; }
     if (letter === '/') { markAtCursor(SLASH); return; }
     if (letter === '\\') { markAtCursor(BACK); return; }
