@@ -1069,8 +1069,10 @@
     drawGrid(p, r);
 
     const gridBottom = GRID_TOP + gridMetrics(p.size).cell * p.size;
-    ctx.textAlign = 'center'; ctx.fillStyle = C.muted; ctx.font = `400 13px ${FONT}`;
-    ctx.fillText(`Par ${p.par === Infinity ? p.budget : p.par} · mark ${p.k} reflector${p.k === 1 ? '' : 's'}`, 240, gridBottom + 24);
+    const parVal = p.par === Infinity ? p.budget : p.par, over = r.moves - parVal;
+    ctx.textAlign = 'center'; ctx.font = `400 13px ${FONT}`;
+    ctx.fillStyle = r.moves <= parVal ? C.good : over <= 2 ? C.warn : C.bad;
+    ctx.fillText(`Par ${parVal} · mark ${p.k} reflector${p.k === 1 ? '' : 's'}`, 240, gridBottom + 24);
 
     if (locked()) {
       ctx.fillStyle = C.good; ctx.font = `700 15px ${FONT}`;
