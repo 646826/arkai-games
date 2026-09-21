@@ -993,23 +993,31 @@
     ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
     addHit(0, 0, W, H, 'titledefault');
 
+    // Sibling games all show a mute icon on the title screen, not just the
+    // board (IDEA-BACKLOG.md, session #242's parity gap); this game's title
+    // screen already fills the top strip with day-nav arrows, so the icon
+    // pushes that row (and everything below it) down by TITLE_SHIFT rather
+    // than overlapping the nextday hit region at the right edge.
+    const TITLE_SHIFT = 40;
+    iconButton(W - 10 - 34, 4, 34, 32, 'mute', 'mute', false);
+
     const prevOk = S.day > 1, nextOk = S.day < S.today;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillStyle = prevOk ? C.text : C.muted; ctx.font = `700 22px ${FONT}`;
-    ctx.fillText('‹', 32, 40);
-    addHit(10, 20, 44, 40, 'prevday');
+    ctx.fillText('‹', 32, 40 + TITLE_SHIFT);
+    addHit(10, 20 + TITLE_SHIFT, 44, 40, 'prevday');
     ctx.fillStyle = nextOk ? C.text : C.muted;
-    ctx.fillText('›', 448, 40);
-    addHit(426, 20, 44, 40, 'nextday');
+    ctx.fillText('›', 448, 40 + TITLE_SHIFT);
+    addHit(426, 20 + TITLE_SHIFT, 44, 40, 'nextday');
     ctx.fillStyle = C.muted; ctx.font = `600 15px ${FONT}`;
-    ctx.fillText(titleDay(S.day, dayDate(S.day), archive()), 240, 40);
+    ctx.fillText(titleDay(S.day, dayDate(S.day), archive()), 240, 40 + TITLE_SHIFT);
 
     ctx.fillStyle = C.accent; ctx.font = `800 38px ${FONT}`;
-    ctx.fillText('Echo Sounding', 240, 90);
+    ctx.fillText('Echo Sounding', 240, 90 + TITLE_SHIFT);
     ctx.fillStyle = C.muted; ctx.font = `400 15px ${FONT}`;
-    ctx.fillText('Ping the dark. Deduce the echoes.', 240, 118);
+    ctx.fillText('Ping the dark. Deduce the echoes.', 240, 118 + TITLE_SHIFT);
 
-    const cardY = [154, 274, 394], cardH = 108;
+    const cardY = [154 + TITLE_SHIFT, 274 + TITLE_SHIFT, 394 + TITLE_SHIFT], cardH = 108;
     TIERS.forEach((t, tier) => {
       const y = cardY[tier], p = S.puzzles[tier], r = S.runs[tier];
       ctx.fillStyle = C.card;
@@ -1035,20 +1043,26 @@
       addHit(40, y, 400, cardH, `card${tier}`);
     });
 
+    // Below the cards, dual-review (this session) found the naive "+TITLE_SHIFT"
+    // pattern used above pushes this block's bottom into the fixed toast zone
+    // (drawEffects(): roundRect(40, H - 74, ...) = y 646..692) — the pre-icon
+    // layout had an 18px gap here that a flat +40 shift erased. Tightened
+    // instead of shifted so the onward hit (614..640) clears the toast with a
+    // 6px margin; cards above are untouched.
     ctx.fillStyle = C.muted; ctx.font = `400 14px ${FONT}`;
-    ctx.fillText(`Streak ${S.streak}${S.bestStreak > S.streak ? ` · best ${S.bestStreak}` : ''}`, 240, 528);
+    ctx.fillText(`Streak ${S.streak}${S.bestStreak > S.streak ? ` · best ${S.bestStreak}` : ''}`, 240, 560);
     const pulse = calm() ? 1 : 0.75 + 0.25 * Math.sin(S.clock * 2.4);
     ctx.globalAlpha = pulse;
     ctx.fillStyle = C.accent; ctx.font = `600 15px ${FONT}`;
-    ctx.fillText('Tap or press Space to play', 240, 560);
+    ctx.fillText('Tap or press Space to play', 240, 584);
     ctx.globalAlpha = 1;
     ctx.fillStyle = C.muted; ctx.font = `400 12px ${FONT}`;
-    ctx.fillText('Missed a day? The arrows above open every earlier one.', 240, 588);
+    ctx.fillText('Missed a day? The arrows above open every earlier one.', 240, 606);
 
     if (onward()) {
       ctx.fillStyle = C.accent; ctx.font = `600 14px ${FONT}`;
-      ctx.fillText(`Play ${ONWARD.title} next →`, 240, 616);
-      addHit(120, 602, 240, 26, 'onward');
+      ctx.fillText(`Play ${ONWARD.title} next →`, 240, 628);
+      addHit(120, 614, 240, 26, 'onward');
     }
   }
 
