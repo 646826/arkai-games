@@ -437,9 +437,30 @@
     return { slug, title, path: `/games/${slug}/` };
   }
 
+  // A friend's result, carried in the URL a share links to (D-052, replacing the
+  // orphaned edit reverted as D-051). It repeats exactly the three marks the
+  // plaintext share already prints — never a move count on its own — so the
+  // link discloses nothing a pasted result did not already disclose. Only ever
+  // attached to today's puzzle (see shareUrl below): an archive share compares
+  // against a day the visitor's own tab does not have open, so it would never
+  // match. `today` is the visitor's own calendar day, not the sharer's — a code
+  // that names any other day is silently ignored, never shown stale. A crafted
+  // code is accepted as harmless flavor (there is nothing behind it to forge:
+  // no board, no leaderboard, no identity), so this only bounds its shape.
+  const FRIEND_MARK = /^(?:⬛|⭐|[🟢🟡🔴]\+[1-9]\d?)$/u;
+  function encodeFriendCode(day, marks) {
+    return `${day}.${marks.join('|')}`;
+  }
+  function decodeFriendCode(raw, today) {
+    const m = /^(\d{1,6})\.([^.]{1,60})$/.exec(String(raw || ''));
+    if (!m || Number(m[1]) !== today) return null;
+    const marks = m[2].split('|');
+    return marks.length === TIERS.length && marks.every((mark) => FRIEND_MARK.test(mark)) ? marks : null;
+  }
+
   const core = {
     COLS, ROWS, CELLS, FLOOR, WALL, HOLE, TIERS, EPOCH_UTC, DAY_MS, MAX_ATTEMPTS, MAX_OPTIMAL_LINES,
-    turn, doomed, solve, walkAlone, draw, makePuzzle, fallbackPuzzle, replay, resolveFall, mergeDay, ownsPosition, boardKey, carryUnsaved, readKey, dayStep, dayNumber, streakAfter, shareMark, titleDay, readOnward,
+    turn, doomed, solve, walkAlone, draw, makePuzzle, fallbackPuzzle, replay, resolveFall, mergeDay, ownsPosition, boardKey, carryUnsaved, readKey, dayStep, dayNumber, streakAfter, shareMark, titleDay, readOnward, encodeFriendCode, decodeFriendCode,
   };
   // ---- puzzle core end ----
 
@@ -473,8 +494,10 @@
   // it is the game page rather than this frame's own address: /play/* is
   // noindex and unmeasured, so a result shared from there would lead nowhere useful.
   // ?ref=share is how the portal's beacon tells a visit from a shared result
-  // apart from `direct`: chats and apps send no referrer at all.
-  const SHARE_URL = 'https:' + '//arkai.win/games/one-step-late/?ref=share';
+  // apart from `direct`: chats and apps send no referrer at all. `&f=` (see
+  // shareUrl) rides the same query string; the canonical link tag on the game
+  // page names the bare path, so this never grows a second indexed URL.
+  const SHARE_BASE = 'https:' + '//arkai.win/games/one-step-late/?ref=share';
   const STEP_TIME = 0.13, SHADOW_DELAY = 0.07, FALL_TIME = 0.75, DEMO_STEP = 0.42;
   const COLS_NAMES = 'ABCDEF';
   const DIR_NAMES = ['up', 'right', 'down', 'left'];
@@ -604,6 +627,11 @@
   // The portal's next daily, named by the game page that frames this one
   // (readOnward). Null on its own, from file://, and in pictures.
   const ONWARD = !PICTURE && /^https?:$/.test(location.protocol) ? readOnward(location.hash, SLUG) : null;
+  // A friend's result, named by whoever shared the link that opened this tab
+  // (see decodeFriendCode above). Read once at boot, like ONWARD; never shown
+  // in a picture, and decodeFriendCode itself throws it away once the day it
+  // names is no longer today.
+  const FRIEND_RAW = !PICTURE && /^https?:$/.test(location.protocol) ? new URLSearchParams(location.search).get('f') : null;
   // A real link, not script: a game never reaches into the page that frames it
   // (the quality gate refuses any parent or top access), and a link leaving for
   // the portal is navigation the browser does, the same for a screen reader.
@@ -1214,10 +1242,17 @@
   }
 
   // ---- sharing ----
+  // Only a share of today's puzzle carries a friend code: an archive share
+  // names a day the recipient's own tab is not showing (decodeFriendCode
+  // checks against the recipient's calendar day, not the sharer's), so a code
+  // attached to one would silently never match anybody's screen (D-052).
+  function shareUrl(marks) {
+    return archive() ? SHARE_BASE : `${SHARE_BASE}&f=${encodeURIComponent(encodeFriendCode(S.day, marks))}`;
+  }
   function shareText() {
     const marks = S.runs.map((r, t) => shareMark(r.solved ? r.solvedMoves : 0, S.puzzles[t].par));
     // An archive day says so: "#3" posted on day 10 otherwise reads as played on the day.
-    return `One Step Late #${S.day}${archive() ? ' (archive)' : ''}\n${marks.join('  ')}\n${SHARE_URL}`;
+    return `One Step Late #${S.day}${archive() ? ' (archive)' : ''}\n${marks.join('  ')}\n${shareUrl(marks)}`;
   }
 
   // `share` is reported only once the text really left: a cancelled sheet or a
@@ -1903,9 +1938,14 @@
     ctx.globalAlpha = 1;
     // Finished for today is the moment an earlier day is worth offering.
     const again = allDone ? (!past && S.day > 1 ? '‹ plays earlier days' : 'Tap a puzzle to see it again') : '';
+    // A friend's result, from a link they shared: only ever decoded for today
+    // (decodeFriendCode itself refuses any other day), so this line cannot
+    // outlive the puzzle it names. Shown in place of the streak, not beside it
+    // — a specific invitation from a real person beats a stat about oneself.
+    const friendMarks = !past && FRIEND_RAW ? decodeFriendCode(FRIEND_RAW, S.today) : null;
     const sub = past
       ? again || 'Earlier days do not count toward the streak'
-      : [again, S.bestStreak ? `Streak ${liveStreak()} · best ${S.bestStreak}` : ''].filter(Boolean).join('  ·  ');
+      : [again, friendMarks ? `A friend played today: ${friendMarks.join(' ')} — beat it` : (S.bestStreak ? `Streak ${liveStreak()} · best ${S.bestStreak}` : '')].filter(Boolean).join('  ·  ');
     if (sub) label(sub, W / 2, T.sub, 15, C.muted, 'center', '600');
     for (const b of buttons()) drawButton(b);
     drawFooter(T.footer);
