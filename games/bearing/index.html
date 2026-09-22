@@ -230,6 +230,30 @@
     return Math.max(1, Math.floor((utc - EPOCH_UTC) / DAY_MS) + 1);
   }
 
+  /**
+   * The day named by the archive picker's `?date=YYYY-MM-DD` (see
+   * /archive/ and frame-forward.js), or null if the param is absent,
+   * malformed, or not a real calendar date. y/m/d are treated as the
+   * visitor's own local calendar date, exactly like `dayNumber(new Date())`
+   * is at boot — reused via a plain date-like object instead of a real
+   * `new Date(y, mo, d)`, which the puzzle core's own purity test below
+   * forbids inside this block. Needs no upper/lower bound of its own: a
+   * date before day one or after today comes out exactly like never having
+   * loaded the param, because `loadDay` already clamps both ends for
+   * prevday/nextday.
+   */
+  function daysInMonth(y, mo) {
+    if (mo === 1) return y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0) ? 29 : 28;
+    return [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mo];
+  }
+  function dayFromDateParam(raw) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw || '');
+    if (!m) return null;
+    const y = Number(m[1]), mo = Number(m[2]) - 1, d = Number(m[3]);
+    if (mo < 0 || mo > 11 || d < 1 || d > daysInMonth(y, mo)) return null;
+    return dayNumber({ getFullYear: () => y, getMonth: () => mo, getDate: () => d });
+  }
+
   function streakAfter(streak, lastFull, day, today, freezeAvailable) {
     if (day !== today || lastFull >= day) return null;
     if (lastFull === day - 1) return { streak: streak + 1, lastFull: day };
@@ -293,7 +317,7 @@
   const core = {
     GAME_SEED, EPOCH_UTC, DAY_MS, FREEZE_COOLDOWN, DIAL, MIN_SEP, POINTS, TIERS, MAX_ATTEMPTS,
     seeded, norm16, circDist, candidatesFor, placeSources, fallbackBearings, makePuzzle,
-    judge, costOf, replay, marksOf, mergeDay, readKey, dayStep, dayNumber, streakAfter, shareMark, parNote, titleDay, readOnward, cleanFreezeUsedDay,
+    judge, costOf, replay, marksOf, mergeDay, readKey, dayStep, dayNumber, dayFromDateParam, streakAfter, shareMark, parNote, titleDay, readOnward, cleanFreezeUsedDay,
   };
   // ---- puzzle core end ----
 
@@ -455,6 +479,10 @@
   const archive = () => S.day < S.today;
   const dayDate = (day) => new Date(EPOCH_UTC + (day - 1) * DAY_MS).toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'UTC' });
   const ONWARD = !PICTURE && /^https?:$/.test(location.protocol) ? readOnward(location.hash, SLUG) : null;
+  // A specific day named by the archive picker on /archive/, forwarded into
+  // this iframe the same way a friend code is (frame-forward.js). Read once
+  // at boot; dayFromDateParam already returns null for anything malformed.
+  const DATE_RAW = !PICTURE && /^https?:$/.test(location.protocol) ? new URLSearchParams(location.search).get('date') : null;
   const onwardLink = document.getElementById('onward');
   const onward = () => ONWARD !== null && solvedCount() === TIERS.length;
   // ---- onward click plan begin ----
@@ -1320,7 +1348,7 @@
   }
 
   resize();
-  if (PICTURE) posePicture(); else loadDay(dayNumber(new Date()));
+  if (PICTURE) posePicture(); else loadDay(dayFromDateParam(DATE_RAW) ?? dayNumber(new Date()));
   requestAnimationFrame(frame);
 })();
 </script>
