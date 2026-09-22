@@ -14,7 +14,7 @@ There are 13 of them. Together they are 761 KB.
 | **Blind Corners** | Puzzle, Daily | Keyboard, touch & mouse | 104 KB | [play](https://arkai.win/games/blind-corners/) |
 | **Ink Side Down** | Puzzle, Daily | Keyboard, touch & mouse | 96 KB | [play](https://arkai.win/games/ink-side-down/) |
 | **Mole Rush** | Arcade, Family | Keyboard, touch & mouse | 55 KB | [play](https://arkai.win/games/mole-rush/) |
-| **One Step Late** | Puzzle, Daily | Keyboard, touch & mouse | 97 KB | [play](https://arkai.win/games/one-step-late/) |
+| **One Step Late** | Puzzle, Daily | Keyboard, touch & mouse | 98 KB | [play](https://arkai.win/games/one-step-late/) |
 | **Pair Flip** | Cards, Family | Keyboard, touch & mouse | 46 KB | [play](https://arkai.win/games/pair-flip/) |
 | **Slide Merge** | Puzzle, Numbers | Keyboard, touch & swipe | 39 KB | [play](https://arkai.win/games/slide-merge/) |
 | **Sudoku Sixes** | Logic, Puzzle | Keyboard, touch & mouse | 53 KB | [play](https://arkai.win/games/sudoku-sixes/) |
@@ -85,7 +85,7 @@ Two details that are easy to get wrong, so they are stated rather than implied:
   `start` and `gameover`. Brick Rebound uses a different set: `game_end`, `game_ready`, `game_start`, `level_end`, `level_start`.
   The portal normalises this on its side. Listen for both spellings until it is
   fixed at the source.
-- **A few send more than that.** Bearing, Blind Corners also send `closed`, `focus`, `next_game`, `progress`, `share`. Echo Sounding, Trunk Line, Ink Side Down, One Step Late also send `closed`, `focus`, `next_game`, `practice`, `progress`, `share`. None of these end the game; a host listening only for `start`/`gameover`/`win` can ignore the rest.
+- **A few send more than that.** Bearing, Blind Corners also send `closed`, `focus`, `next_game`, `progress`, `share`. Echo Sounding, Trunk Line, Ink Side Down also send `closed`, `focus`, `next_game`, `practice`, `progress`, `share`. One Step Late also sends `closed`, `focus`, `friend_seen`, `next_game`, `practice`, `progress`, `share`. None of these end the game; a host listening only for `start`/`gameover`/`win` can ignore the rest.
 
 The score, where a game reports one, is in `data` — not in the event name.
 

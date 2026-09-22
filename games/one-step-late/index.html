@@ -579,6 +579,13 @@
     parts: [], floats: [], toast: null, press: null, hover: null,
   };
   const started = new Set();
+  // Whether the friend banner has already been reported this page load. There is
+  // no telemetry yet for whether the D-056 mechanic is actually seen (only the
+  // generic `share` event for the link that created it) — decided against
+  // extending it to the other five dailies until that question has an answer
+  // (ops/intel/breakthrough-2026-09-21.md item 3). `drawTitle` runs every frame
+  // the title screen is on-screen, so this flag is what keeps the emit to once.
+  let friendSeenSent = false;
 
   // ---- portal events (same-origin parent only) ----
   const emit = (event, data) => {
@@ -1950,6 +1957,7 @@
     // outlive the puzzle it names. Shown in place of the streak, not beside it
     // — a specific invitation from a real person beats a stat about oneself.
     const friendMarks = !past && FRIEND_RAW ? decodeFriendCode(FRIEND_RAW, S.today) : null;
+    if (friendMarks && !friendSeenSent) { friendSeenSent = true; emit('friend_seen', { day: S.day }); }
     const sub = past
       ? again || 'Earlier days do not count toward the streak'
       : [again, friendMarks ? `A friend played today: ${friendMarks.join(' ')} — beat it` : (S.bestStreak ? `Streak ${liveStreak()} · best ${S.bestStreak}` : '')].filter(Boolean).join('  ·  ');
