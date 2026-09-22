@@ -1101,7 +1101,10 @@
     ctx.fillStyle = C.muted; ctx.font = `400 13px ${FONT}`;
     ctx.fillText(`Facing ${POINTS[S.heading]} · ${r.listens.length} listen${r.listens.length === 1 ? '' : 's'} spent · par ${p.par}`, 240, 46);
 
+    ctx.save();
+    if (S.shake > 0) ctx.translate((Math.random() - 0.5) * S.shake, (Math.random() - 0.5) * S.shake);
     drawDial();
+    ctx.restore();
 
     // Per-source readouts, in words, next to the dial — the exact equivalent of
     // what a listen conveys, for anyone who cannot rely on stereo hearing alone.

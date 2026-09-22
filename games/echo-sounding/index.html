@@ -1143,6 +1143,8 @@
   function drawPlay() {
     ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
     const p = puzzle(), r = run();
+    ctx.save();
+    if (S.shake > 0) ctx.translate((Math.random() - 0.5) * S.shake, (Math.random() - 0.5) * S.shake);
     drawSonarField(p.size);
 
     // 34x32 rather than the sibling games' 48-60: this bar has a centered day
@@ -1181,6 +1183,7 @@
     button(12 + (btnW + gap) * 3, btnY, btnW, btnH, 'Share', 'share');
 
     drawGrid(p, r);
+    ctx.restore();
 
     const gridBottom = GRID_TOP + gridMetrics(p.size).cell * p.size;
     const parVal = p.par === Infinity ? p.budget : p.par, over = r.moves - parVal;

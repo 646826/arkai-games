@@ -8,7 +8,7 @@ There are 13 of them. Together they are 751 KB.
 
 | Game | Kind | Controls | Size | Play |
 | --- | --- | --- | ---: | --- |
-| **Bearing** | Puzzle, Daily | Keyboard, touch & mouse | 57 KB | [play](https://arkai.win/games/bearing/) |
+| **Bearing** | Puzzle, Daily | Keyboard, touch & mouse | 58 KB | [play](https://arkai.win/games/bearing/) |
 | **Echo Sounding** | Puzzle, Daily | Keyboard, touch & mouse | 62 KB | [play](https://arkai.win/games/echo-sounding/) |
 | **Trunk Line** | Puzzle, Daily | Keyboard, touch & mouse | 57 KB | [play](https://arkai.win/games/trunk-line/) |
 | **Blind Corners** | Puzzle, Daily | Keyboard, touch & mouse | 103 KB | [play](https://arkai.win/games/blind-corners/) |

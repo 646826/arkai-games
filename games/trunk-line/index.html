@@ -1108,7 +1108,10 @@
     button(12 + (btnW + gap) * 2, btnY, btnW, btnH, 'Clear', 'clear', false, !locked());
     button(12 + (btnW + gap) * 3, btnY, btnW, btnH, 'Share', 'share', false);
 
+    ctx.save();
+    if (S.shake > 0) ctx.translate((Math.random() - 0.5) * S.shake, (Math.random() - 0.5) * S.shake);
     drawNetwork();
+    ctx.restore();
 
     const over = r.moves - p.par;
     ctx.textAlign = 'center'; ctx.font = `400 13px ${FONT}`;
