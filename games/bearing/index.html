@@ -24,7 +24,7 @@
 </style>
 </head>
 <body>
-<canvas id="game" tabindex="0" role="application" aria-label="Bearing, a daily direction-finding puzzle. Two or three sound sources sit around a 16-point compass. Rotate your heading and listen: each source's left-right pull matches two possible bearings, mirrored across your heading, until a second listen from another heading narrows it to one. Left and right arrow keys rotate, Space listens, mark a compass point by tapping it, K checks, X clears your marks, L describes the puzzle, H shows the rules. Comma and period open the previous or next day. Press Tab for buttons."></canvas>
+<canvas id="game" tabindex="0" role="application" aria-label="Bearing, a daily direction-finding puzzle. Two or three sound sources sit around a 16-point compass. Rotate your heading and listen: each source's left-right pull matches two possible bearings, mirrored across your heading, until a second listen from another heading narrows it to one. Left and right arrow keys rotate, Space listens, mark a compass point by tapping it, K checks, X clears your marks, L describes the puzzle, R replays a solved puzzle for practice, H shows the rules. Comma and period open the previous or next day. Press Tab for buttons."></canvas>
 <div id="status" class="sr" aria-live="polite"></div>
 <div id="controls" class="sr" role="group" aria-label="Game controls">
   <button type="button" data-act="rotateccw">Rotate heading left</button>
@@ -33,6 +33,7 @@
   <button type="button" data-act="check">Check your marks</button>
   <button type="button" data-act="clear">Clear your marks</button>
   <button type="button" data-act="describe">Describe the puzzle</button>
+  <button type="button" data-act="replay">Replay a solved puzzle for practice</button>
   <button type="button" data-act="help">Rules</button>
   <button type="button" data-act="share">Share result</button>
   <a id="onward" href="#" target="_top" hidden>Play the next daily puzzle</a>
@@ -365,6 +366,7 @@
     day: 1, today: 1,
     puzzles: [], runs: [], tier: 0, newDay: false,
     heading: 0, marks: new Set(),
+    practice: false, practiceRun: null,
     help: false,
     streak: 0, bestStreak: 0, lastFull: 0, freezeUsedDay: 0, storageWarned: false,
     muted: storage.get(STORE_MUTE) === '1',
@@ -473,9 +475,9 @@
 
   // ---- helpers ----
   const puzzle = () => S.puzzles[S.tier];
-  const run = () => S.runs[S.tier];
+  const run = () => (S.practice ? S.practiceRun : S.runs[S.tier]);
   const solvedCount = () => S.runs.filter((r) => r.solved).length;
-  const locked = () => run().solved;
+  const locked = () => run().solved && !S.practice;
   const archive = () => S.day < S.today;
   const dayDate = (day) => new Date(EPOCH_UTC + (day - 1) * DAY_MS).toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'UTC' });
   const ONWARD = !PICTURE && /^https?:$/.test(location.protocol) ? readOnward(location.hash, SLUG) : null;
@@ -559,7 +561,7 @@
   }
 
   function currentEntries() {
-    return S.runs.map((r, tier) => (tier === S.tier ? { i: r.inputs, g: Array.from(S.marks).join('.'), m: r.moves, s: r.solved ? r.solvedMoves : 0, p: r.solved ? r.par : 0 } : entryFor(tier)));
+    return S.runs.map((r, tier) => (tier === S.tier && !S.practice ? { i: r.inputs, g: Array.from(S.marks).join('.'), m: r.moves, s: r.solved ? r.solvedMoves : 0, p: r.solved ? r.par : 0 } : entryFor(tier)));
   }
 
   function writeStore() {
@@ -593,7 +595,7 @@
           r.inputs = state.inputs; r.listens = state.listens;
           r.marks = new Set(marksOf(entry.g));
           emit('closed', { day: S.day, tier: tier + 1 });
-          if (tier === S.tier) { S.marks = new Set(r.marks); toast(`${TIERS[tier].label} was solved in another tab, in ${entry.s}.`); }
+          if (tier === S.tier && !S.practice) { S.marks = new Set(r.marks); toast(`${TIERS[tier].label} was solved in another tab, in ${entry.s}.`); }
         }
       });
     }
@@ -605,6 +607,7 @@
 
   function selectTier(tier) {
     S.tier = tier;
+    S.practice = false; S.practiceRun = null;
     S.help = false;
     S.flash = 0; S.shake = 0;
     S.heading = 0;
@@ -707,7 +710,15 @@
     ensureAudio();
     followToday();
     if (tier !== undefined && tier !== S.tier) selectTier(tier);
-    else S.marks = new Set(run().marks);
+    else {
+      // Same tier as before: selectTier() (which clears practice) is skipped,
+      // so an in-progress practice run must be cleared here instead — title →
+      // play on an already-solved, already-practiced tier must land back on
+      // the real, saved run, not resume the stale practice one (trunk-line
+      // guards this exact path in its own startPlay()).
+      S.practice = false; S.practiceRun = null;
+      S.marks = new Set(run().marks);
+    }
     S.mode = 'play';
     S.help = false; S.toast = null;
     sfx.click();
@@ -740,8 +751,7 @@
     r.listens.push(heading);
     r.inputs = r.inputs ? `${r.inputs}.${heading}` : String(heading);
     r.moves++;
-    emit('progress', { moves: run().moves, tier: S.tier + 1, day: S.day, archive: archive() });
-    writeStore();
+    if (!S.practice) { emit('progress', { moves: run().moves, tier: S.tier + 1, day: S.day, archive: archive() }); writeStore(); }
     S.listening = true; S.listenStep = 0;
     const t0 = audio && audio.state === 'running' ? audio.currentTime + 0.05 : 0;
     const GAP = 0.85;
@@ -766,7 +776,7 @@
       S.marks.add(stop); sfx.mark();
     }
     run().marks = new Set(S.marks);
-    writeStore();
+    if (!S.practice) writeStore();
     announce(`${S.marks.has(stop) ? 'Marked' : 'Unmarked'} ${POINTS[stop]}.`);
   }
 
@@ -774,7 +784,7 @@
     if (S.mode !== 'play' || locked() || !S.marks.size) return;
     S.marks.clear();
     run().marks = new Set();
-    writeStore();
+    if (!S.practice) writeStore();
     sfx.click();
     announce('Marks cleared.');
   }
@@ -793,6 +803,12 @@
 
   function solvedNow() {
     const p = puzzle(), r = run();
+    if (S.practice) {
+      celebrate();
+      const over = r.moves - p.par;
+      toast(`Practice solved in ${r.moves}. ${over <= 0 ? 'Par!' : `${over} over par.`}`);
+      return;
+    }
     r.solved = true; r.solvedMoves = r.moves; r.par = p.par;
     writeStore();
     celebrate();
@@ -811,9 +827,27 @@
     ensureAudio();
     r.inputs = r.inputs ? `${r.inputs}.x` : 'x';
     r.moves += 2;
-    writeStore();
+    if (!S.practice) writeStore();
     toast('Not quite. Listen again from a different heading to narrow it down. Cost 2.');
     sfx.fail(); shake(5);
+  }
+
+  function startPractice() {
+    if (!run().solved) return;
+    // Re-triggering practice (the replay button/key work any time it is
+    // active) must not re-emit `practice` on every click — the exact bug
+    // session #239 found and fixed in one-step-late/ink-side-down. Computed
+    // before S.practice flips, so a second call sees itself already practicing.
+    const enteringPractice = !S.practice;
+    S.practice = true;
+    S.practiceRun = { listens: [], inputs: '', moves: 0, solved: false, solvedMoves: 0, par: puzzle().par };
+    S.marks = new Set();
+    S.heading = 0;
+    S.help = false; S.toast = null;
+    S.mode = 'play';
+    sfx.click();
+    if (enteringPractice) emit('practice', { tier: S.tier + 1, day: S.day, archive: archive() });
+    announce('Practice run. Nothing here is saved.');
   }
 
   function goNext() {
@@ -1125,7 +1159,7 @@
     iconButton(48, 4, 34, 32, 'mute', 'mute');
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillStyle = C.text; ctx.font = `700 16px ${FONT}`;
-    ctx.fillText(`Day ${S.day} · ${TIERS[S.tier].label}`, 240, 22);
+    ctx.fillText(`Day ${S.day} · ${TIERS[S.tier].label}${S.practice ? ' · practice' : ''}`, 240, 22);
 
     const p = puzzle(), r = run();
     ctx.fillStyle = C.muted; ctx.font = `400 13px ${FONT}`;
@@ -1150,7 +1184,7 @@
     button(250, 540, 100, 50, '‹', 'rotateccw', false);
     button(350, 540, 100, 50, '›', 'rotatecw', false);
 
-    button(30, 602, 120, 44, 'Check', 'check', false, !locked());
+    button(30, 602, 120, 44, locked() ? 'Replay' : 'Check', locked() ? 'replay' : 'check', false, true);
     button(160, 602, 120, 44, 'Clear', 'clear', false, !locked());
     button(290, 602, 160, 44, S.tier === 0 ? 'Three-source' : 'Two-source', `card${1 - S.tier}`, false);
 
@@ -1252,6 +1286,7 @@
       case 'rotatecw': rotate(1); return;
       case 'check': doCheck(); return;
       case 'clear': clearMarks(); return;
+      case 'replay': startPractice(); return;
       case 'share': share(); return;
       case 'onward': goOnward(); return;
       case 'help': S.help = !S.help; return;
@@ -1299,10 +1334,11 @@
       case 'x': if (S.mode === 'play') clearMarks(); return;
       case 'c': share(); return;
       case 'l': if (S.mode === 'play') announce(describeState()); return;
+      case 'r': if (S.mode === 'play') startPractice(); return;
       case 'h': S.help = !S.help; sfx.click(); return;
       case 'n': if (S.mode === 'play') goNext(); return;
       case 'g': if (S.mode === 'title') openGate(); return;
-      case 'escape':
+      case 'Escape':
         if (S.help) { S.help = false; return; }
         if (S.mode === 'gate') { goTitle(); return; }
         if (S.mode === 'play') goTitle();

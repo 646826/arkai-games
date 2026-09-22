@@ -1422,7 +1422,7 @@
       case 'h': S.help = !S.help; sfx.click(); return;
       case 'r': startPractice(); return;
       case 'n': if (S.mode === 'play') goNext(); return;
-      case 'escape': if (S.help) S.help = false; else if (S.mode === 'play') goTitle(); return;
+      case 'Escape': if (S.help) S.help = false; else if (S.mode === 'play') goTitle(); return;
     }
   });
 
