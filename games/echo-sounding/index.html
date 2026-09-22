@@ -28,15 +28,15 @@
 </style>
 </head>
 <body>
-<canvas id="game" tabindex="0" role="application" aria-label="Echo Sounding, a daily puzzle. A hidden grid holds a few reflectors. Ping any cell and you learn only the distance to the nearest one. Mark where the reflectors must be, then check. Arrow keys or WASD move the cursor, Space pings or marks depending on the mode, M switches mode, K checks, X clears your marks, L describes the grid, H shows the rules. Comma and period open the previous or next day. Press Tab for buttons."></canvas>
+<canvas id="game" tabindex="0" role="application" aria-label="Echo Sounding, a daily puzzle. A hidden grid holds a few reflectors. Ping any cell and you learn only the distance to the nearest one. Mark where the reflectors must be, then check. Arrow keys or WASD move the cursor, Space pings, marks, or pencils an ungraded guess, depending on the mode, M cycles the mode, K checks, X clears your marks and pencils, L describes the grid, H shows the rules. Comma and period open the previous or next day. Press Tab for buttons."></canvas>
 <div id="status" class="sr" aria-live="polite"></div>
 <div id="controls" class="sr" role="group" aria-label="Game controls">
   <button type="button" data-act="dir0">Move the cursor up</button>
   <button type="button" data-act="dir1">Move the cursor right</button>
   <button type="button" data-act="dir2">Move the cursor down</button>
   <button type="button" data-act="dir3">Move the cursor left</button>
-  <button type="button" data-act="act">Ping, or mark a reflector, at the cursor</button>
-  <button type="button" data-act="mode">Switch between ping and mark</button>
+  <button type="button" data-act="act">Ping, mark, or pencil a reflector, at the cursor, depending on the mode</button>
+  <button type="button" data-act="mode">Cycle between ping, mark, and pencil mode</button>
   <button type="button" data-act="check">Check your marks</button>
   <button type="button" data-act="clear">Clear your marks</button>
   <button type="button" data-act="board">Describe the grid</button>
@@ -443,7 +443,7 @@
     mode: 'title',
     day: 1, today: 1,
     puzzles: [], runs: [], tier: 0, newDay: false,
-    cursor: 0, tapMode: 'ping', marks: new Set(),
+    cursor: 0, tapMode: 'ping', marks: new Set(), tent: new Set(),
     practice: false, practiceRun: null,
     help: false,
     streak: 0, bestStreak: 0, lastFull: 0, freezeUsedDay: 0, storageWarned: false,
@@ -499,6 +499,8 @@
     hit: () => [880, 1180].forEach((f, i) => tone(f, 0.12, 'triangle', 0.05, i * 0.06)),
     mark: () => tone(520, 0.05, 'square', 0.03),
     unmark: () => tone(340, 0.05, 'square', 0.025),
+    pencil: () => tone(520, 0.03, 'sine', 0.03),
+    unpencil: () => tone(360, 0.03, 'sine', 0.025),
     bump: () => tone(130, 0.08, 'square', 0.025),
     fail: () => tone(300, 0.3, 'sawtooth', 0.035, 0, -180),
     win: () => [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.16, 'triangle', 0.045, i * 0.09)),
@@ -583,7 +585,8 @@
     const p = puzzle(), r = run();
     const pings = r.pings.length ? r.pings.map(({ cell, dist }) => `${cellName(p.size, cell)} ${dist}`).join(', ') : 'none yet';
     const marks = S.marks.size ? Array.from(S.marks).map((c) => cellName(p.size, c)).join(', ') : 'none';
-    return `Grid ${p.size} by ${p.size}, ${p.k} reflectors hidden. Pings: ${pings}. Marks: ${marks}. Cursor at ${cellName(p.size, S.cursor)}.`;
+    const tent = S.tent.size ? ` Pencilled, not graded: ${Array.from(S.tent).map((c) => cellName(p.size, c)).join(', ')}.` : '';
+    return `Grid ${p.size} by ${p.size}, ${p.k} reflectors hidden. Pings: ${pings}. Marks: ${marks}.${tent} Cursor at ${cellName(p.size, S.cursor)}.`;
   }
 
   // ---- persistence (single tab: no cross-tab merge, kept deliberately simple) ----
@@ -660,6 +663,7 @@
     S.help = false;
     S.parts = []; S.floats = []; S.flash = 0; S.shake = 0;
     S.marks = new Set(run().marks);
+    S.tent = new Set(); // pencilled guesses are scratch work: gone the moment a puzzle leaves screen
     S.cursor = 0;
   }
 
@@ -749,7 +753,7 @@
     ensureAudio();
     followToday();
     if (tier !== undefined && tier !== S.tier) selectTier(tier);
-    else { S.practice = false; S.practiceRun = null; S.marks = new Set(run().marks); }
+    else { S.practice = false; S.practiceRun = null; S.marks = new Set(run().marks); S.tent = new Set(); }
     S.mode = 'play';
     S.help = false; S.toast = null;
     sfx.click();
@@ -812,17 +816,33 @@
     else {
       if (S.marks.size >= p.k) { toast(`Mark up to ${p.k} cells. Clear one first.`); sfx.bump(); return; }
       S.marks.add(cell); sfx.mark();
+      S.tent.delete(cell); // confirming a cell settles any guess pencilled there
     }
     if (!S.practice) { run().marks = new Set(S.marks); writeStore(); }
     announce(`${S.marks.has(cell) ? 'Marked' : 'Unmarked'} ${cellName(p.size, cell)}.`);
   }
 
-  const actAt = (cell) => (S.tapMode === 'mark' ? toggleMark(cell) : pingAt(cell));
+  /**
+   * A pencilled guess: not graded, not saved, gone with the tab (same
+   * contract as Blind Corners' own pencil marks). A cell already holding a
+   * real mark has no room for a guess too — unmark it first.
+   */
+  function toggleTent(cell) {
+    if (S.mode !== 'play' || locked()) return;
+    const p = puzzle();
+    if (S.marks.has(cell)) { sfx.bump(); return; }
+    if (S.tent.has(cell)) { S.tent.delete(cell); sfx.unpencil(); }
+    else { S.tent.add(cell); sfx.pencil(); }
+    announce(`${S.tent.has(cell) ? 'Pencilled' : 'Unpencilled'} ${cellName(p.size, cell)}, not graded.`);
+  }
 
+  const actAt = (cell) => (S.tapMode === 'mark' ? toggleMark(cell) : S.tapMode === 'pencil' ? toggleTent(cell) : pingAt(cell));
+
+  const TAP_MODES = ['ping', 'mark', 'pencil'];
   function toggleTapMode() {
-    S.tapMode = S.tapMode === 'ping' ? 'mark' : 'ping';
+    S.tapMode = TAP_MODES[(TAP_MODES.indexOf(S.tapMode) + 1) % TAP_MODES.length];
     sfx.mode();
-    announce(S.tapMode === 'ping' ? 'Ping mode.' : 'Mark mode.');
+    announce(S.tapMode === 'ping' ? 'Ping mode.' : S.tapMode === 'mark' ? 'Mark mode.' : 'Pencil mode: guesses here are not graded.');
   }
 
   function toggleMute() {
@@ -833,8 +853,9 @@
   }
 
   function clearMarks() {
-    if (S.mode !== 'play' || locked() || !S.marks.size) return;
+    if (S.mode !== 'play' || locked() || (!S.marks.size && !S.tent.size)) return;
     S.marks.clear();
+    S.tent.clear();
     if (!S.practice) { run().marks = new Set(); writeStore(); }
     sfx.click();
     announce('Marks cleared.');
@@ -894,6 +915,7 @@
     S.practice = true;
     S.practiceRun = { inputs: '', pings: [], probed: new Set(), marks: new Set(), moves: 0, solved: false, solvedMoves: 0, par: puzzle().par };
     S.marks = new Set();
+    S.tent = new Set();
     S.mode = 'play';
     sfx.click();
     emit('practice', { tier: S.tier + 1, day: S.day, archive: archive() });
@@ -1139,6 +1161,14 @@
       if (S.marks.has(i)) {
         ctx.strokeStyle = C.accent; ctx.lineWidth = 3;
         ctx.beginPath(); ctx.arc(cx + cell / 2, cy + cell / 2, cell * 0.3, 0, Math.PI * 2); ctx.stroke();
+      } else if (S.tent.has(i)) {
+        // Dashed and dimmer, told apart from a real mark by shape, not only tone —
+        // same convention Blind Corners' own pencil marks use.
+        ctx.save();
+        ctx.setLineDash([4, 4]); ctx.globalAlpha = 0.6;
+        ctx.strokeStyle = C.muted; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.arc(cx + cell / 2, cy + cell / 2, cell * 0.3, 0, Math.PI * 2); ctx.stroke();
+        ctx.restore();
       }
       addHit(cx, cy, cell, cell, `cell${i}`);
     }
@@ -1184,7 +1214,7 @@
     });
 
     const btnY = 76, btnW = 110, btnH = 30, gap = 6;
-    button(12, btnY, btnW, btnH, S.tapMode === 'ping' ? 'Ping' : 'Mark', 'mode', S.tapMode === 'mark');
+    button(12, btnY, btnW, btnH, S.tapMode === 'ping' ? 'Ping' : S.tapMode === 'mark' ? 'Mark' : 'Pencil', 'mode', S.tapMode !== 'ping');
     button(12 + (btnW + gap), btnY, btnW, btnH, 'Check', 'check');
     button(12 + (btnW + gap) * 2, btnY, btnW, btnH, 'Clear', 'clear');
     button(12 + (btnW + gap) * 3, btnY, btnW, btnH, 'Share', 'share');
@@ -1228,12 +1258,13 @@
       'Ping any cell: it answers with one number —',
       'the distance to the nearest reflector.',
       'Mark cells you deduce hold a reflector.',
+      'Pencil mode lets you jot an ungraded guess first.',
       'Check once every reflector is marked.',
       'A wrong check pings the cell that proves it, for 2.',
       'Every ping costs 1 — beat the par for a star.',
       '',
       'Arrows or WASD move the cursor.',
-      'Space pings, or marks in Mark mode. M switches.',
+      'Space acts in the current mode. M cycles ping, mark, pencil.',
       'K checks, X clears marks, C shares, H closes this.',
     ];
     ctx.font = `400 15px ${FONT}`; ctx.fillStyle = C.text;
