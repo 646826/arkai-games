@@ -976,6 +976,15 @@
       ctx.moveTo(cx - 8, cy - 1); ctx.lineTo(cx, cy - 8); ctx.lineTo(cx + 8, cy - 1);
       ctx.moveTo(cx - 5, cy - 3); ctx.lineTo(cx - 5, cy + 8); ctx.lineTo(cx + 5, cy + 8); ctx.lineTo(cx + 5, cy - 3);
       ctx.stroke();
+    } else if (icon === 'prev' || icon === 'next') {
+      // Same chevron the sibling games (One Step Late, Ink Side Down, Blind
+      // Corners) draw for day-nav — was bare text here, the one control that
+      // didn't get the pill treatment (IDEA-BACKLOG.md/BENCHMARK.md gap #2).
+      const back = icon === 'prev' ? 1 : -1;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(cx + 5 * back, cy - 11); ctx.lineTo(cx - 6 * back, cy); ctx.lineTo(cx + 5 * back, cy + 11);
+      ctx.stroke();
     } else {
       ctx.beginPath();
       ctx.moveTo(cx - 9, cy - 3); ctx.lineTo(cx - 5, cy - 3); ctx.lineTo(cx, cy - 8);
@@ -1008,13 +1017,11 @@
     iconButton(W - 10 - 34, 4, 34, 32, 'mute', 'mute', false);
 
     const prevOk = S.day > 1, nextOk = S.day < S.today;
+    // Only drawn when navigable — matches the sibling games' dayArrows(),
+    // which omit the arrow entirely rather than showing it greyed out.
+    if (prevOk) iconButton(10, 20 + TITLE_SHIFT, 44, 40, 'prev', 'prevday');
+    if (nextOk) iconButton(426, 20 + TITLE_SHIFT, 44, 40, 'next', 'nextday');
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = prevOk ? C.text : C.muted; ctx.font = `700 22px ${FONT}`;
-    ctx.fillText('‹', 32, 40 + TITLE_SHIFT);
-    addHit(10, 20 + TITLE_SHIFT, 44, 40, 'prevday');
-    ctx.fillStyle = nextOk ? C.text : C.muted;
-    ctx.fillText('›', 448, 40 + TITLE_SHIFT);
-    addHit(426, 20 + TITLE_SHIFT, 44, 40, 'nextday');
     ctx.fillStyle = C.muted; ctx.font = `600 15px ${FONT}`;
     ctx.fillText(titleDay(S.day, dayDate(S.day), archive()), 240, 40 + TITLE_SHIFT);
 
