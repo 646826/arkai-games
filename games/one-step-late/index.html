@@ -480,12 +480,12 @@
     tall: {
       H: 780, heading: true, iconY: 10, icon: 48, tabsY: 72, tabH: 60, infoY: 156, boardY: 176,
       buttonH: 56, toastY: 726, footerY: 744, small: 15, tabText: 16,
-      title: { name: 92, nameSize: 42, day: 138, lanes: 180, lines: 330, lineGap: 28, cards: 452, cta: 550, sub: 584, share: 628, footer: 744 },
+      title: { name: 92, nameSize: 42, day: 138, tagline: 176, cards: 230, cta: 320, sub: 352, howto: 388, share: 460, footer: 744 },
     },
     compact: {
       H: 640, heading: false, iconY: 6, icon: 60, tabsY: 6, tabH: 60, infoY: 86, boardY: 104,
       buttonH: 62, toastY: 68, footerY: 0, small: 16, tabText: 15,
-      title: { name: 82, nameSize: 40, day: 120, lanes: 146, lines: 286, lineGap: 26, cards: 388, cta: 478, sub: 506, share: 528, footer: 618 },
+      title: { name: 82, nameSize: 40, day: 120, tagline: 154, cards: 200, cta: 288, sub: 316, howto: 348, share: 426, footer: 618 },
     },
   };
   let L = LAYOUTS.tall;
@@ -1678,6 +1678,7 @@
     if (S.mode === 'title') {
       const T = L.title;
       const list = icons(false).concat(dayArrows(), row(TIERS.map((t, i) => [`card${i}`, t.label]), T.cards, 60).map((b) => ({ ...b, card: true })));
+      list.push({ id: 'help', label: 'How to play', x: 80, y: T.howto, w: W - 160, h: L.buttonH });
       if (onward()) list.push(...row([['share', archive() ? `Share Day ${S.day}` : 'Share', true], ['onward', `Play ${ONWARD.title}`]], T.share, L.buttonH, 20, W - 20));
       else if (solvedCount()) list.push({ id: 'share', label: archive() ? `Share Day ${S.day}` : 'Share today’s result', x: 80, y: T.share, w: W - 160, h: L.buttonH, primary: true });
       return list;
@@ -1836,8 +1837,7 @@
   const RULES = [
     ['You step where you choose.', C.text],
     ['Then your shadow repeats the move', C.lilac],
-    ['you made the turn before.', C.lilac],
-    ['The arrow on it is that next step.', C.muted],
+    ['you made the turn before; an arrow marks it.', C.lilac],
     ['You never walk into a hole.', C.text],
     ['Your shadow does. The move that aimed', C.bad],
     ['it there is taken back, and still counts.', C.bad],
@@ -1856,11 +1856,20 @@
     if (S.help) announce(rulesText());
   }
 
-  function drawHelp() {
-    ctx.fillStyle = 'rgba(10, 8, 28, 0.94)';
-    roundRect(BOARD_X - 6, L.boardY - 6, BOARD_W + 12, BOARD_H + 12, 14);
+  // On the title screen the panel must clear the day-nav arrows sitting above
+  // the board's usual position, so its top (and, to still fit above the
+  // footer, its height) are only defaulted to the board's own bounds — not
+  // fixed to them the way the play-mode panel always was.
+  function drawHelp(top = L.boardY - 8, bottom = top + BOARD_H + 16) {
+    const h = bottom - top;
+    ctx.fillStyle = '#14111c';
+    roundRect(BOARD_X - 8, top, BOARD_W + 16, h, 16);
     ctx.fill();
-    RULES.forEach(([str, color], i) => label(str, W / 2, L.boardY + 36 + i * 32, 17, color, 'center', '600'));
+    ctx.strokeStyle = C.line;
+    ctx.lineWidth = 1.5;
+    roundRect(BOARD_X - 8, top, BOARD_W + 16, h, 16);
+    ctx.stroke();
+    RULES.forEach(([str, color], i) => label(str, W / 2, top + 48 + i * 34, 17, color, 'center', '600', BOARD_W - 12));
   }
 
   function drawFooter(y) {
@@ -1893,48 +1902,12 @@
     return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m`;
   }
 
-  // Two lanes: you walk to the sun, your shadow copies each step one beat later
-  // and reaches the moon a beat after you. The rule, shown before it is read.
-  function drawLanes(y0) {
-    const size = 50, x0 = 128, laneYou = y0, laneShadow = y0 + 58, beat = 0.55, steps = 4;
-    const cycle = (steps + 3) * beat;
-    const t = S.clock % cycle;
-    // Reduced motion gets one still frame that shows the same thing: the shadow a step behind.
-    const youAt = calm() ? 2 : Math.min(steps, t / beat);
-    const shadowAt = calm() ? 1 : Math.min(steps, Math.max(0, t / beat - 1));
-    for (const laneY of [laneYou, laneShadow]) {
-      for (let i = 0; i <= steps; i++) {
-        ctx.fillStyle = i % 2 ? C.tile : C.board;
-        ctx.fillRect(x0 + i * size, laneY, size, size);
-      }
-      ctx.strokeStyle = 'rgba(169, 156, 240, 0.22)';
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(x0, laneY, size * (steps + 1), size);
-    }
-    const endX = x0 + steps * size + size / 2;
-    drawSun(endX, laneYou + size / 2, size, youAt >= steps);
-    drawMoon(endX, laneShadow + size / 2, size, shadowAt >= steps, C.board);
-    const smooth = (v) => Math.floor(v) + ease((v % 1) * 1.6);
-    drawOrb(x0 + size / 2 + Math.min(steps, smooth(youAt)) * size, laneYou + size / 2, 16, 1, 'you');
-    drawOrb(x0 + size / 2 + Math.min(steps, smooth(shadowAt)) * size, laneShadow + size / 2, 16, 1, 'shadow', 0.95);
-    label('you', x0 - 12, laneYou + size / 2, 16, C.gold, 'right', '800');
-    label('shadow', x0 - 12, laneShadow + size / 2, 16, C.lilac, 'right', '800');
-  }
-
   function drawTitle() {
     const T = L.title;
     label('ONE STEP LATE', W / 2, T.name, T.nameSize, C.text, 'center', '900');
     const past = archive();
     label(titleDay(S.day, past ? dayDate(S.day) : '', past, PICTURE), W / 2, T.day, 17, C.gold, 'center', '700', W - 2 * (14 + ARROW + 6));
-    drawLanes(T.lanes);
-
-    const lines = [
-      ['Each turn, your shadow copies the move', C.text],
-      ['you made the turn before.', C.text],
-      ['You never step into a hole. It does.', C.lilac],
-      ['Fewest moves wins: match par for a star.', C.muted],
-    ];
-    lines.forEach(([str, color], i) => label(str, W / 2, T.lines + i * T.lineGap, 18, color, 'center', '600'));
+    label('Your shadow copies your last move, one step late.', W / 2, T.tagline, 15, C.muted, 'center', '500', W - 40);
 
     const allDone = solvedCount() === TIERS.length;
     ctx.globalAlpha = allDone ? 1 : 0.8 + 0.2 * wave(3);
@@ -1955,6 +1928,7 @@
     if (sub) label(sub, W / 2, T.sub, 15, C.muted, 'center', '600');
     for (const b of buttons()) drawButton(b);
     drawFooter(T.footer);
+    if (S.help) drawHelp(T.day + ARROW / 2 + 8, T.footer - 24);
   }
 
   // In the compact shape the toast takes the place of the info line for its
@@ -2028,6 +2002,10 @@
     // and Firefox would otherwise ring a board focused by script before the click.
     canvas.focus({ preventScroll: true, focusVisible: false });
     ensureAudio();
+    // The help panel on the title screen covers the same coordinates as the tier
+    // cards/buttons beneath it (unlike in play, where it only covers the board);
+    // any tap while it is open must close it, not fall through to what it hides.
+    if (S.help) { S.help = false; S.press = null; return; }
     const at = toLogical(event);
     const b = hitButton(at.x, at.y);
     S.press = { id: b ? b.id : null, x: at.x, y: at.y, pointer: event.pointerId };
@@ -2036,6 +2014,7 @@
 
   canvas.addEventListener('pointermove', (event) => {
     if (event.pointerType !== 'mouse') return;
+    if (S.help) { S.hover = null; return; }
     const at = toLogical(event);
     const b = hitButton(at.x, at.y);
     S.hover = b ? b.id : null;
@@ -2053,7 +2032,6 @@
       return;
     }
     if (S.mode === 'title') { startPlay(); return; }
-    if (S.help) { S.help = false; return; }
     const dx = at.x - start.x, dy = at.y - start.y;
     if (Math.hypot(dx, dy) > 26) {
       move(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 1 : 3) : dy > 0 ? 2 : 0);
@@ -2084,6 +2062,12 @@
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     const code = event.code;
     const { dir, digit, letter } = readKey(code, event.key);
+    // Same reasoning as the pointerdown guard above: while the help panel is
+    // open, only the keys that can close it do anything.
+    if (S.help) {
+      if (letter === 'Escape' || letter === 'h' || letter === '?') { event.preventDefault(); toggleHelp(); }
+      return;
+    }
     const space = code === 'Space' || event.key === ' ';
     if (dir >= 0 || space || letter === 'Backspace') event.preventDefault();
     // Every move is counted, so a held key must not turn into thirty of them.
@@ -2097,7 +2081,7 @@
     if (step) { stepDay(step); return; }
     if (letter === 'm') { toggleMute(); return; }
     if (letter === 'l') { announce(S.mode === 'play' ? describeBoard() : `Day ${S.day}. Start a puzzle to hear its board.`); return; }
-    if (letter === 'h' || letter === '?') { if (S.mode === 'title') announce(rulesText()); else toggleHelp(); return; }
+    if (letter === 'h' || letter === '?') { toggleHelp(); return; }
     if (S.mode === 'title') {
       if (space || letter === 'Enter') startPlay();
       else if (letter === 'c') share();
@@ -2110,7 +2094,7 @@
     if (letter === 'b') { showBestLine(); return; }
     if (letter === 'c') { share(); return; }
     if (digit >= 0) { setTier(digit); return; }
-    if (letter === 'Escape') { if (S.help) S.help = false; else goTitle(); }
+    if (letter === 'Escape') goTitle();
   });
 
   controls.addEventListener('click', (event) => {
@@ -2125,8 +2109,6 @@
       announce(S.mode === 'play' ? describeBoard() : `Day ${S.day}. Start a puzzle to hear its board.`);
     } else if (act === 'next' && S.mode === 'title') {
       startPlay();
-    } else if (act === 'help' && S.mode === 'title') {
-      announce(rulesText());
     } else {
       press(act);
     }
