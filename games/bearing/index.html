@@ -68,6 +68,7 @@
   const GAME_SEED = 0xbea4;
   const EPOCH_UTC = Date.UTC(2026, 8, 21);
   const DAY_MS = 86400000;
+  const FREEZE_COOLDOWN = 30;
   const DIAL = 16; // 22.5° per stop, a real compass rose vocabulary
   const MIN_SEP = 4; // 90° minimum between any two sources — generous margin (IDEA-BACKLOG.md 2026-09-21)
   const POINTS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
@@ -229,9 +230,10 @@
     return Math.max(1, Math.floor((utc - EPOCH_UTC) / DAY_MS) + 1);
   }
 
-  function streakAfter(streak, lastFull, day, today) {
+  function streakAfter(streak, lastFull, day, today, freezeAvailable) {
     if (day !== today || lastFull >= day) return null;
     if (lastFull === day - 1) return { streak: streak + 1, lastFull: day };
+    if (freezeAvailable && lastFull === day - 2) return { streak: streak + 1, lastFull: day, freezeUsed: true };
     return { streak: 1, lastFull: day };
   }
 
@@ -284,7 +286,7 @@
   }
 
   const core = {
-    GAME_SEED, EPOCH_UTC, DAY_MS, DIAL, MIN_SEP, POINTS, TIERS, MAX_ATTEMPTS,
+    GAME_SEED, EPOCH_UTC, DAY_MS, FREEZE_COOLDOWN, DIAL, MIN_SEP, POINTS, TIERS, MAX_ATTEMPTS,
     seeded, norm16, circDist, candidatesFor, placeSources, fallbackBearings, makePuzzle,
     judge, costOf, replay, marksOf, mergeDay, readKey, dayStep, dayNumber, streakAfter, shareMark, parNote, titleDay, readOnward,
   };
@@ -335,7 +337,7 @@
     puzzles: [], runs: [], tier: 0, newDay: false,
     heading: 0, marks: new Set(),
     help: false,
-    streak: 0, bestStreak: 0, lastFull: 0, storageWarned: false,
+    streak: 0, bestStreak: 0, lastFull: 0, freezeUsedDay: 0, storageWarned: false,
     muted: storage.get(STORE_MUTE) === '1',
     gatePassed: storage.get(STORE_GATE) === '1', gateSide: null, gateAttempts: 0,
     listening: false, listenStep: -1,
@@ -531,10 +533,14 @@
     const data = readStore();
     data.days[S.day] = mergeDay(data.days[S.day], currentEntries(), null, null);
     if (solvedCount() === TIERS.length) {
-      const next = streakAfter(S.streak, S.lastFull, S.day, S.today);
-      if (next) { S.streak = next.streak; S.lastFull = next.lastFull; S.bestStreak = Math.max(S.bestStreak, S.streak); }
+      const freezeAvailable = !S.freezeUsedDay || S.day - S.freezeUsedDay >= FREEZE_COOLDOWN;
+      const next = streakAfter(S.streak, S.lastFull, S.day, S.today, freezeAvailable);
+      if (next) {
+        S.streak = next.streak; S.lastFull = next.lastFull; S.bestStreak = Math.max(S.bestStreak, S.streak);
+        if (next.freezeUsed) { S.freezeUsedDay = S.day; toast('Missed a day — your streak freeze covered it.'); }
+      }
     }
-    data.streak = S.streak; data.best = S.bestStreak; data.lastFull = S.lastFull;
+    data.streak = S.streak; data.best = S.bestStreak; data.lastFull = S.lastFull; data.freezeUsedDay = S.freezeUsedDay;
     if (!storage.set(STORE, JSON.stringify(data)) && !S.storageWarned) {
       S.storageWarned = true;
       toast('This browser is not keeping your progress.');
@@ -561,6 +567,7 @@
     S.streak = Number(data.streak) || 0;
     S.bestStreak = Math.max(S.bestStreak, Number(data.best) || 0);
     S.lastFull = Number(data.lastFull) || 0;
+    S.freezeUsedDay = Number(data.freezeUsedDay) || 0;
   }
 
   function selectTier(tier) {
@@ -583,6 +590,7 @@
     S.streak = Number(data.streak) || 0;
     S.bestStreak = Number(data.best) || 0;
     S.lastFull = Number(data.lastFull) || 0;
+    S.freezeUsedDay = Number(data.freezeUsedDay) || 0;
     S.runs = S.puzzles.map((p, tier) => {
       const entry = saved[tier] || {};
       const state = replay(entry.i);
