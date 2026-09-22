@@ -1086,8 +1086,13 @@
   function drawPlay() {
     ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
 
-    iconButton(10, 4, 34, 32, 'home', 'home');
-    iconButton(W - 10 - 34, 4, 34, 32, 'mute', 'mute');
+    // Same corner pair as Echo Sounding/Trunk Line's in-play HUD (BENCHMARK
+    // gap #2): this game's title text is centered, not right-aligned, so
+    // nothing forces the opposite-corners split the title screen uses for
+    // mute alone — stacking left keeps in-play home/mute geometry identical
+    // across all three Era-B dailies.
+    iconButton(8, 4, 34, 32, 'home', 'home');
+    iconButton(48, 4, 34, 32, 'mute', 'mute');
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillStyle = C.text; ctx.font = `700 16px ${FONT}`;
     ctx.fillText(`Day ${S.day} · ${TIERS[S.tier].label}`, 240, 22);

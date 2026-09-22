@@ -513,6 +513,7 @@
     gold: '#ffd166', goldHi: '#fff3c4', goldDeep: '#e2a92c',
     lilac: '#a99cf0', shade: '#4c3d86', shadeHi: '#7a68c4',
     text: '#ece9ff', muted: '#a8a2d0', good: '#6ee7a8', warn: '#fbbf24', bad: '#f87171',
+    button: '#1e1a42', buttonHot: '#262150', buttonDown: '#2a2552', line: 'rgba(169, 156, 240, 0.35)',
   };
 
   const canvas = document.getElementById('game');
@@ -1717,10 +1718,10 @@
 
   function drawIcon(b) {
     const x = b.x + b.w / 2, y = b.y + b.h / 2;
-    ctx.fillStyle = S.hover === b.id ? '#262150' : '#1b1740';
+    ctx.fillStyle = S.hover === b.id ? C.buttonHot : C.button;
     roundRect(b.x, b.y, b.w, b.h, 12);
     ctx.fill();
-    ctx.strokeStyle = 'rgba(169, 156, 240, 0.35)';
+    ctx.strokeStyle = C.line;
     ctx.lineWidth = 1.5;
     ctx.stroke();
     ctx.fillStyle = C.text;
@@ -1763,11 +1764,11 @@
     if (b.card) { drawTierCard(b, Number(b.id.slice(4)), S.hover === b.id); return; }
     const down = S.press && S.press.id === b.id;
     const hot = S.hover === b.id;
-    ctx.fillStyle = b.primary ? (down ? C.goldDeep : C.gold) : down ? '#2a2552' : hot ? '#262150' : '#1e1a42';
+    ctx.fillStyle = b.primary ? (down ? C.goldDeep : C.gold) : down ? C.buttonDown : hot ? C.buttonHot : C.button;
     roundRect(b.x, b.y + (down ? 2 : 0), b.w, b.h, 12);
     ctx.fill();
     if (!b.primary) {
-      ctx.strokeStyle = 'rgba(169, 156, 240, 0.35)';
+      ctx.strokeStyle = C.line;
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
@@ -1782,7 +1783,7 @@
 
   function drawTierCard(b, tier, active) {
     const r = S.runs[tier], p = S.puzzles[tier];
-    ctx.fillStyle = active ? '#262150' : '#17143a';
+    ctx.fillStyle = active ? C.buttonHot : '#17143a';
     roundRect(b.x, b.y, b.w, b.h, 12);
     ctx.fill();
     ctx.strokeStyle = active ? C.gold : r.solved ? 'rgba(255, 209, 102, 0.45)' : 'rgba(169, 156, 240, 0.25)';
