@@ -665,7 +665,13 @@
       longTimer = window.setTimeout(() => {
         if (!press || press.done) return;
         const cell = cellAt(press.lx, press.ly);
-        if (cell) {
+        // cellAt() only resolves coordinates; the revealed flag lives on the
+        // grid cell from at(). A hold over an already-revealed cell flags
+        // nothing (toggleFlag's own guard below no-ops on it too) — leave
+        // `done` false so release still reaches the chord/reveal path below,
+        // instead of being swallowed.
+        const target = cell && at(cell.x, cell.y);
+        if (target && !target.revealed) {
           toggleFlag(cell.x, cell.y);
           press.done = true;
         }
