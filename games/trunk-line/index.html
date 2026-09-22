@@ -24,7 +24,7 @@
 </style>
 </head>
 <body>
-<canvas id="game" tabindex="0" role="application" aria-label="Trunk Line, a daily network deduction puzzle. Five stations are connected by a hidden wiring tree. Ping any two stations to learn only how many hops separate them, never the path. Mark the four true lines, then check. Letters Q, W, E, D and F select stations A through E; arrow keys move a cursor between stations and Enter selects it. M switches between ping and mark, K checks, X clears your marks, R replays a solved puzzle for practice, L describes the network, H shows the rules. Comma and period open the previous or next day. Press Tab for buttons."></canvas>
+<canvas id="game" tabindex="0" role="application" aria-label="Trunk Line, a daily network deduction puzzle. Five stations are connected by a hidden wiring tree. Ping any two stations to learn only how many hops separate them, never the path. Mark the four true lines, then check. Letters Q, W, E, D and F select stations A through E; arrow keys move a cursor between stations and Enter selects it. M switches between ping and mark, K checks, X clears your marks, I shows a hint, R replays a solved puzzle for practice, L describes the network, H shows the rules. Comma and period open the previous or next day. Press Tab for buttons."></canvas>
 <div id="status" class="sr" aria-live="polite"></div>
 <div id="controls" class="sr" role="group" aria-label="Game controls">
   <button type="button" data-act="station0">Select station A</button>
@@ -33,6 +33,7 @@
   <button type="button" data-act="station3">Select station D</button>
   <button type="button" data-act="station4">Select station E</button>
   <button type="button" data-act="mode">Switch between ping and mark</button>
+  <button type="button" data-act="hint">Hint</button>
   <button type="button" data-act="check">Check your marks</button>
   <button type="button" data-act="clear">Clear your marks</button>
   <button type="button" data-act="board">Describe the network</button>
@@ -233,6 +234,98 @@
     return { ok: marks.every((m) => puzzle.hidden.has(m)) };
   }
 
+  /** Every pinged pair's distance, from this run's ping history — later entries win, though a deterministic puzzle always agrees with itself. */
+  function pingedMap(p, pings) {
+    const map = new Map();
+    for (const idx of pings) {
+      const [a, b] = PAIRS[idx];
+      map.set(idx, p.dist[a][b]);
+    }
+    return map;
+  }
+
+  /**
+   * Live hint, level 2: what solveTree's own two-phase algorithm would still
+   * want to know next, computed purely from the pairs the player has
+   * themselves pinged so far (`known`: pair index -> revealed distance, e.g.
+   * from pingedMap). Mirrors solveTree's root fan-out then per-level parent
+   * search, but is order-independent — it never assumes the player queried
+   * in the reference algorithm's own order, only reads what is already
+   * known, so a station whose parent is already pinned down by *any* known
+   * distance-1 pair is treated as resolved even if that pair was not the
+   * "first" candidate the reference solver would itself have tried.
+   * Returns { type: 'pair', a, b } when a specific next ping is forced, or
+   * { type: 'phase', phase: 'parent' } once root fan-out is complete but no
+   * single next pair is forced by the player's own data — an honest generic
+   * nudge instead of a fabricated suggestion.
+   */
+  function nextHintPing(known) {
+    for (let v = 1; v < N; v++) {
+      if (!known.has(pairIndexOf(0, v))) return { type: 'pair', a: 0, b: v };
+    }
+    const distFromRoot = [0];
+    for (let v = 1; v < N; v++) distFromRoot.push(known.get(pairIndexOf(0, v)));
+    const byLevel = new Map();
+    for (let v = 1; v < N; v++) {
+      const d = distFromRoot[v];
+      if (!byLevel.has(d)) byLevel.set(d, []);
+      byLevel.get(d).push(v);
+    }
+    const maxLevel = Math.max(...distFromRoot);
+    for (let d = 2; d <= maxLevel; d++) {
+      const candidates = byLevel.get(d - 1) || [];
+      for (const v of byLevel.get(d) || []) {
+        if (candidates.some((u) => known.get(pairIndexOf(v, u)) === 1)) continue; // parent already pinned down
+        const next = candidates.find((u) => !known.has(pairIndexOf(v, u)));
+        if (next !== undefined) return { type: 'pair', a: Math.min(v, next), b: Math.max(v, next) };
+      }
+    }
+    return { type: 'phase', phase: 'parent' };
+  }
+
+  /**
+   * Live hint, level 3: an edge already forced by the player's own pings —
+   * never a lookup of the hidden answer. Two ways a pair becomes forced: (1)
+   * any pinged pair that came back distance 1 is a direct edge, always true
+   * on a tree, no further reasoning needed; (2) once every root ping is in,
+   * a station whose only remaining not-yet-ruled-out candidate at the level
+   * above it is a single station — that candidate must be its parent by
+   * elimination, even when that exact pair was never itself pinged. `marks`
+   * are excluded so a hint never just repeats what is already marked.
+   * Returns { pair: [a, b] } or null when nothing is forced yet.
+   */
+  function forcedEdgeHint(known, marks) {
+    for (const [idx, d] of known) {
+      if (d === 1 && !marks.has(idx)) return { pair: PAIRS[idx] };
+    }
+    for (let v = 1; v < N; v++) {
+      if (!known.has(pairIndexOf(0, v))) return null; // root fan-out incomplete: no elimination yet
+    }
+    const distFromRoot = [0];
+    for (let v = 1; v < N; v++) distFromRoot.push(known.get(pairIndexOf(0, v)));
+    const byLevel = new Map();
+    for (let v = 1; v < N; v++) {
+      const d = distFromRoot[v];
+      if (!byLevel.has(d)) byLevel.set(d, []);
+      byLevel.get(d).push(v);
+    }
+    const maxLevel = Math.max(...distFromRoot);
+    for (let d = 2; d <= maxLevel; d++) {
+      const candidates = byLevel.get(d - 1) || [];
+      for (const v of byLevel.get(d) || []) {
+        const remaining = candidates.filter((u) => {
+          const idx = pairIndexOf(v, u);
+          return !(known.has(idx) && known.get(idx) !== 1);
+        });
+        if (remaining.length === 1) {
+          const idx = pairIndexOf(v, remaining[0]);
+          if (!marks.has(idx)) return { pair: PAIRS[idx] };
+        }
+      }
+    }
+    return null;
+  }
+
   // A history token is a pinged pair's index (0-9), or a failed check: a bare
   // 'x'. Joined by dots, the same convention every other daily on this portal
   // uses for its own move history.
@@ -378,7 +471,7 @@
   const core = {
     GAME_SEED, EPOCH_UTC, DAY_MS, FREEZE_COOLDOWN, N, STATIONS, TIERS, PAIRS, PAIR_COUNT,
     seeded, pairIndexOf, randomTreeEdges, distMatrix, solveTree, FALLBACK_EDGES, makePuzzle,
-    judge, costOf, replay, marksOf, mergeDay, readKey, dayStep, dayNumber, dayFromDateParam, streakAfter, shareMark, parNote, titleDay, readOnward, cleanFreezeUsedDay,
+    judge, pingedMap, nextHintPing, forcedEdgeHint, costOf, replay, marksOf, mergeDay, readKey, dayStep, dayNumber, dayFromDateParam, streakAfter, shareMark, parNote, titleDay, readOnward, cleanFreezeUsedDay,
   };
   // ---- puzzle core end ----
 
@@ -425,7 +518,7 @@
     puzzles: [], runs: [], tier: 0, newDay: false,
     selected: null, cursor: 0, tapMode: 'ping', marks: new Set(),
     practice: false, practiceRun: null,
-    help: false,
+    help: false, hintLevel: 0,
     streak: 0, bestStreak: 0, lastFull: 0, freezeUsedDay: 0, storageWarned: false,
     muted: storage.get(STORE_MUTE) === '1',
     clock: 0, dayCheck: 5, flash: 0, shake: 0, toast: null,
@@ -546,18 +639,10 @@
   }
   const titleSummary = () => `Day ${S.day}${archive() ? `, ${dayDate(S.day)}, from the archive` : ''}. ${solvedCount()} of 3 puzzles solved.`;
 
-  const toast = (message, spoken = message) => { S.toast = { text: message, t: 0 }; announce(spoken); };
+  // duration in seconds; hints get longer than a passive ping/mark toast
+  // because they are deliberately requested and worth actually reading.
+  const toast = (message, spoken = message, duration = 2.6) => { S.toast = { text: message, t: 0, duration }; announce(spoken); };
   const shake = (amount) => { if (!calm()) S.shake = amount; };
-
-  /** Every pinged pair's distance, from this run's ping history — later entries win, though a deterministic puzzle always agrees with itself. */
-  function pingedMap(p, pings) {
-    const map = new Map();
-    for (const idx of pings) {
-      const [a, b] = PAIRS[idx];
-      map.set(idx, p.dist[a][b]);
-    }
-    return map;
-  }
 
   function describeState() {
     const p = puzzle(), r = run();
@@ -566,6 +651,38 @@
     const marks = S.marks.size ? [...S.marks].map((idx) => `${STATIONS[PAIRS[idx][0]]}-${STATIONS[PAIRS[idx][1]]}`).join(', ') : 'none';
     const sel = S.selected === null ? 'none' : STATIONS[S.selected];
     return `${S.tapMode} mode. Selected: ${sel}. ${r.pings.length} pings spent, par ${p.par}. Pings: ${pings}. Marks: ${marks}.`;
+  }
+
+  // Level 1 is the same every day, on purpose: it is solveTree's own first
+  // phase (ping the root against everyone) restated in plain language, true
+  // of every hidden tree this game can generate, so it reveals nothing about
+  // today's specific network.
+  const HINT1_TEXT = 'Ping station A against every other station first — that alone tells you who is one hop away.';
+  const HINT2_PARENT_TEXT = 'You know every station’s distance from A now. Ping a station whose parent is still unknown against a station one level closer to A.';
+
+  /** Turns a hint level plus the player's own known distances/marks into on-screen copy. Never reads puzzle.hidden. */
+  function hintText(level, known, marks) {
+    if (level === 1) return HINT1_TEXT;
+    if (level === 2) {
+      const next = nextHintPing(known);
+      return next.type === 'pair' ? `Try ${STATIONS[next.a]}–${STATIONS[next.b]} next.` : HINT2_PARENT_TEXT;
+    }
+    const forced = forcedEdgeHint(known, marks);
+    if (!forced) return 'Not enough pings yet to force a line — try a few more, then ask again.';
+    const [a, b] = forced.pair;
+    return `${STATIONS[a]}–${STATIONS[b]} must be a direct line — nothing else fits what you have pinged so far.`;
+  }
+
+  function doHint() {
+    if (S.mode !== 'play' || locked()) return;
+    ensureAudio();
+    const p = puzzle(), r = run();
+    S.hintLevel = Math.min(3, S.hintLevel + 1);
+    const known = pingedMap(p, r.pings);
+    const text = hintText(S.hintLevel, known, S.marks);
+    sfx.click();
+    toast(text, `Hint level ${S.hintLevel}. ${text}`, 6);
+    if (!S.practice) emit('hint', { level: S.hintLevel, tier: S.tier + 1, day: S.day, archive: archive() });
   }
 
   // ---- persistence ----
@@ -634,6 +751,7 @@
     S.flash = 0; S.shake = 0;
     S.selected = null; S.cursor = 0;
     S.marks = new Set(run().marks);
+    S.hintLevel = 0;
   }
 
   /** Opens a day's three puzzles: today, or any earlier day back to day 1. */
@@ -879,6 +997,7 @@
     S.practiceRun = { inputs: '', pings: [], marks: new Set(), moves: 0, solved: false, solvedMoves: 0, par: puzzle().par };
     S.marks = new Set();
     S.selected = null;
+    S.hintLevel = 0;
     S.mode = 'play';
     sfx.click();
     if (enteringPractice) emit('practice', { tier: S.tier + 1, day: S.day, archive: archive() });
@@ -965,6 +1084,9 @@
       ctx.beginPath();
       ctx.moveTo(cx + 5 * back, cy - 11); ctx.lineTo(cx - 6 * back, cy); ctx.lineTo(cx + 5 * back, cy + 11);
       ctx.stroke();
+    } else if (icon === 'hint') {
+      ctx.font = `800 18px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('?', cx, cy + 1);
     } else {
       ctx.beginPath();
       ctx.moveTo(cx - 9, cy - 3); ctx.lineTo(cx - 5, cy - 3); ctx.lineTo(cx, cy - 8);
@@ -1112,6 +1234,7 @@
 
     iconButton(8, 4, 34, 32, 'home', 'home');
     iconButton(48, 4, 34, 32, 'mute', 'mute');
+    iconButton(88, 4, 34, 32, 'hint', 'hint');
     ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
     ctx.fillStyle = r.moves > p.par ? C.warn : C.text; ctx.font = `700 15px ${FONT}`;
     ctx.fillText(`${r.moves} · par ${p.par}`, 466, 22);
@@ -1191,7 +1314,7 @@
     if (S.flash > 0) { ctx.fillStyle = `rgba(154,230,76,${S.flash * 0.3})`; ctx.fillRect(0, 0, W, H); }
     if (S.toast) {
       S.toast.t += dt;
-      if (S.toast.t < 2.6) {
+      if (S.toast.t < (S.toast.duration ?? 2.6)) {
         ctx.fillStyle = 'rgba(10,19,10,0.92)';
         roundRect(40, H - 74, W - 80, 46, 12); ctx.fill();
         ctx.fillStyle = C.text; ctx.font = `600 14px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -1241,6 +1364,7 @@
       case 'home': goTitle(); return;
       case 'mute': toggleMute(); return;
       case 'mode': if (!locked()) toggleTapMode(); return;
+      case 'hint': doHint(); return;
       case 'check': doCheck(); return;
       case 'clear': clearMarks(); return;
       case 'share': share(); return;
@@ -1283,6 +1407,7 @@
         else if (S.mode === 'play' && !locked()) toggleTapMode();
         return;
       case 'm': if (S.mode === 'play' && !locked()) toggleTapMode(); return;
+      case 'i': if (S.mode === 'play') doHint(); return;
       case 'k': if (S.mode === 'play') doCheck(); return;
       case 'x': if (S.mode === 'play') clearMarks(); return;
       case 'c': share(); return;
