@@ -1226,6 +1226,7 @@
       case 'clear': clearMarks(); return;
       case 'share': share(); return;
       case 'onward': goOnward(); return;
+      case 'help': S.help = !S.help; return;
       case 'closehelp': S.help = false; return;
       case 'opengate': if (S.mode === 'title') openGate(); return;
       case 'gateleft': answerGate(-1); return;

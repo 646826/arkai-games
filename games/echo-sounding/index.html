@@ -1077,6 +1077,13 @@
       ctx.fillText(`Play ${ONWARD.title} next →`, 240, 628);
       addHit(120, 614, 240, 26, 'onward');
     }
+
+    // Every sibling daily has a tappable "How to play" on its title screen;
+    // this game only ever wired the H-key shortcut (case 'h' below), leaving
+    // touch/mouse players with no way to reach the rules before starting —
+    // found live in a QA pass, not from a written spec. 6px clear of the
+    // onward hit above (614..640) rather than sharing its old +40 shift.
+    button(40, 646, 400, 44, 'How to play', 'help', false);
   }
 
   /**
@@ -1313,6 +1320,7 @@
       case 'replay': startPractice(); return;
       case 'next': goNext(); return;
       case 'onward': goOnward(); return;
+      case 'help': S.help = !S.help; return;
       case 'closehelp': S.help = false; return;
     }
   }
