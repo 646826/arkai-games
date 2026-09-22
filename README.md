@@ -4,14 +4,14 @@ Every game from [arkai.win](https://arkai.win) — each one a **single self-cont
 file** you can open from your desktop with no build step, no server, no package
 manager and no network connection.
 
-There are 13 of them. Together they are 744 KB.
+There are 13 of them. Together they are 747 KB.
 
 | Game | Kind | Controls | Size | Play |
 | --- | --- | --- | ---: | --- |
 | **Bearing** | Puzzle, Daily | Keyboard, touch & mouse | 56 KB | [play](https://arkai.win/games/bearing/) |
-| **Echo Sounding** | Puzzle, Daily | Keyboard, touch & mouse | 59 KB | [play](https://arkai.win/games/echo-sounding/) |
-| **Trunk Line** | Puzzle, Daily | Keyboard, touch & mouse | 55 KB | [play](https://arkai.win/games/trunk-line/) |
-| **Blind Corners** | Puzzle, Daily | Keyboard, touch & mouse | 102 KB | [play](https://arkai.win/games/blind-corners/) |
+| **Echo Sounding** | Puzzle, Daily | Keyboard, touch & mouse | 60 KB | [play](https://arkai.win/games/echo-sounding/) |
+| **Trunk Line** | Puzzle, Daily | Keyboard, touch & mouse | 56 KB | [play](https://arkai.win/games/trunk-line/) |
+| **Blind Corners** | Puzzle, Daily | Keyboard, touch & mouse | 103 KB | [play](https://arkai.win/games/blind-corners/) |
 | **Ink Side Down** | Puzzle, Daily | Keyboard, touch & mouse | 95 KB | [play](https://arkai.win/games/ink-side-down/) |
 | **Mole Rush** | Arcade, Family | Keyboard, touch & mouse | 55 KB | [play](https://arkai.win/games/mole-rush/) |
 | **One Step Late** | Puzzle, Daily | Keyboard, touch & mouse | 96 KB | [play](https://arkai.win/games/one-step-late/) |

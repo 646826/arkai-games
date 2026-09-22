@@ -233,8 +233,13 @@
   function streakAfter(streak, lastFull, day, today, freezeAvailable) {
     if (day !== today || lastFull >= day) return null;
     if (lastFull === day - 1) return { streak: streak + 1, lastFull: day };
-    if (freezeAvailable && lastFull === day - 2) return { streak: streak + 1, lastFull: day, freezeUsed: true };
+    if (freezeAvailable && lastFull > 0 && lastFull === day - 2) return { streak: streak + 1, lastFull: day, freezeUsed: true };
     return { streak: 1, lastFull: day };
+  }
+
+  // day 2 can only reach the freeze branch when lastFull is the never-played sentinel (0), never a real missed day; every stored freezeUsedDay === 2 is that bug's leftover, so it is safe to always clear it on load.
+  function cleanFreezeUsedDay(freezeUsedDay) {
+    return freezeUsedDay === 2 ? 0 : freezeUsedDay;
   }
 
   function titleDay(day, date, past) {
@@ -288,7 +293,7 @@
   const core = {
     GAME_SEED, EPOCH_UTC, DAY_MS, FREEZE_COOLDOWN, DIAL, MIN_SEP, POINTS, TIERS, MAX_ATTEMPTS,
     seeded, norm16, circDist, candidatesFor, placeSources, fallbackBearings, makePuzzle,
-    judge, costOf, replay, marksOf, mergeDay, readKey, dayStep, dayNumber, streakAfter, shareMark, parNote, titleDay, readOnward,
+    judge, costOf, replay, marksOf, mergeDay, readKey, dayStep, dayNumber, streakAfter, shareMark, parNote, titleDay, readOnward, cleanFreezeUsedDay,
   };
   // ---- puzzle core end ----
 
@@ -567,7 +572,7 @@
     S.streak = Number(data.streak) || 0;
     S.bestStreak = Math.max(S.bestStreak, Number(data.best) || 0);
     S.lastFull = Number(data.lastFull) || 0;
-    S.freezeUsedDay = Number(data.freezeUsedDay) || 0;
+    S.freezeUsedDay = cleanFreezeUsedDay(Number(data.freezeUsedDay) || 0);
   }
 
   function selectTier(tier) {
@@ -590,7 +595,7 @@
     S.streak = Number(data.streak) || 0;
     S.bestStreak = Number(data.best) || 0;
     S.lastFull = Number(data.lastFull) || 0;
-    S.freezeUsedDay = Number(data.freezeUsedDay) || 0;
+    S.freezeUsedDay = cleanFreezeUsedDay(Number(data.freezeUsedDay) || 0);
     S.runs = S.puzzles.map((p, tier) => {
       const entry = saved[tier] || {};
       const state = replay(entry.i);

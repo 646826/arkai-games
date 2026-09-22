@@ -417,8 +417,13 @@
   function streakAfter(streak, lastFull, day, today, freezeAvailable) {
     if (day !== today || lastFull >= day) return null;
     if (lastFull === day - 1) return { streak: streak + 1, lastFull: day };
-    if (freezeAvailable && lastFull === day - 2) return { streak: streak + 1, lastFull: day, freezeUsed: true };
+    if (freezeAvailable && lastFull > 0 && lastFull === day - 2) return { streak: streak + 1, lastFull: day, freezeUsed: true };
     return { streak: 1, lastFull: day };
+  }
+
+  // day 2 can only reach the freeze branch when lastFull is the never-played sentinel (0), never a real missed day; every stored freezeUsedDay === 2 is that bug's leftover, so it is safe to always clear it on load.
+  function cleanFreezeUsedDay(freezeUsedDay) {
+    return freezeUsedDay === 2 ? 0 : freezeUsedDay;
   }
 
   /**
@@ -459,7 +464,7 @@
 
   const core = {
     COLS, ROWS, CELLS, FLOOR, WALL, MARK, TOP, BOTTOM, TIERS, EPOCH_UTC, DAY_MS, MAX_ATTEMPTS, MAX_OPTIMAL_LINES, GAME_SEED,
-    rollInk, marksOf, roll, previews, solve, walkAlone, draw, makePuzzle, fallbackPuzzle, replay, mergeDay, ownsPosition, boardKey, carryUnsaved, readKey, dayStep, dayNumber, streakAfter, shareMark, titleDay, readOnward,
+    rollInk, marksOf, roll, previews, solve, walkAlone, draw, makePuzzle, fallbackPuzzle, replay, mergeDay, ownsPosition, boardKey, carryUnsaved, readKey, dayStep, dayNumber, streakAfter, cleanFreezeUsedDay, shareMark, titleDay, readOnward,
   };
   // ---- puzzle core end ----
 
@@ -788,7 +793,7 @@
     if (lastFull > S.lastFull) {
       S.lastFull = lastFull;
       S.streak = Number(data.streak) || 0;
-      S.freezeUsedDay = Number(data.freezeUsedDay) || 0;
+      S.freezeUsedDay = cleanFreezeUsedDay(Number(data.freezeUsedDay) || 0);
     }
     S.bestStreak = Math.max(S.bestStreak, Number(data.best) || 0);
     // While nothing of ours can be saved, the snapshot is the store: the open
@@ -858,7 +863,7 @@
     S.streak = Number(data.streak) || 0;
     S.bestStreak = Number(data.best) || 0;
     S.lastFull = Number(data.lastFull) || 0;
-    S.freezeUsedDay = Number(data.freezeUsedDay) || 0;
+    S.freezeUsedDay = cleanFreezeUsedDay(Number(data.freezeUsedDay) || 0);
     // Seen means what the store holds: a day opened from an unsaved snapshot
     // must still tell its own positions from another tab's later save.
     const stored = unsaved ? parseStore(unsavedBase).days[day] : saved;
