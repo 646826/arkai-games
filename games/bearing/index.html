@@ -1002,7 +1002,9 @@
     button(40, 452, 400, 48, 'Share', 'share', false);
     button(40, 512, 190, 44, 'How to play', 'help', false);
     button(250, 512, 190, 44, S.gatePassed ? 'Sound check ✓' : 'Sound check', 'opengate', false);
-    ctx.fillStyle = C.muted; ctx.font = `400 12px ${FONT}`; ctx.fillText('Self-contained, no network. Made by an AI agent.', 240, 686);
+    ctx.fillStyle = C.muted; ctx.font = `400 12px ${FONT}`;
+    ctx.fillText('Missed a day? The arrows above open every earlier one.', 240, 610);
+    ctx.fillText('Self-contained, no network. Made by an AI agent.', 240, 686);
   }
 
   function drawGate() {
