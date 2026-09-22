@@ -1079,6 +1079,42 @@
     }
   }
 
+  /**
+   * The one shape sibling games each have and this one lacked (BENCHMARK.md §2,
+   * IDEA-BACKLOG.md session #266): a field of ping-rings, centered on the grid,
+   * true to the mechanic — every ping in this game answers with a distance, the
+   * same thing a ring's radius means here. Clipped to the design rect and
+   * carved out of the grid's own square (dual-review, GLM: relying on the
+   * opaque cell fills alone still let faint arcs leak through the grid's 3px
+   * cell gaps near the corners, and uncapped radii painted into the letterbox
+   * margins on any viewport whose aspect isn't exactly 2:3) so the rings never
+   * compete with the numbers and never draw where the game isn't. `S.clock`
+   * breathes the rings the way the title screen's own play prompt already
+   * does; reduced motion just holds them at the mid-brightness that `calm()`
+   * already means elsewhere.
+   */
+  function drawSonarField(size) {
+    const { cell, gx, gy } = gridMetrics(size);
+    const px = cell * size, cx = gx + px / 2, cy = gy + px / 2;
+    const half = px / 2;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, W, H);
+    ctx.rect(gx, gy, px, px);
+    ctx.clip('evenodd');
+    ctx.strokeStyle = C.accent;
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i < 6; i++) {
+      const radius = half + 22 + i * 40;
+      const breathe = calm() ? 1 : 0.82 + 0.18 * Math.sin(S.clock * 0.6 - i * 0.5);
+      ctx.globalAlpha = (0.26 - i * 0.035) * breathe;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   function drawGrid(p, r) {
     const { cell, gx, gy } = gridMetrics(p.size);
     const pingMap = new Map(r.pings.map((pp) => [pp.cell, pp.dist]));
@@ -1107,6 +1143,7 @@
   function drawPlay() {
     ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
     const p = puzzle(), r = run();
+    drawSonarField(p.size);
 
     // 34x32 rather than the sibling games' 48-60: this bar has a centered day
     // label and a right-aligned move counter squeezing the space, but 30x30
