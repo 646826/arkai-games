@@ -80,10 +80,18 @@
   // range for the reference solver's probe count; `budget` is the number shown
   // as the star threshold, which is its own upper bound.
   const TIERS = [
-    { name: 'I', label: 'Easy', size: 6, k: 3, budget: 10, par: [4, 10] },
+    { name: 'I', label: 'Easy', size: 6, k: 2, budget: 8, par: [3, 8] },
     { name: 'II', label: 'Medium', size: 7, k: 3, budget: 9, par: [4, 9] },
     { name: 'III', label: 'Hard', size: 8, k: 4, budget: 10, par: [5, 10] },
   ];
+  // Easy shipped with three reflectors and came out harder than Medium: the
+  // solver needed more pings on it (mean par 8.2 against 7.6 over 1000 days),
+  // and half the players who opened it never solved it (IDEA-BACKLOG.md,
+  // session #292). Two reflectors from day 4 (2026-09-24) on. Days 1-3 were
+  // already played and shared, so they keep the grids they were published with.
+  const EASY_RETUNE_DAY = 4;
+  const EASY_BEFORE_RETUNE = { name: 'I', label: 'Easy', size: 6, k: 3, budget: 10, par: [4, 10] };
+  const specFor = (day, tier) => (tier === 0 && day < EASY_RETUNE_DAY ? EASY_BEFORE_RETUNE : TIERS[tier]);
   const MAX_ATTEMPTS = 1500;
   // Above this many still-possible placements, checking every one is skipped for
   // that probe: cheap early rounds, exact once the field narrows.
@@ -203,7 +211,7 @@
   }
 
   function draw(day, tier, attempt) {
-    const spec = TIERS[tier], cells = spec.size * spec.size;
+    const spec = specFor(day, tier), cells = spec.size * spec.size;
     const rand = seeded(GAME_SEED, day, tier, attempt);
     const order = Array.from({ length: cells }, (_, i) => i);
     for (let i = cells - 1; i > 0; i--) {
@@ -220,7 +228,7 @@
 
   /** A grid that always works, for a day the generator cannot fill: the corners, and past four, the centre. */
   function fallbackPuzzle(day, tier) {
-    const spec = TIERS[tier], n = spec.size;
+    const spec = specFor(day, tier), n = spec.size;
     const spots = [0, n - 1, n * (n - 1), n * n - 1, ((n / 2) | 0) * n + ((n / 2) | 0)];
     const reflectors = spots.slice(0, spec.k).sort((a, b) => a - b);
     return finish(reflectors, spec, day, tier, -1, spec.size * spec.size);
@@ -228,7 +236,7 @@
 
   /** The puzzle for a day and tier. Same arguments, same grid, on any machine. */
   function makePuzzle(day, tier) {
-    const spec = TIERS[tier], maxProbes = spec.par[1] + SEARCH_SLACK;
+    const spec = specFor(day, tier), maxProbes = spec.par[1] + SEARCH_SLACK;
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       const reflectors = draw(day, tier, attempt);
       const puzzle = finish(reflectors, spec, day, tier, attempt, maxProbes);
@@ -410,7 +418,7 @@
   }
 
   const core = {
-    GAME_SEED, EPOCH_UTC, DAY_MS, TIERS, MAX_ATTEMPTS, BRUTE_CAP, SEARCH_SLACK,
+    GAME_SEED, EPOCH_UTC, DAY_MS, TIERS, EASY_RETUNE_DAY, EASY_BEFORE_RETUNE, specFor, MAX_ATTEMPTS, BRUTE_CAP, SEARCH_SLACK,
     seeded, manhattan, responsesFor, nCk, pickProbe, countConsistent, solve, draw, finish, fallbackPuzzle, makePuzzle,
     judge, costOf, replay, marksOf, mergeDay, readKey, dayStep, dayNumber, dayFromDateParam, streakAfter, cleanFreezeUsedDay, shareMark, parNote, solvedNotice, titleDay, readOnward,
   };
@@ -1090,7 +1098,7 @@
       ctx.fillStyle = C.text; ctx.font = `800 22px ${FONT}`; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
       ctx.fillText(t.label, 62, y + 38);
       ctx.fillStyle = C.muted; ctx.font = `400 14px ${FONT}`;
-      ctx.fillText(`${t.size}×${t.size} grid · ${t.k} reflectors · par ${p.par === Infinity ? t.budget : p.par}`, 62, y + 60);
+      ctx.fillText(`${p.size}×${p.size} grid · ${p.k} reflectors · par ${p.par === Infinity ? p.budget : p.par}`, 62, y + 60);
       ctx.textAlign = 'right';
       if (r.solved) {
         ctx.fillStyle = r.solvedMoves - r.par <= 0 ? C.good : C.warn;
