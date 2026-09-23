@@ -845,8 +845,9 @@
     }
   });
 
+  // A move only arms or cancels the press; nothing drawn depends on it, so it does
+  // not repaint (a mouse wandering over a still board would redraw it every frame).
   canvas.addEventListener('pointermove', (e) => {
-    invalidate();
     if (!press || e.pointerId !== press.id) return;
     if (Math.abs(e.clientX - press.x) > DRAG_SLOP || Math.abs(e.clientY - press.y) > DRAG_SLOP) {
       window.clearTimeout(longTimer);
@@ -943,6 +944,10 @@
 
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', resize);
+  // The two ways a picture can go without the game changing: a tab brought back,
+  // and a canvas whose backing store the browser dropped and has now restored blank.
+  document.addEventListener('visibilitychange', invalidate);
+  canvas.addEventListener('contextrestored', invalidate);
 
   const animating = () => {
     if (S.shake > 0 || S.parts.length > 0) return true;
