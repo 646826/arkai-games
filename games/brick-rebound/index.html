@@ -892,8 +892,9 @@
       acc += elapsed;
       // Every step this frame owes is taken off before the first one runs: an update()
       // that throws must not leave time owing, or the frame after a run of throws would
-      // replay seconds of physics at once. Without a throw it is the same steps as ever.
-      const steps = Math.floor(acc / STEP);
+      // replay seconds of physics at once. Without a throw it is the same steps as ever
+      // (a first frame stamped before `last` leaves acc below zero: no step, as before).
+      const steps = Math.max(0, Math.floor(acc / STEP));
       acc -= steps * STEP;
       for (let i = 0; i < steps; i++) update(STEP);
     }
