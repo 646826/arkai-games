@@ -133,7 +133,7 @@
       x: i % level.cols, y: Math.floor(i / level.cols),
       mine: false, revealed: false, flagged: false, n: 0, t: 0, wrong: false,
     }));
-    S.placed = false;
+    S.placed = false; S.logical = true;
     S.revealed = 0; S.flags = 0;
     S.time = 0; S.running = false; S.runStart = 0;
     S.newBest = false;
@@ -153,9 +153,10 @@
   // starting from that tap, clears the whole field. The deductions are the ones
   // players actually use: a number already satisfied frees its other neighbours,
   // a number with exactly as many hidden neighbours as mines left flags them all,
-  // two overlapping numbers are read together (1-2-1 and its kin), and at the end
-  // the mine counter itself is a clue. A board those four rules cannot finish is
-  // thrown away, even when a cleverer argument would have cracked it.
+  // two overlapping numbers are read together (1-2-1 and its kin), and once every
+  // mine is found the counter says the rest is safe. A board those four rules
+  // cannot finish is thrown away, even when a cleverer argument would have
+  // cracked it.
   const core = (() => {
     function neighbourTable(cols, rows) {
       const table = [];
@@ -273,12 +274,13 @@
         for (const j of safe) if (!reveal(j)) return false;
         if (safe.length || sure.length) continue;
 
-        // 3. The mine counter: every mine found, or every hidden tile a mine.
-        const left = mines - marked;
-        const hiddenAll = [];
-        for (let i = 0; i < size; i++) if (state[i] === 0) hiddenAll.push(i);
-        if (left === 0) { for (const j of hiddenAll) if (!reveal(j)) return false; continue; }
-        if (left === hiddenAll.length) { for (const j of hiddenAll) mark(j); continue; }
+        // 3. The mine counter: with every mine found, whatever is still hidden is
+        // safe. Its mirror, every hidden tile a mine, cannot arise here: the loop
+        // only runs while a safe tile is still hidden.
+        if (marked === mines) {
+          for (let i = 0; i < size; i++) if (state[i] === 0 && !reveal(i)) return false;
+          continue;
+        }
 
         return false;                            // only a guess would go on from here
       }
@@ -318,8 +320,9 @@
   // game is the one thing a player can neither read nor prevent — and neither is
   // a board that later needs a coin flip, so the deal is one logic can finish.
   function placeMines(safeX, safeY) {
-    const { mine } = core.layMines(S.cols, S.rows, S.mines, safeX, safeY, Math.random);
+    const { mine, logical } = core.layMines(S.cols, S.rows, S.mines, safeX, safeY, Math.random);
     for (let i = 0; i < S.grid.length; i++) S.grid[i].mine = mine[i] === 1;
+    S.logical = logical;    // false only after 4000 unreadable deals: then say nothing about it
     numberCells();
   }
 
@@ -755,7 +758,7 @@
       hits.length = 0;
       drawOverlay('BOOM', [
         `${LEVELS[S.level].name} · ${clock(S.time)}`,
-        'No guess was needed: the numbers held the answer.',
+        S.logical ? 'No guess was needed: the numbers held the answer.' : 'The first tap is always safe — the rest are on you.',
         '',
         S.overT > 0.6 ? 'Tap or press R to try again' : '',
       ], '#f87171');
