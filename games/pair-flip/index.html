@@ -699,11 +699,16 @@
     // sharpness is gone and only the memory is left.
     const q = clamp(view.scale * view.dpr, 1, 2.5);
     const key = `${L.w.toFixed(2)}|${q.toFixed(2)}`;
-    if (sprites.key === key) return;
-    sprites.key = key;
-    sprites.q = q;
-    sprites.back = makeSprite(L.w, L.h, q, (c) => paintBack(c, 0, 0, L.w, L.h));
-    sprites.faces = new Map();
+    if (sprites.key !== key) {
+      sprites.key = key;
+      sprites.q = q;
+      sprites.back = makeSprite(L.w, L.h, q, (c) => paintBack(c, 0, 0, L.w, L.h));
+      sprites.faces = new Map();
+    }
+    // Each deal picks its own symbols, and a new game on the same board keeps the
+    // key. Faces baked only when the key changed left the next game's new symbols
+    // without one: the first of them turned up threw inside draw(), and the frame
+    // loop stopped for good — "play again" froze on its first flip.
     for (const card of S.cards) {
       if (sprites.faces.has(card.sym)) continue;
       const sym = SYMBOLS[card.sym];
