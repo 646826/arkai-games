@@ -481,7 +481,8 @@
     streak: 0, bestStreak: 0, lastFull: 0, freezeUsedDay: 0, storageWarned: false,
     muted: storage.get(STORE_MUTE) === '1',
     clock: 0, dayCheck: 5, shake: 0, flash: 0,
-    parts: [], floats: [], toast: null, hidden: false,
+    lively: 0, stir: 0, // seconds of ambient motion left since the last input, and how much of it is showing (0–1)
+    parts: [], floats: [], toast: null,
   };
   const started = new Set();
 
@@ -543,6 +544,7 @@
   // ---- canvas letterbox ----
   let view = { dpr: 1, cssW: W, cssH: H, scale: 1, ox: 0, oy: 0 };
   function resize() {
+    invalidate(); // a canvas given a new size is blank until it is drawn again
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const cssW = Math.max(1, canvas.clientWidth), cssH = Math.max(1, canvas.clientHeight);
     canvas.width = Math.round(cssW * dpr);
@@ -609,6 +611,8 @@
   const toast = (message, spoken = message) => { S.toast = { text: message, t: 0 }; announce(spoken); };
   const float = (x, y, message, color) => S.floats.push({ x, y, text: message, color, t: 0 });
   const shake = (amount) => { if (!calm()) S.shake = amount; };
+  // Ambient motion, scaled by how awake the board is: at rest it is the reduced-motion picture.
+  const wave = (speed, phase = 0) => (calm() ? 0 : S.stir * Math.sin(S.clock * speed + phase));
   function spawnParts(x, y, color, count, speed = 160) {
     if (calm()) return;
     for (let i = 0; i < count; i++) {
@@ -764,10 +768,17 @@
 
   function checkDay() {
     if (PICTURE || dayNumber(new Date()) === S.today) return;
+    // A new day changes the screen with no event to say so, but only once: mid-puzzle
+    // S.today stays behind on purpose, and this check comes round every five seconds.
     if (S.mode === 'play' && S.day === S.today) {
-      if (!S.newDay) { S.newDay = true; toast(touch() ? 'New puzzles are out. Tap the home button.' : 'New puzzles are out. Press Esc.'); }
+      if (!S.newDay) {
+        invalidate();
+        S.newDay = true;
+        toast(touch() ? 'New puzzles are out. Tap the home button.' : 'New puzzles are out. Press Esc.');
+      }
       return;
     }
+    invalidate(); // followToday() catches S.today up, so this runs once a day too
     followToday();
   }
 
@@ -987,6 +998,27 @@
   }
   copyClose.addEventListener('click', () => { copyBox.classList.remove('open'); canvas.focus(); });
 
+  // ---- update ----
+  function update(dt) {
+    if (PICTURE) return; // the pose holds still
+    S.clock += dt;
+    // The ambient motion comes up over half a second after an input and settles over one.
+    S.lively = Math.max(0, S.lively - dt);
+    const want = S.lively > 0 && !calm() ? 1 : 0;
+    S.stir = want > S.stir ? Math.min(want, S.stir + dt * 2) : Math.max(want, S.stir - dt);
+    S.parts = S.parts.filter((pt) => { pt.t += dt; pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.vy += 240 * dt; return pt.t < pt.life; });
+    S.floats = S.floats.filter((f) => { f.t += dt; return f.t < 0.9; });
+    if (S.flash > 0) S.flash = Math.max(0, S.flash - dt * 1.5);
+    if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 20);
+    if (S.toast) {
+      S.toast.t += dt;
+      if (S.toast.t >= 2.6) S.toast = null;
+    }
+    // A page left open over midnight must not keep offering yesterday.
+    S.dayCheck -= dt;
+    if (S.dayCheck <= 0) { S.dayCheck = 5; checkDay(); }
+  }
+
   // ---- rendering ----
   let hitRegions = [];
   const addHit = (x, y, w, h, action) => hitRegions.push({ x, y, w, h, action });
@@ -1122,8 +1154,7 @@
     // 6px margin; cards above are untouched.
     ctx.fillStyle = C.muted; ctx.font = `400 14px ${FONT}`;
     ctx.fillText(`Streak ${S.streak}${S.bestStreak > S.streak ? ` · best ${S.bestStreak}` : ''}`, 240, 560);
-    const pulse = calm() ? 1 : 0.75 + 0.25 * Math.sin(S.clock * 2.4);
-    ctx.globalAlpha = pulse;
+    ctx.globalAlpha = 0.75 + 0.25 * wave(2.4);
     ctx.fillStyle = C.accent; ctx.font = `600 15px ${FONT}`;
     ctx.fillText('Tap or press Space to play', 240, 584);
     ctx.globalAlpha = 1;
@@ -1153,10 +1184,10 @@
    * opaque cell fills alone still let faint arcs leak through the grid's 3px
    * cell gaps near the corners, and uncapped radii painted into the letterbox
    * margins on any viewport whose aspect isn't exactly 2:3) so the rings never
-   * compete with the numbers and never draw where the game isn't. `S.clock`
-   * breathes the rings the way the title screen's own play prompt already
-   * does; reduced motion just holds them at the mid-brightness that `calm()`
-   * already means elsewhere.
+   * compete with the numbers and never draw where the game isn't. The rings
+   * breathe the way the title screen's own play prompt does, through wave():
+   * for a few seconds after an input, then they settle at mid-brightness, the
+   * same picture reduced motion holds them at.
    */
   function drawSonarField(size) {
     const { cell, gx, gy } = gridMetrics(size);
@@ -1171,8 +1202,7 @@
     ctx.lineWidth = 1.5;
     for (let i = 0; i < 6; i++) {
       const radius = half + 22 + i * 40;
-      const breathe = calm() ? 1 : 0.82 + 0.18 * Math.sin(S.clock * 0.6 - i * 0.5);
-      ctx.globalAlpha = (0.26 - i * 0.035) * breathe;
+      ctx.globalAlpha = (0.26 - i * 0.035) * (0.82 + 0.18 * wave(0.6, -i * 0.5));
       ctx.beginPath();
       ctx.arc(cx, cy, radius, 0, Math.PI * 2);
       ctx.stroke();
@@ -1260,7 +1290,10 @@
 
     const gridBottom = GRID_TOP + gridMetrics(p.size).cell * p.size;
     const parVal = p.par === Infinity ? p.budget : p.par, over = r.moves - parVal;
-    ctx.textAlign = 'center'; ctx.font = `400 13px ${FONT}`;
+    // After restore() the context holds whatever the frame before left in it: the
+    // baseline is set here, or this line sits a few pixels lower after a resize, in
+    // the picture, and on a still screen drawn after a toast than it does otherwise.
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `400 13px ${FONT}`;
     ctx.fillStyle = r.moves <= parVal ? C.good : over <= 2 ? C.warn : C.bad;
     ctx.fillText(`Par ${parVal} · mark ${p.k} reflector${p.k === 1 ? '' : 's'}`, 240, gridBottom + 24);
 
@@ -1308,13 +1341,7 @@
     addHit(0, 0, W, H, 'closehelp');
   }
 
-  function drawEffects(dt) {
-    if (!S.hidden) {
-      S.parts = S.parts.filter((pt) => { pt.t += dt; pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.vy += 240 * dt; return pt.t < pt.life; });
-      S.floats = S.floats.filter((f) => { f.t += dt; return f.t < 0.9; });
-      if (S.flash > 0) S.flash = Math.max(0, S.flash - dt * 1.5);
-      if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 20);
-    }
+  function drawEffects() {
     for (const pt of S.parts) {
       ctx.globalAlpha = Math.max(0, 1 - pt.t / pt.life);
       ctx.fillStyle = pt.color;
@@ -1329,13 +1356,10 @@
     ctx.globalAlpha = 1;
     if (S.flash > 0) { ctx.fillStyle = `rgba(0,229,199,${S.flash * 0.3})`; ctx.fillRect(0, 0, W, H); }
     if (S.toast) {
-      S.toast.t += dt;
-      if (S.toast.t < 2.6) {
-        ctx.fillStyle = 'rgba(6,20,32,0.92)';
-        roundRect(40, H - 74, W - 80, 46, 12); ctx.fill();
-        ctx.fillStyle = C.text; ctx.font = `600 14px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        wrapText(S.toast.text, W / 2, H - 51, W - 110, 16);
-      } else S.toast = null;
+      ctx.fillStyle = 'rgba(6,20,32,0.92)';
+      roundRect(40, H - 74, W - 80, 46, 12); ctx.fill();
+      ctx.fillStyle = C.text; ctx.font = `600 14px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      wrapText(S.toast.text, W / 2, H - 51, W - 110, 16);
     }
   }
 
@@ -1345,13 +1369,13 @@
     if (onward()) { onwardLink.href = ONWARD.path; onwardLink.textContent = `Play ${ONWARD.title}, another daily puzzle`; }
   }
 
-  function render(dt) {
+  function render() {
     hitRegions = [];
     ctx.setTransform(view.dpr * view.scale, 0, 0, view.dpr * view.scale, view.dpr * view.ox, view.dpr * view.oy);
     ctx.clearRect(-view.ox / view.scale, -view.oy / view.scale, view.cssW / view.scale, view.cssH / view.scale);
     if (S.mode === 'title') drawTitle(); else drawPlay();
     if (S.help) drawHelp();
-    drawEffects(dt);
+    drawEffects();
     syncOnward();
   }
 
@@ -1393,12 +1417,14 @@
   }
 
   canvas.addEventListener('pointerdown', (e) => {
+    wake();
     canvas.focus();
     const { x, y } = toLogical(e.clientX, e.clientY);
     handleAction(hitTest(x, y));
   });
 
   window.addEventListener('keydown', (e) => {
+    wake();
     const holdable = e.code === 'ArrowUp' || e.code === 'ArrowDown' || e.code === 'ArrowLeft' || e.code === 'ArrowRight' ||
       e.code === 'KeyW' || e.code === 'KeyA' || e.code === 'KeyS' || e.code === 'KeyD';
     if (e.repeat && !holdable) return;
@@ -1435,6 +1461,7 @@
   });
 
   controls.addEventListener('click', (e) => {
+    wake();
     const btn = e.target.closest('button,a');
     if (!btn) return;
     const act = btn.dataset.act;
@@ -1446,34 +1473,68 @@
     handleAction(act);
   });
 
-  window.addEventListener('resize', resize);
-  document.addEventListener('visibilitychange', () => {
-    S.hidden = document.hidden;
-    if (S.hidden && audio) audio.suspend().catch(() => {});
-  });
-
   // Another tab of this game saved something: take it in, so neither tab
   // overwrites the other's solved puzzles.
   window.addEventListener('storage', (event) => {
+    invalidate();
     if (event.key === STORE && S.runs.length) absorb(readStore());
   });
 
   // ---- run ----
-  let lastT = 0;
+  // A grid between pings is a still picture, and it used to be redrawn sixty times
+  // a second anyway. Now it is drawn when something changed — the rule Sudoku
+  // Sixes, Minesweeper, Blind Corners, Ink Side Down and One Step Late already
+  // follow: every listener that can change the picture calls invalidate() (wake(),
+  // for the player's own input) before anything else can return, and the loop owns
+  // what no event announces — a running animation (particles, a float, the shake of
+  // a wrong check, the flash of a solve, a toast). A missed invalidate is a frozen
+  // game.
+  //
+  // The ambient motion — the breathing sonar rings around the grid and the
+  // breathing "Tap or press Space to play" — answers the player instead of running
+  // as a screensaver: wake() keeps it going for LIVELY seconds after the last
+  // input, then it fades into the reduced-motion picture and the drawing stops.
+  // A page nobody has touched yet opens still.
+  const LIVELY = 4;
+  let dirty = true, wasAnimating = false;
+  const invalidate = () => { dirty = true; };
+  const wake = () => { dirty = true; S.lively = LIVELY; };
+
+  const animating = () => {
+    if (S.shake > 0 || S.flash > 0 || S.parts.length > 0 || S.floats.length > 0 || S.toast) return true;
+    return S.stir > 0 || (S.lively > 0 && !calm());
+  };
+
+  let lastT = 0, running = true;
   function frame(now) {
     const dt = Math.min(0.05, lastT ? (now - lastT) / 1000 : 0);
     lastT = now;
-    S.clock += dt;
-    if (!PICTURE) {
-      S.dayCheck -= dt;
-      if (S.dayCheck <= 0) { S.dayCheck = 5; checkDay(); }
+    if (running) {
+      update(dt);
+      const live = animating();
+      // `wasAnimating` buys one more frame after the last one ends, so the screen
+      // never keeps a half-finished animation as its final picture.
+      if (dirty || live || wasAnimating) {
+        dirty = false;
+        render();
+        // The generator waits for this before it photographs (POSED_FLAG in picture-flag.mjs).
+        if (PICTURE) window.__arkaiPosed = true;
+      }
+      wasAnimating = live;
     }
-    render(S.hidden ? 0 : dt);
-    // The generator waits for this before it photographs (POSED_FLAG in picture-flag.mjs).
-    if (PICTURE) window.__arkaiPosed = true;
     requestAnimationFrame(frame);
   }
 
+  // A hidden tab should not keep drawing; a tab shown again is drawn again.
+  document.addEventListener('visibilitychange', () => {
+    invalidate();
+    running = !document.hidden;
+    if (document.hidden && audio) audio.suspend().catch(() => {});
+  });
+
+  window.addEventListener('resize', resize);
+  // A canvas whose backing store the browser dropped comes back blank.
+  canvas.addEventListener('contextrestored', invalidate);
   resize();
   if (PICTURE) posePicture(); else loadDay(dayFromDateParam(DATE_RAW) ?? dayNumber(new Date()));
   requestAnimationFrame(frame);
