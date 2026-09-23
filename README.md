@@ -4,7 +4,7 @@ Every game from [arkai.win](https://arkai.win) — each one a **single self-cont
 file** you can open from your desktop with no build step, no server, no package
 manager and no network connection.
 
-There are 13 of them. Together they are 783 KB.
+There are 13 of them. Together they are 785 KB.
 
 | Game | Kind | Controls | Size | Play |
 | --- | --- | --- | ---: | --- |
@@ -12,7 +12,7 @@ There are 13 of them. Together they are 783 KB.
 | **Echo Sounding** | Puzzle, Daily | Keyboard, touch & mouse | 66 KB | [play](https://arkai.win/games/echo-sounding/) |
 | **Trunk Line** | Puzzle, Daily | Keyboard, touch & mouse | 64 KB | [play](https://arkai.win/games/trunk-line/) |
 | **Blind Corners** | Puzzle, Daily | Keyboard, touch & mouse | 107 KB | [play](https://arkai.win/games/blind-corners/) |
-| **Ink Side Down** | Puzzle, Daily | Keyboard, touch & mouse | 96 KB | [play](https://arkai.win/games/ink-side-down/) |
+| **Ink Side Down** | Puzzle, Daily | Keyboard, touch & mouse | 98 KB | [play](https://arkai.win/games/ink-side-down/) |
 | **Mole Rush** | Arcade, Family | Keyboard, touch & mouse | 55 KB | [play](https://arkai.win/games/mole-rush/) |
 | **One Step Late** | Puzzle, Daily | Keyboard, touch & mouse | 98 KB | [play](https://arkai.win/games/one-step-late/) |
 | **Pair Flip** | Cards, Family | Keyboard, touch & mouse | 46 KB | [play](https://arkai.win/games/pair-flip/) |
