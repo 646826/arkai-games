@@ -575,6 +575,8 @@
     streak: 0, bestStreak: 0, lastFull: 0, freezeUsedDay: 0, storageWarned: false,
     muted: storage.get(STORE_MUTE) === '1',
     clock: 0, dayCheck: 0, shake: 0, flash: 0,
+    lively: 0, stir: 0,     // seconds of ambient motion left since the last input, and how much of it is showing (0–1)
+    turn: 0,                // how far the sun's rays have turned; they turn only while the board is stirring
     youAnim: null, shadowAnim: null,
     parts: [], floats: [], toast: null, press: null, hover: null,
   };
@@ -583,8 +585,8 @@
   // no telemetry yet for whether the D-056 mechanic is actually seen (only the
   // generic `share` event for the link that created it) — decided against
   // extending it to the other five dailies until that question has an answer
-  // (ops/intel/breakthrough-2026-09-21.md item 3). `drawTitle` runs every frame
-  // the title screen is on-screen, so this flag is what keeps the emit to once.
+  // (ops/intel/breakthrough-2026-09-21.md item 3). `drawTitle` runs on every
+  // redraw of the title screen, so this flag is what keeps the emit to once.
   let friendSeenSent = false;
 
   // ---- portal events (same-origin parent only) ----
@@ -702,8 +704,9 @@
   if (ONWARD) {
     onwardLink.setAttribute('href', ONWARD.path);
     onwardLink.textContent = `Play ${ONWARD.title}, another daily puzzle`;
-    // Shown once the day on screen is finished — kept in sync every frame in
-    // render(), the same gate the canvas button next to it already used.
+    // Shown once the day on screen is finished — kept in sync by render(), the
+    // same gate the canvas button next to it already used. Whatever can finish a
+    // day (the player's input, another tab's save, a new day) draws a frame.
     onwardLink.addEventListener('click', (event) => {
       const plan = onwardClickPlan(event, onward());
       if (plan === 'ignore') return;
@@ -728,7 +731,8 @@
   const dayDate = (day) => new Date(EPOCH_UTC + (day - 1) * DAY_MS).toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'UTC' });
   const titleSummary = () => `Day ${S.day}${archive() ? `, ${dayDate(S.day)}, from the archive` : ''}. ${solvedCount()} of 3 puzzles solved.`;
   const digits = (text) => (typeof text === 'string' ? text.split('').map(Number).filter((d) => d >= 0 && d <= 3) : []);
-  const wave = (speed, phase = 0) => (calm() ? 0 : Math.sin(S.clock * speed + phase));
+  // Ambient motion, scaled by how awake the board is: at rest it is the reduced-motion picture.
+  const wave = (speed, phase = 0) => (calm() ? 0 : S.stir * Math.sin(S.clock * speed + phase));
   // A tween between two cells. Same cell means nothing moved, so nothing animates:
   // a zero-length slide would otherwise read as the fade a returning shadow uses.
   const slide = (from, to) => ({ from, to, t: from === to ? 1 : 0, bump: -1, bt: 1 });
@@ -989,7 +993,8 @@
   }
 
   function checkDay() {
-    if (PICTURE || dayNumber(new Date()) === S.today) return;
+    if (PICTURE || dayNumber(new Date()) === S.today) return; // the posed board belongs to no day
+    invalidate(); // a new day changes the screen with no event to say so
     // Mid-puzzle on today's board, nothing is pulled away: it says so once.
     if (S.mode === 'play' && S.day === S.today) {
       if (!S.newDay) {
@@ -1394,6 +1399,12 @@
   // ---- update ----
   function update(dt) {
     S.clock += dt;
+    // The ambient motion comes up over half a second after an input and settles over one.
+    S.lively = Math.max(0, S.lively - dt);
+    const want = S.lively > 0 && !calm() ? 1 : 0;
+    S.stir = want > S.stir ? Math.min(want, S.stir + dt * 2) : Math.max(want, S.stir - dt);
+    // The sun's rays turn with it, slowing to a stop as it settles.
+    S.turn += dt * 0.4 * S.stir;
     if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 24);
     if (S.flash > 0) S.flash = Math.max(0, S.flash - dt);
     for (const a of [S.youAnim, S.shadowAnim]) {
@@ -1436,6 +1447,7 @@
   });
 
   function resize() {
+    invalidate(); // a canvas given a new size is blank until it is drawn again
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const cw = canvas.clientWidth || window.innerWidth, ch = canvas.clientHeight || window.innerHeight;
     // Below 480:780 both shapes are limited by width and scale alike, so the one
@@ -1529,7 +1541,7 @@
     ctx.arc(x, y, size * 0.24, 0, Math.PI * 2);
     ctx.stroke();
     ctx.lineWidth = 3;
-    const turnAngle = calm() ? 0 : S.clock * 0.4;
+    const turnAngle = calm() ? 0 : S.turn;
     for (let i = 0; i < 8; i++) {
       const a = (Math.PI / 4) * i + turnAngle;
       ctx.beginPath();
@@ -2031,6 +2043,7 @@
   }
 
   canvas.addEventListener('pointerdown', (event) => {
+    wake();
     // Only the first finger, and only the main mouse button: a second finger or
     // a right click must never become a counted move.
     if (!event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
@@ -2048,15 +2061,18 @@
     try { canvas.setPointerCapture(event.pointerId); } catch { /* not supported */ }
   });
 
+  // Only a change of what is under the mouse is a new picture: a mouse wandering
+  // over a still board must not redraw it every frame.
   canvas.addEventListener('pointermove', (event) => {
     if (event.pointerType !== 'mouse') return;
-    if (S.help) { S.hover = null; return; }
     const at = toLogical(event);
-    const b = hitButton(at.x, at.y);
-    S.hover = b ? b.id : null;
+    const b = S.help ? null : hitButton(at.x, at.y);
+    const hover = b ? b.id : null;
+    if (hover !== S.hover) { S.hover = hover; invalidate(); }
   });
 
   canvas.addEventListener('pointerup', (event) => {
+    wake();
     const start = S.press;
     if (!start || start.pointer !== event.pointerId) return;
     S.press = null;
@@ -2082,10 +2098,12 @@
   });
 
   canvas.addEventListener('pointercancel', (event) => {
+    invalidate();
     if (S.press && S.press.pointer === event.pointerId) S.press = null;
   });
 
   window.addEventListener('keydown', (event) => {
+    wake();
     // While the copy dialog is open the board is not there to play, wherever focus went.
     if (copyBox.classList.contains('open')) {
       if (event.key === 'Escape') closeCopyBox();
@@ -2134,6 +2152,7 @@
   });
 
   controls.addEventListener('click', (event) => {
+    wake();
     const button = event.target instanceof Element ? event.target.closest('button[data-act]') : null;
     if (!button || copyBox.classList.contains('open')) return;
     ensureAudio();
@@ -2153,26 +2172,64 @@
   // Another tab of this game saved something: take it in, so neither tab
   // overwrites the other's solved puzzles or positions on its next move.
   window.addEventListener('storage', (event) => {
+    invalidate();
     if (event.key === STORE && S.runs.length) absorb(readStore());
   });
 
   // ---- loop ----
+  // A board between moves is a still picture, and it used to be redrawn sixty times
+  // a second anyway. Now it is drawn when something changed — the rule Sudoku
+  // Sixes, Minesweeper, Blind Corners and Ink Side Down already follow: every
+  // listener that can change the picture calls invalidate() (wake(), for the
+  // player's own input) before anything else can return, and the loop owns what no
+  // event announces — a running animation (a step, a bump, the shadow's fall, the
+  // par line playing, particles, a toast), and the countdown on the title screen
+  // reaching a new minute. A missed invalidate is a frozen game.
+  //
+  // The ambient motion — the twinkling stars, the wobbling shadow, the breathing
+  // sun and moon, the turning rays, the bobbing arrow, the breathing "Tap to
+  // play" — answers the player instead of running as a screensaver: wake() keeps
+  // it going for LIVELY seconds after the last input, then it fades into the
+  // reduced-motion picture and the drawing stops. A page nobody has touched yet
+  // opens still.
+  const LIVELY = 4;
+  let dirty = true, wasAnimating = false, shownText = '';
+  const invalidate = () => { dirty = true; };
+  const wake = () => { dirty = true; S.lively = LIVELY; };
+
+  const animating = () => {
+    const y = S.youAnim, s = S.shadowAnim;
+    if (y.t < 1 || y.bt < 1 || s.t < 1 || s.bt < 1 || S.fall || S.demo) return true;
+    if (S.shake > 0 || S.flash > 0 || S.parts.length > 0 || S.floats.length > 0 || S.toast) return true;
+    return S.stir > 0 || (S.lively > 0 && !calm());
+  };
+
   let lastTime = 0, running = true;
   function frame(now) {
     const dt = Math.min(0.05, (now - lastTime) / 1000 || 0);
     lastTime = now;
     if (running) {
       if (!PICTURE) update(dt); // a pose holds still
-      render();
-      // The generator waits for this: the posed frame is on the canvas.
-      if (PICTURE) window.__arkaiPosed = true;
+      const text = S.mode === 'title' ? untilMidnight() : '';
+      if (text !== shownText) { shownText = text; dirty = true; }
+      const live = animating();
+      // `wasAnimating` buys one more frame after the last one ends, so the screen
+      // never keeps a half-finished animation as its final picture.
+      if (dirty || live || wasAnimating) {
+        dirty = false;
+        render();
+        // The generator waits for this: the posed frame is on the canvas.
+        if (PICTURE) window.__arkaiPosed = true;
+      }
+      wasAnimating = live;
     }
     requestAnimationFrame(frame);
   }
 
   // A turn-based game has no clock to stop, but a hidden tab should not keep
-  // drawing stars, and sound must not start again on its own.
+  // drawing, and sound must not start again on its own.
   document.addEventListener('visibilitychange', () => {
+    invalidate();
     running = !document.hidden;
     if (audio) {
       if (document.hidden) audio.suspend().catch(() => {});
@@ -2182,6 +2239,14 @@
   });
 
   window.addEventListener('resize', resize);
+  // A canvas whose backing store the browser dropped comes back blank.
+  canvas.addEventListener('contextrestored', invalidate);
+  // The hints drawn on the canvas follow the pointer (tap or click, the keys on the
+  // buttons), and the sun's rays stand straight under reduced motion: a device that
+  // changes either — a tablet mode, a mouse plugged in, the motion setting —
+  // redraws a still screen. Old Safari has no addEventListener on a media query.
+  if (coarseQuery && coarseQuery.addEventListener) coarseQuery.addEventListener('change', invalidate);
+  if (calmQuery && calmQuery.addEventListener) calmQuery.addEventListener('change', invalidate);
   resize();
   if (PICTURE) posePicture(); else loadDay(dayFromDateParam(DATE_RAW) ?? dayNumber(new Date()));
   requestAnimationFrame(frame);
