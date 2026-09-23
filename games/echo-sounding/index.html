@@ -495,6 +495,14 @@
       }
     } catch { /* not embedded */ }
   };
+  // A throw nobody caught is a bug a player has just met, and until now only they knew.
+  // Said once per page: a frame that throws sixty times a second is one fact, not sixty.
+  let crashed = false;
+  window.addEventListener('error', () => {
+    if (crashed) return;
+    crashed = true;
+    emit('crash');
+  });
   const reportFocus = () => emit('focus', { day: S.day, tier: S.tier + 1 });
 
   let announceTimer = 0, pending = '';
@@ -1507,6 +1515,9 @@
 
   let lastT = 0, running = true;
   function frame(now) {
+    // Booked before anything that can throw: one bad frame must not stop every frame
+    // after it and leave the game frozen on its last picture (Pair Flip, 48ad915).
+    requestAnimationFrame(frame);
     const dt = Math.min(0.05, lastT ? (now - lastT) / 1000 : 0);
     lastT = now;
     if (running) {
@@ -1522,7 +1533,6 @@
       }
       wasAnimating = live;
     }
-    requestAnimationFrame(frame);
   }
 
   // A hidden tab should not keep drawing; a tab shown again is drawn again.

@@ -117,6 +117,14 @@
       }
     } catch { /* not embedded */ }
   };
+  // A throw nobody caught is a bug a player has just met, and until now only they knew.
+  // Said once per page: a frame that throws sixty times a second is one fact, not sixty.
+  let crashed = false;
+  window.addEventListener('error', () => {
+    if (crashed) return;
+    crashed = true;
+    emit('crash');
+  });
 
   const S = {
     mode: 'title',              // title | playing | won | paused | gameover
@@ -950,6 +958,9 @@
   // ---- loop ----
   let last = 0;
   function frame(now) {
+    // Booked before anything that can throw: one bad frame must not stop every frame
+    // after it and leave the game frozen on its last picture (Pair Flip, 48ad915).
+    requestAnimationFrame(frame);
     if (!last) last = now;
     // Clamped so a tab restored after a minute in the background resumes on the
     // next frame instead of integrating a minute of drift in one step.
@@ -959,7 +970,6 @@
     if (!PICTURE) update(dt);                     // the pose is drawn every frame and never advances
     draw();
     if (PICTURE) window.__arkaiPosed = true;      // the posed frame is on the canvas; the generator waits for this
-    requestAnimationFrame(frame);
   }
 
   // Dust is scattered by Math.random, so the picture goes without it.

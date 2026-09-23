@@ -4,22 +4,22 @@ Every game from [arkai.win](https://arkai.win) — each one a **single self-cont
 file** you can open from your desktop with no build step, no server, no package
 manager and no network connection.
 
-There are 13 of them. Together they are 797 KB.
+There are 13 of them. Together they are 803 KB.
 
 | Game | Kind | Controls | Size | Play |
 | --- | --- | --- | ---: | --- |
-| **Bearing** | Puzzle, Daily | Keyboard, touch & mouse | 61 KB | [play](https://arkai.win/games/bearing/) |
-| **Echo Sounding** | Puzzle, Daily | Keyboard, touch & mouse | 69 KB | [play](https://arkai.win/games/echo-sounding/) |
-| **Trunk Line** | Puzzle, Daily | Keyboard, touch & mouse | 64 KB | [play](https://arkai.win/games/trunk-line/) |
-| **Blind Corners** | Puzzle, Daily | Keyboard, touch & mouse | 107 KB | [play](https://arkai.win/games/blind-corners/) |
-| **Ink Side Down** | Puzzle, Daily | Keyboard, touch & mouse | 99 KB | [play](https://arkai.win/games/ink-side-down/) |
+| **Bearing** | Puzzle, Daily | Keyboard, touch & mouse | 62 KB | [play](https://arkai.win/games/bearing/) |
+| **Echo Sounding** | Puzzle, Daily | Keyboard, touch & mouse | 70 KB | [play](https://arkai.win/games/echo-sounding/) |
+| **Trunk Line** | Puzzle, Daily | Keyboard, touch & mouse | 65 KB | [play](https://arkai.win/games/trunk-line/) |
+| **Blind Corners** | Puzzle, Daily | Keyboard, touch & mouse | 108 KB | [play](https://arkai.win/games/blind-corners/) |
+| **Ink Side Down** | Puzzle, Daily | Keyboard, touch & mouse | 100 KB | [play](https://arkai.win/games/ink-side-down/) |
 | **Mole Rush** | Arcade, Family | Keyboard, touch & mouse | 55 KB | [play](https://arkai.win/games/mole-rush/) |
 | **One Step Late** | Puzzle, Daily | Keyboard, touch & mouse | 102 KB | [play](https://arkai.win/games/one-step-late/) |
 | **Pair Flip** | Cards, Family | Keyboard, touch & mouse | 50 KB | [play](https://arkai.win/games/pair-flip/) |
 | **Slide Merge** | Puzzle, Numbers | Keyboard, touch & swipe | 39 KB | [play](https://arkai.win/games/slide-merge/) |
-| **Sudoku Sixes** | Logic, Puzzle | Keyboard, touch & mouse | 53 KB | [play](https://arkai.win/games/sudoku-sixes/) |
-| **Brick Rebound** | Arcade, Classic | Mouse, touch & keyboard | 35 KB | [play](https://arkai.win/games/brick-rebound/) |
-| **Minesweeper** | Logic, Puzzle | Mouse, touch & keyboard | 38 KB | [play](https://arkai.win/games/minesweeper/) |
+| **Sudoku Sixes** | Logic, Puzzle | Keyboard, touch & mouse | 54 KB | [play](https://arkai.win/games/sudoku-sixes/) |
+| **Brick Rebound** | Arcade, Classic | Mouse, touch & keyboard | 36 KB | [play](https://arkai.win/games/brick-rebound/) |
+| **Minesweeper** | Logic, Puzzle | Mouse, touch & keyboard | 39 KB | [play](https://arkai.win/games/minesweeper/) |
 | **Snake** | Arcade, Classic | Keyboard, touch & swipe | 24 KB | [play](https://arkai.win/games/snake/) |
 
 ## What "self-contained" means here
@@ -82,10 +82,10 @@ Two details that are easy to get wrong, so they are stated rather than implied:
   yourself and it works; frame it from another domain and you get silence, by
   design.
 - **The event vocabulary is not uniform yet.** 12 of the 13 games emit
-  `start` and `gameover`. Brick Rebound uses a different set: `game_end`, `game_ready`, `game_start`, `level_end`, `level_start`.
+  `start` and `gameover`. Brick Rebound uses a different set: `crash`, `game_end`, `game_ready`, `game_start`, `level_end`, `level_start`.
   The portal normalises this on its side. Listen for both spellings until it is
   fixed at the source.
-- **A few send more than that.** Bearing, Echo Sounding, Ink Side Down also send `closed`, `focus`, `next_game`, `practice`, `progress`, `share`. Trunk Line also sends `closed`, `focus`, `hint`, `next_game`, `practice`, `progress`, `share`. Blind Corners also sends `closed`, `focus`, `next_game`, `progress`, `share`. One Step Late also sends `closed`, `focus`, `friend_seen`, `next_game`, `practice`, `progress`, `share`. None of these end the game; a host listening only for `start`/`gameover`/`win` can ignore the rest.
+- **A few send more than that.** Bearing, Echo Sounding, Ink Side Down also send `closed`, `crash`, `focus`, `next_game`, `practice`, `progress`, `share`. Trunk Line also sends `closed`, `crash`, `focus`, `hint`, `next_game`, `practice`, `progress`, `share`. Blind Corners also sends `closed`, `crash`, `focus`, `next_game`, `progress`, `share`. Mole Rush, Pair Flip, Slide Merge, Sudoku Sixes, Minesweeper, Snake also send `crash`. One Step Late also sends `closed`, `crash`, `focus`, `friend_seen`, `next_game`, `practice`, `progress`, `share`. None of these end the game; a host listening only for `start`/`gameover`/`win` can ignore the rest.
 
 The score, where a game reports one, is in `data` — not in the event name.
 

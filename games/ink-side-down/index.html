@@ -587,6 +587,14 @@
       }
     } catch { /* not embedded */ }
   };
+  // A throw nobody caught is a bug a player has just met, and until now only they knew.
+  // Said once per page: a frame that throws sixty times a second is one fact, not sixty.
+  let crashed = false;
+  window.addEventListener('error', () => {
+    if (crashed) return;
+    crashed = true;
+    emit('crash');
+  });
 
   // The board now on screen, for the portal's sensor: a page left from here was
   // left on this puzzle, even one begun earlier (`start` is sent once).
@@ -2173,6 +2181,9 @@
 
   let lastTime = 0, running = true;
   function frame(now) {
+    // Booked before anything that can throw: one bad frame must not stop every frame
+    // after it and leave the game frozen on its last picture (Pair Flip, 48ad915).
+    requestAnimationFrame(frame);
     const dt = Math.min(0.05, (now - lastTime) / 1000 || 0);
     lastTime = now;
     if (running) {
@@ -2190,7 +2201,6 @@
       }
       wasAnimating = live;
     }
-    requestAnimationFrame(frame);
   }
 
   // A turn-based game has no clock to stop, but a hidden tab should not keep

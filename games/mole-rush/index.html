@@ -134,6 +134,14 @@
       }
     } catch { /* not embedded */ }
   };
+  // A throw nobody caught is a bug a player has just met, and until now only they knew.
+  // Said once per page: a frame that throws sixty times a second is one fact, not sixty.
+  let crashed = false;
+  window.addEventListener('error', () => {
+    if (crashed) return;
+    crashed = true;
+    emit('crash');
+  });
 
   // ---- sound, synthesised ------------------------------------------------
   let audio = null, noiseBuf = null;
@@ -1318,6 +1326,9 @@
   // ---- loop ---------------------------------------------------------------
   let last = 0;
   function frame(now) {
+    // Booked before anything that can throw: one bad frame must not stop every frame
+    // after it and leave the game frozen on its last picture (Pair Flip, 48ad915).
+    requestAnimationFrame(frame);
     if (!last) last = now;
     // Clamped, but at a quarter of a second rather than a twentieth. The tight
     // clamp meant a frame slower than 20 fps advanced the round clock by 50 ms
@@ -1328,17 +1339,10 @@
     // fast-forwarded either way.
     const dt = Math.min(0.25, (now - last) / 1000);
     last = now;
-    // The next frame is scheduled in a finally: a single throw anywhere in
-    // update or draw would otherwise stop the loop for good, leaving the last
-    // frame on screen and the game looking frozen rather than broken.
-    try {
-      checkView();
-      if (!PICTURE) update(dt);       // the pose holds still: the loop only redraws it
-      draw();
-      if (PICTURE) window.__arkaiPosed = true;   // the generator waits for this before it photographs
-    } finally {
-      requestAnimationFrame(frame);
-    }
+    checkView();
+    if (!PICTURE) update(dt);       // the pose holds still: the loop only redraws it
+    draw();
+    if (PICTURE) window.__arkaiPosed = true;   // the generator waits for this before it photographs
   }
 
   reset();
