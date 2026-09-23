@@ -497,11 +497,13 @@
   };
   // A throw nobody caught is a bug a player has just met, and until now only they knew.
   // Said once per page: a frame that throws sixty times a second is one fact, not sixty.
+  // Only this page's own script counts (an extension's error is not the game breaking),
+  // and the line travels with it: this file ships byte for byte, so the line is exact.
   let crashed = false;
-  window.addEventListener('error', () => {
-    if (crashed) return;
+  window.addEventListener('error', (e) => {
+    if (crashed || !String(e.filename).startsWith(location.origin + location.pathname)) return;
     crashed = true;
-    emit('crash');
+    emit('crash', { line: e.lineno });
   });
   const reportFocus = () => emit('focus', { day: S.day, tier: S.tier + 1 });
 

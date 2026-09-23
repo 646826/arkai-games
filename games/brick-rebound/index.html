@@ -107,11 +107,13 @@
   };
   // A throw nobody caught is a bug a player has just met, and until now only they knew.
   // Said once per page: a frame that throws sixty times a second is one fact, not sixty.
+  // Only this page's own script counts (an extension's error is not the game breaking),
+  // and the line travels with it: this file ships byte for byte, so the line is exact.
   let crashed = false;
-  window.addEventListener('error', () => {
-    if (crashed) return;
+  window.addEventListener('error', (e) => {
+    if (crashed || !String(e.filename).startsWith(location.origin + location.pathname)) return;
     crashed = true;
-    emit('crash');
+    emit('crash', { line: e.lineno });
   });
 
   // ---- sound (generated, no assets) ----
@@ -884,11 +886,14 @@
     // Booked before anything that can throw: one bad frame must not stop every frame
     // after it and leave the game frozen on its last picture (Pair Flip, 48ad915).
     requestAnimationFrame(frame);
-    if (!manualClock) {
-      acc += Math.min(0.1, (now - last) / 1000);
-      while (acc >= STEP) { update(STEP); acc -= STEP; }
-    }
+    const elapsed = Math.min(0.1, (now - last) / 1000);
     last = now;
+    if (!manualClock) {
+      acc += elapsed;
+      // Time is taken off before the step runs: an update() that throws must not leave
+      // its time owing, or the frame after a run of throws replays seconds of physics.
+      while (acc >= STEP) { acc -= STEP; update(STEP); }
+    }
     canvas.classList.toggle('menu', S.mode !== 'playing' && S.mode !== 'serve');
     render();
   }
