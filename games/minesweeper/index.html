@@ -12,7 +12,7 @@
 </style>
 </head>
 <body>
-<canvas id="game" tabindex="0" aria-label="Minesweeper. Tap a tile to clear it, long-press or right-click to place a flag. Arrow keys move the cursor, Space clears, F flags."></canvas>
+<canvas id="game" tabindex="0" aria-label="Minesweeper. Every board can be cleared without guessing. Tap a tile to clear it, long-press or right-click to place a flag. Arrow keys move the cursor, Space clears, F flags."></canvas>
 <script>
 (() => {
   'use strict';
@@ -147,29 +147,179 @@
     emit('start', { game: 'minesweeper', level: level.key });
   }
 
-  // Mines are laid after the first tap, around it: a first click that loses the
-  // game is the one thing a player can neither read nor prevent.
-  function placeMines(safeX, safeY) {
-    const safe = new Set();
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        if (inside(safeX + dx, safeY + dy)) safe.add(idx(safeX + dx, safeY + dy));
+  // ---- minefield core begin ----
+  // No board here ever asks for a guess. After the first tap, mines are dealt
+  // again and again until a player who only ever makes sound deductions,
+  // starting from that tap, clears the whole field. The deductions are the ones
+  // players actually use: a number already satisfied frees its other neighbours,
+  // a number with exactly as many hidden neighbours as mines left flags them all,
+  // two overlapping numbers are read together (1-2-1 and its kin), and at the end
+  // the mine counter itself is a clue. A board those four rules cannot finish is
+  // thrown away, even when a cleverer argument would have cracked it.
+  const core = (() => {
+    function neighbourTable(cols, rows) {
+      const table = [];
+      for (let i = 0; i < cols * rows; i++) {
+        const x = i % cols, y = (i - x) / cols, list = [];
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (!dx && !dy) continue;
+            const nx = x + dx, ny = y + dy;
+            if (nx >= 0 && ny >= 0 && nx < cols && ny < rows) list.push(ny * cols + nx);
+          }
+        }
+        table.push(list);
       }
+      return table;
     }
-    const pool = [];
-    for (let i = 0; i < S.grid.length; i++) if (!safe.has(i)) pool.push(i);
-    // On a board too small for a 9-cell hole, protect the clicked tile alone
-    // rather than placing fewer mines than the counter promises.
-    let candidates = pool;
-    if (pool.length < S.mines) {
-      candidates = [];
-      for (let i = 0; i < S.grid.length; i++) if (i !== idx(safeX, safeY)) candidates.push(i);
+
+    // mine: one byte per tile. Returns true when logic alone, starting with a
+    // reveal of `start`, opens every safe tile.
+    function solvesByLogic(cols, rows, mine, start, near = neighbourTable(cols, rows)) {
+      const size = cols * rows;
+      const count = new Uint8Array(size);
+      let mines = 0;
+      for (let i = 0; i < size; i++) {
+        if (mine[i]) { mines++; continue; }
+        for (const j of near[i]) count[i] += mine[j];
+      }
+      if (mine[start]) return false;
+      const state = new Uint8Array(size);   // 0 hidden, 1 open, 2 known mine
+      const queued = new Uint8Array(size), queue = [];
+      const stamp = new Int32Array(size);
+      let open = 0, marked = 0, tick = 0;
+      const safeTotal = size - mines;
+
+      // A tile changed: each open number beside it has something new to say,
+      // and only those are read again.
+      const touch = (c) => {
+        for (const j of near[c]) if (state[j] === 1 && count[j] && !queued[j]) { queued[j] = 1; queue.push(j); }
+      };
+      function reveal(i) {
+        const stack = [i];
+        while (stack.length) {
+          const c = stack.pop();
+          if (state[c]) continue;
+          if (mine[c]) return false;          // unreachable while the rules are sound
+          state[c] = 1; open++;
+          if (count[c] === 0) { for (const j of near[c]) if (!state[j]) stack.push(j); }
+          else if (!queued[c]) { queued[c] = 1; queue.push(c); }
+          touch(c);
+        }
+        return true;
+      }
+      const mark = (i) => { if (!state[i]) { state[i] = 2; marked++; touch(i); } };
+
+      // A constraint: the hidden tiles around an open number, and how many of
+      // them are mines.
+      function constraint(i) {
+        const hidden = [];
+        let need = count[i];
+        for (const j of near[i]) {
+          if (state[j] === 0) hidden.push(j);
+          else if (state[j] === 2) need--;
+        }
+        return { hidden, need };
+      }
+
+      if (!reveal(start)) return false;
+      while (open < safeTotal) {
+        // 1. One number on its own.
+        while (queue.length) {
+          const i = queue.pop();
+          queued[i] = 0;
+          const { hidden, need } = constraint(i);
+          if (!hidden.length) continue;
+          if (need === 0) { for (const j of hidden) if (!reveal(j)) return false; }
+          else if (need === hidden.length) for (const j of hidden) mark(j);
+        }
+        if (open === safeTotal) break;
+
+        // 2. Two overlapping numbers read together. With `both` the shared
+        // hidden tiles, the mines among them are bounded from both sides; what
+        // is left for each number's private tiles may then be all or nothing.
+        const frontier = [], owners = [];
+        for (let i = 0; i < size; i++) {
+          if (state[i] !== 1 || count[i] === 0) continue;
+          const c = constraint(i);
+          if (!c.hidden.length) continue;
+          for (const j of c.hidden) (owners[j] || (owners[j] = [])).push(frontier.length);
+          frontier.push(c);
+        }
+        const partnered = new Int32Array(frontier.length).fill(-1);
+        const safe = [], sure = [];
+        for (let a = 0; a < frontier.length; a++) {
+          const A = frontier[a], partners = [];
+          for (const j of A.hidden) for (const b of owners[j]) if (b > a && partnered[b] !== a) { partnered[b] = a; partners.push(b); }
+          for (const b of partners) {
+            const B = frontier[b];
+            tick++;
+            for (const j of B.hidden) stamp[j] = tick;
+            const both = [], onlyA = [];
+            for (const j of A.hidden) (stamp[j] === tick ? both : onlyA).push(j);
+            tick++;
+            for (const j of both) stamp[j] = tick;
+            const onlyB = B.hidden.filter((j) => stamp[j] !== tick);
+            const most = Math.min(both.length, A.need, B.need);
+            const least = Math.max(0, A.need - onlyA.length, B.need - onlyB.length);
+            for (const [need, only] of [[A.need, onlyA], [B.need, onlyB]]) {
+              if (!only.length) continue;
+              if (need - least === 0) safe.push(...only);
+              else if (need - most === only.length) sure.push(...only);
+            }
+          }
+        }
+        for (const j of sure) mark(j);
+        for (const j of safe) if (!reveal(j)) return false;
+        if (safe.length || sure.length) continue;
+
+        // 3. The mine counter: every mine found, or every hidden tile a mine.
+        const left = mines - marked;
+        const hiddenAll = [];
+        for (let i = 0; i < size; i++) if (state[i] === 0) hiddenAll.push(i);
+        if (left === 0) { for (const j of hiddenAll) if (!reveal(j)) return false; continue; }
+        if (left === hiddenAll.length) { for (const j of hiddenAll) mark(j); continue; }
+
+        return false;                            // only a guess would go on from here
+      }
+      return true;
     }
-    for (let i = candidates.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+
+    // Deals `mines` mines around the tile (sx, sy) and its eight neighbours
+    // (only the tile itself on a board too small for the hole), redealing until
+    // solvesByLogic clears it. `random` is Math.random in the game and a seeded
+    // generator in the tests. After `tries` failed deals the last one stands,
+    // guessable, and says so: the measured odds of reaching it are in the test.
+    function layMines(cols, rows, mines, sx, sy, random, tries = 4000) {
+      const size = cols * rows, near = neighbourTable(cols, rows), start = sy * cols + sx;
+      const keep = new Set([start]);
+      for (const j of near[start]) keep.add(j);
+      let pool = [];
+      for (let i = 0; i < size; i++) if (!keep.has(i)) pool.push(i);
+      if (pool.length < mines) { pool = []; for (let i = 0; i < size; i++) if (i !== start) pool.push(i); }
+      const mine = new Uint8Array(size);
+      for (let deal = 1; deal <= tries; deal++) {
+        mine.fill(0);
+        for (let k = 0; k < mines && k < pool.length; k++) {   // partial Fisher-Yates
+          const r = k + Math.floor(random() * (pool.length - k));
+          [pool[k], pool[r]] = [pool[r], pool[k]];
+          mine[pool[k]] = 1;
+        }
+        if (solvesByLogic(cols, rows, mine, start, near)) return { mine, deals: deal, logical: true };
+      }
+      return { mine, deals: tries, logical: false };
     }
-    for (let i = 0; i < S.mines && i < candidates.length; i++) S.grid[candidates[i]].mine = true;
+
+    return { neighbourTable, solvesByLogic, layMines };
+  })();
+  // ---- minefield core end ----
+
+  // Mines are laid after the first tap, around it: a first click that loses the
+  // game is the one thing a player can neither read nor prevent — and neither is
+  // a board that later needs a coin flip, so the deal is one logic can finish.
+  function placeMines(safeX, safeY) {
+    const { mine } = core.layMines(S.cols, S.rows, S.mines, safeX, safeY, Math.random);
+    for (let i = 0; i < S.grid.length; i++) S.grid[i].mine = mine[i] === 1;
     numberCells();
   }
 
@@ -574,6 +724,7 @@
       hits.length = 0;
       drawOverlay('MINESWEEPER', [
         'Numbers count the mines they touch.',
+        'Every board can be cleared by logic — no guesses.',
         'Tap to clear · long-press or right-click to flag.',
         'Arrow keys move, Space clears, F flags, C chords.',
       ], '#38bdf8');
@@ -604,7 +755,7 @@
       hits.length = 0;
       drawOverlay('BOOM', [
         `${LEVELS[S.level].name} · ${clock(S.time)}`,
-        'The first tap is always safe — the rest are on you.',
+        'No guess was needed: the numbers held the answer.',
         '',
         S.overT > 0.6 ? 'Tap or press R to try again' : '',
       ], '#f87171');

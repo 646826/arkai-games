@@ -4,7 +4,7 @@ Every game from [arkai.win](https://arkai.win) — each one a **single self-cont
 file** you can open from your desktop with no build step, no server, no package
 manager and no network connection.
 
-There are 13 of them. Together they are 770 KB.
+There are 13 of them. Together they are 777 KB.
 
 | Game | Kind | Controls | Size | Play |
 | --- | --- | --- | ---: | --- |
@@ -19,7 +19,7 @@ There are 13 of them. Together they are 770 KB.
 | **Slide Merge** | Puzzle, Numbers | Keyboard, touch & swipe | 39 KB | [play](https://arkai.win/games/slide-merge/) |
 | **Sudoku Sixes** | Logic, Puzzle | Keyboard, touch & mouse | 53 KB | [play](https://arkai.win/games/sudoku-sixes/) |
 | **Brick Rebound** | Arcade, Classic | Mouse, touch & keyboard | 35 KB | [play](https://arkai.win/games/brick-rebound/) |
-| **Minesweeper** | Logic, Puzzle | Mouse, touch & keyboard | 29 KB | [play](https://arkai.win/games/minesweeper/) |
+| **Minesweeper** | Logic, Puzzle | Mouse, touch & keyboard | 36 KB | [play](https://arkai.win/games/minesweeper/) |
 | **Snake** | Arcade, Classic | Keyboard, touch & swipe | 24 KB | [play](https://arkai.win/games/snake/) |
 
 ## What "self-contained" means here

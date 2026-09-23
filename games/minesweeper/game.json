@@ -2,16 +2,16 @@
   "slug": "minesweeper",
   "title": "Minesweeper",
   "tagline": "Read the numbers, dodge the mines.",
-  "description": "Clear every safe tile on a hidden minefield using nothing but the numbers you uncover, flagging the mines as you pin them down. Three board sizes from a nine-wide warm-up to a thirteen-by-seventeen field with 48 mines, and your best time is kept for each.",
+  "description": "Clear every safe tile on a hidden minefield using nothing but the numbers you uncover, flagging the mines as you pin them down. Every board is dealt so that logic alone can clear it — never a coin flip at the end. Three board sizes from a nine-wide warm-up to a thirteen-by-seventeen field with 48 mines, and your best time is kept for each.",
   "categories": ["Logic", "Puzzle"],
   "controls": "Mouse, touch & keyboard",
   "instructions": [
     "Pick a size on the title screen, or tap anywhere to play the last one you used.",
-    "Tap a tile to clear it — the first tap is always safe. A number counts the mines touching that tile.",
+    "Tap a tile to clear it — the first tap is always safe, and no board ever needs a guess. A number counts the mines touching that tile.",
     "Flag a suspected mine with a long press, a right-click, or by turning on the Flag button; tap a cleared number whose flags all match to open the rest around it.",
     "Arrow keys move the cursor, Space clears, F flags, C chords, R restarts. Your best time per size is stored locally."
   ],
   "palette": ["#0b1020", "#38bdf8"],
   "added": "2026-09-15",
-  "updated": "2026-09-15"
+  "updated": "2026-09-23"
 }
