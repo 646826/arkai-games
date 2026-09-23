@@ -4,7 +4,7 @@ Every game from [arkai.win](https://arkai.win) — each one a **single self-cont
 file** you can open from your desktop with no build step, no server, no package
 manager and no network connection.
 
-There are 13 of them. Together they are 807 KB.
+There are 13 of them. Together they are 811 KB.
 
 | Game | Kind | Controls | Size | Play |
 | --- | --- | --- | ---: | --- |
@@ -15,8 +15,8 @@ There are 13 of them. Together they are 807 KB.
 | **Ink Side Down** | Puzzle, Daily | Keyboard, touch & mouse | 100 KB | [play](https://arkai.win/games/ink-side-down/) |
 | **Mole Rush** | Arcade, Family | Keyboard, touch & mouse | 56 KB | [play](https://arkai.win/games/mole-rush/) |
 | **One Step Late** | Puzzle, Daily | Keyboard, touch & mouse | 103 KB | [play](https://arkai.win/games/one-step-late/) |
-| **Pair Flip** | Cards, Family | Keyboard, touch & mouse | 50 KB | [play](https://arkai.win/games/pair-flip/) |
-| **Slide Merge** | Puzzle, Numbers | Keyboard, touch & swipe | 40 KB | [play](https://arkai.win/games/slide-merge/) |
+| **Pair Flip** | Cards, Family | Keyboard, touch & mouse | 51 KB | [play](https://arkai.win/games/pair-flip/) |
+| **Slide Merge** | Puzzle, Numbers | Keyboard, touch & swipe | 43 KB | [play](https://arkai.win/games/slide-merge/) |
 | **Sudoku Sixes** | Logic, Puzzle | Keyboard, touch & mouse | 54 KB | [play](https://arkai.win/games/sudoku-sixes/) |
 | **Brick Rebound** | Arcade, Classic | Mouse, touch & keyboard | 37 KB | [play](https://arkai.win/games/brick-rebound/) |
 | **Minesweeper** | Logic, Puzzle | Mouse, touch & keyboard | 39 KB | [play](https://arkai.win/games/minesweeper/) |

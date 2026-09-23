@@ -142,6 +142,7 @@
     clock: 0, shake: 0, flash: 0, overT: 0,
     parts: [], floats: [], dust: [],
     press: null, pressT: 0, confirmT: 0,
+    lively: 0, stir: 0,          // seconds of ambient motion left since the last input, and how much of it is showing (0–1)
   };
 
   // ---- sound (synthesised, no assets) ----
@@ -460,7 +461,18 @@
 
   // ---- update ----
   function update(dt) {
-    S.clock += dt;
+    // The room's drift is ambient motion, not a screensaver: it comes up over half
+    // a second after an input and settles over one, so a still board slows to a
+    // stop where it is instead of snapping back. S.clock is the ambient clock the
+    // glows and the dust read, and it advances only while S.stir is awake — and
+    // only behind the board in play. An overlay covers the room and the loop stops
+    // drawing under it (animating()), so a room that kept drifting there would sit
+    // stale on screen and jump at the next redraw under the same overlay.
+    S.lively = Math.max(0, S.lively - dt);
+    const want = S.lively > 0 ? 1 : 0;
+    S.stir = want > S.stir ? Math.min(want, S.stir + dt * 2) : Math.max(want, S.stir - dt);
+    const drift = S.mode === 'playing' ? S.stir : 0;
+    S.clock += dt * drift;
     S.animT += dt * 1000;
     S.pressT = Math.max(0, S.pressT - dt);
     S.confirmT = Math.max(0, S.confirmT - dt);
@@ -471,8 +483,8 @@
     if (S.bump) { S.bump.t += dt * 1000; if (S.bump.t >= BUMP_MS) S.bump = null; }
 
     for (const d of S.dust) {
-      d.y -= d.s * dt;
-      d.x += Math.sin(S.clock * 0.6 + d.p) * 6 * dt;
+      d.y -= d.s * dt * drift;
+      d.x += Math.sin(S.clock * 0.6 + d.p) * 6 * dt * drift;
       if (d.y < -6) { d.y = H + 6; d.x = Math.random() * W; }
     }
     for (let i = S.parts.length - 1; i >= 0; i--) {
@@ -494,10 +506,44 @@
     }
   }
 
+  // ---- draw scheduling -------------------------------------------------------
+  // A board between moves, the title, the pause overlay and the finished game are
+  // still pictures, and they were repainted sixty times a second anyway — the whole
+  // canvas for identical pixels. Sudoku Sixes' rule, kept here: every event handler
+  // invalidates first, and the loop owns what no event announces — a running
+  // animation or the ambient motion settling. `wasAnimating` buys one more frame
+  // after an animation ends. A missed invalidate is a frozen game (see the test).
+  const LIVELY = 4;              // seconds of ambient motion left after the last input
+  let dirty = true, wasAnimating = false;
+  const invalidate = () => { dirty = true; };
+  const wake = () => { dirty = true; S.lively = LIVELY; };
+
+  // A button label and the highlight a held button carries change on their own
+  // timers, but they are still pictures: the loop redraws once when the boolean
+  // flips, like Minesweeper watching the clock's second, not once per frame.
+  let shownConfirm = false, shownHeld = false;
+
+  // Everything update() moves on screen, and nothing it does not: a missed field
+  // here is a frozen animation (the test pins this against update() itself).
+  const animating = () => {
+    if (S.animT < SLIDE_MS) return true;                       // the slide is in flight
+    const after = S.animT - SLIDE_MS;
+    if (S.pops.length && after < POP_MS) return true;          // merged tiles overshoot
+    if (S.spawn && after < GROW_MS) return true;               // the new tile grows in
+    if (S.bump || S.shake > 0 || S.flash > 0) return true;
+    if (S.parts.length > 0 || S.floats.length > 0) return true;
+    if (S.mode === 'won' && S.overT <= 0.5) return true;       // the win prompt lands at 0.5 s
+    if (S.mode === 'gameover' && S.overT <= 0.7) return true;  // the replay prompt lands at 0.7 s
+    // The ambient motion only runs where the player sees it: an overlay hides the
+    // room, so a screen under one must not keep the loop drawing.
+    return !PICTURE && S.mode === 'playing' && (S.stir > 0 || S.lively > 0);
+  };
+
   // ---- view: one logical board, letterboxed into any frame ----
   const view = { scale: 1, ox: 0, oy: 0, dpr: 1, cw: 0, ch: 0 };
 
   function resize() {
+    invalidate();               // assigning canvas.width below wipes the picture
     // Capped at 2: a 3x phone would render nine times the pixels for no visible
     // gain. Below the device ratio the board is measurably blurry in the hand.
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -886,6 +932,7 @@
   }
 
   window.addEventListener('keydown', (e) => {
+    wake();
     const dir = KEY_DIRS[e.code];
     if (dir) {
       e.preventDefault();
@@ -910,6 +957,7 @@
   let swipe = null;
 
   canvas.addEventListener('pointerdown', (e) => {
+    wake();
     canvas.focus();
     // While an overlay is up it owns every pixel, buttons included. They are
     // drawn under an 86% scrim and look disabled, and the overlay's own words
@@ -941,6 +989,7 @@
     // One swipe is one move. Re-anchoring here would turn a long flick into a
     // stream of moves, which on a board this small is a ruined run.
     swipe = null;
+    wake();   // the swipe resolved into a move: answer it before it changes the picture
     if (Math.abs(dx) > Math.abs(dy)) requestMove(dx > 0 ? 'right' : 'left');
     else requestMove(dy > 0 ? 'down' : 'up');
   });
@@ -951,13 +1000,14 @@
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
   document.addEventListener('visibilitychange', () => {
+    invalidate();
     if (document.hidden && S.mode === 'playing' && !PICTURE) S.mode = 'paused';   // no PAUSED over the picture
   });
 
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', resize);
 
-  // ---- loop ----
+  // ---- loop ------------------------------------------------------------------
   let last = 0;
   function frame(now) {
     // Booked before anything that can throw: one bad frame must not stop every frame
@@ -969,9 +1019,22 @@
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     if (view.cw !== (canvas.clientWidth || view.cw) || view.ch !== (canvas.clientHeight || view.ch)) resize();
-    if (!PICTURE) update(dt);                     // the pose is drawn every frame and never advances
-    draw();
-    if (PICTURE) window.__arkaiPosed = true;      // the posed frame is on the canvas; the generator waits for this
+    if (!PICTURE) update(dt);                     // the pose is a still: redrawn, never advanced
+    // A timer whose end flips a label or a highlight is not an animation: one
+    // redraw when it changes, not one per frame while it runs.
+    const confirming = S.confirmT > 0;
+    if (confirming !== shownConfirm) { shownConfirm = confirming; dirty = true; }
+    const held = S.press !== null;
+    if (held !== shownHeld) { shownHeld = held; dirty = true; }
+    const live = animating();
+    // `wasAnimating` buys one more frame after the last one ends, so the screen
+    // never keeps a half-finished animation as its final picture.
+    if (dirty || live || wasAnimating) {
+      dirty = false;
+      draw();
+      if (PICTURE) window.__arkaiPosed = true;    // the posed frame is on the canvas; the generator waits for this
+    }
+    wasAnimating = live;
   }
 
   // Dust is scattered by Math.random, so the picture goes without it.

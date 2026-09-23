@@ -561,10 +561,13 @@
   // The glow on found pairs and the focus ring's breath are ambient motion: they
   // answer the player instead of running as a screensaver. `S.stir` is 1 while an
   // input is fresh and eases to 0 a few seconds after the last one, leaving the glow
-  // at a steady middle level and the ring steady and clearly visible. The
-  // photographer's pose keeps full amplitude: S.clock is pinned at 0.6 to hold the
-  // glow near its peak, and its card has to stay byte-identical.
-  const wave = (speed) => (PICTURE ? 1 : S.stir) * Math.sin(S.clock * speed);
+  // at a steady middle level and the ring steady and clearly visible. The motion
+  // belongs to the board in play: on the title there is no board to stir, and on the
+  // pause and won screens the board sits under a still overlay, so the amplitude is
+  // zero there and a fresh draw is the whole picture. The photographer's pose keeps
+  // full amplitude: S.clock is pinned at 0.6 to hold the glow near its peak, and
+  // its card has to stay byte-identical.
+  const wave = (speed) => (PICTURE ? 1 : S.mode === 'playing' ? S.stir : 0) * Math.sin(S.clock * speed);
 
   // ---- drawing ---------------------------------------------------------------
   const view = { scale: 1, ox: 0, oy: 0, dpr: 1, cw: 0, ch: 0 };
@@ -681,12 +684,14 @@
   }
 
   // ---- the sprite cache ------------------------------------------------------
-  // Every card is one of fourteen pictures: one back, and a plain and a matched
-  // face per symbol in play. Painted live, a full board put 24 blurred shadows,
-  // 24 clipped hatch fills and 48 gradients into every frame, and a 1800 × 1350
-  // desktop surface ran at half rate — measurably, against snake in the same
-  // browser. Baked once per layout it is 24 drawImage calls, and the picture on
-  // screen is the same one.
+  // The cache holds the back plus a plain and a lit face for every symbol dealt at
+  // this size: at most twelve symbols, so twenty-five canvases. The faces follow
+  // the deals — a symbol is baked the first time it turns up at this size and reused
+  // after that, because a new game on the same board brings symbols the previous
+  // deal never had. Painted live, a full board put 24 blurred shadows, 24 clipped
+  // hatch fills and 48 gradients into every frame, and a 1800 × 1350 desktop surface
+  // ran at half rate — measurably, against snake in the same browser. Baked once per
+  // symbol it is 24 drawImage calls, and the picture on screen is the same one.
   const SPRITE_PAD = 24;                 // logical room for the baked shadow and glow
   const sprites = { key: '', q: 1, back: null, faces: new Map() };
 
@@ -1184,14 +1189,18 @@
   // here is a frozen animation (the test pins this against update() itself).
   const animating = () => {
     if (S.shake > 0 || S.parts.length > 0 || S.floats.length > 0) return true;
-    if (S.hold > 0 || S.guardT > 0) return true;              // a wrong pair waiting to turn back, or a guard still on
-    if (S.sel.length === 2) return true;                      // two cards face up: the judgement is pending
     if (S.mode === 'won' && S.overT <= 0.6) return true;      // the "play again" line lands at 0.6 s
-    for (const card of S.cards) {
-      if (card.dealT < DEAL_DUR_S || card.flipT >= 0 || card.shakeT > 0) return true;
-      if (card.matched && card.matchT < MATCH_POP_S) return true;
+    // Only the modes update() advances the cards in: a pause freezes the board, so a
+    // card caught mid-flip, a pending pair or a hold under the overlay must not keep
+    // the loop running. `S.hold` and `S.guardT` are written but never drawn, and
+    // `S.sel.length === 2` is covered by `flipT` until judge() runs inside update().
+    if (S.mode === 'playing' || S.mode === 'won') {
+      for (const card of S.cards) {
+        if (card.dealT < DEAL_DUR_S || card.flipT >= 0 || card.shakeT > 0) return true;
+        if (card.matched && card.matchT < MATCH_POP_S) return true;
+      }
     }
-    return !PICTURE && (S.stir > 0 || S.lively > 0);          // the ambient motion is still coming to rest
+    return !PICTURE && S.mode === 'playing' && (S.stir > 0 || S.lively > 0);   // the ambient motion is still coming to rest
   };
 
   let last = 0;
