@@ -521,7 +521,7 @@
     help: false, hintLevel: 0,
     streak: 0, bestStreak: 0, lastFull: 0, freezeUsedDay: 0, storageWarned: false,
     muted: storage.get(STORE_MUTE) === '1',
-    clock: 0, dayCheck: 5, flash: 0, shake: 0, toast: null,
+    dayCheck: 5, flash: 0, shake: 0, toast: null,
     hidden: false,
   };
   const started = new Set();
@@ -592,6 +592,7 @@
   // ---- canvas letterbox ----
   let view = { dpr: 1, cssW: W, cssH: H, scale: 1, ox: 0, oy: 0 };
   function resize() {
+    invalidate(); // a canvas given a new size is blank until it is drawn again
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const cssW = Math.max(1, canvas.clientWidth), cssH = Math.max(1, canvas.clientHeight);
     canvas.width = Math.round(cssW * dpr);
@@ -826,10 +827,17 @@
 
   function checkDay() {
     if (PICTURE || dayNumber(new Date()) === S.today) return;
+    // A new day changes the screen with no event to say so, but only once: mid-puzzle
+    // S.today stays behind on purpose, and this check comes round every five seconds.
     if (S.mode === 'play' && S.day === S.today) {
-      if (!S.newDay) { S.newDay = true; toast('A new set of networks is out. Press Esc.'); }
+      if (!S.newDay) {
+        invalidate();
+        S.newDay = true;
+        toast('A new set of networks is out. Press Esc.');
+      }
       return;
     }
+    invalidate(); // followToday() catches S.today up, so this runs once a day too
     followToday();
   }
 
@@ -1038,10 +1046,36 @@
     sfx.click();
     const shared = () => emit('share', { day: S.day, score: solvedCount() });
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(message).then(() => { shared(); toast('Copied! Paste it anywhere.'); }, () => openCopyBox(message));
+      // The promise resolves outside every handler: the toast and the copy box
+      // both land with no event to draw them, so each callback invalidates first.
+      navigator.clipboard.writeText(message).then(
+        () => { invalidate(); shared(); toast('Copied! Paste it anywhere.'); },
+        () => { invalidate(); openCopyBox(message); },
+      );
     } else openCopyBox(message);
   }
-  copyClose.addEventListener('click', () => { copyBox.classList.remove('open'); canvas.focus(); });
+  // The dialog is a page element over the canvas, but closing it hands focus back
+  // to the canvas: draw the frame so the picture is never left stale.
+  copyClose.addEventListener('click', () => {
+    invalidate();
+    copyBox.classList.remove('open');
+    canvas.focus();
+  });
+
+  // ---- update ----
+  // What advances between frames: the flash of a solve, the shake of a wrong
+  // check and the age of the toast. The drawing only reads these, so on a still
+  // screen nothing moves and the loop can stop; a hidden tab or the photographer's
+  // pose stands still, exactly as the old frame() passed a zero dt to drawEffects().
+  function update(dt) {
+    if (PICTURE || S.hidden) return;
+    if (S.flash > 0) S.flash = Math.max(0, S.flash - dt * 1.5);
+    if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 20);
+    if (S.toast) {
+      S.toast.t += dt;
+      if (S.toast.t >= (S.toast.duration ?? 2.6)) S.toast = null;
+    }
+  }
 
   // ---- rendering ----
   let hitRegions = [];
@@ -1316,20 +1350,13 @@
     addHit(0, 0, W, H, 'closehelp');
   }
 
-  function drawEffects(dt) {
-    if (!S.hidden) {
-      if (S.flash > 0) S.flash = Math.max(0, S.flash - dt * 1.5);
-      if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 20);
-    }
+  function drawEffects() {
     if (S.flash > 0) { ctx.fillStyle = `rgba(154,230,76,${S.flash * 0.3})`; ctx.fillRect(0, 0, W, H); }
     if (S.toast) {
-      S.toast.t += dt;
-      if (S.toast.t < (S.toast.duration ?? 2.6)) {
-        ctx.fillStyle = 'rgba(10,19,10,0.92)';
-        roundRect(40, H - 74, W - 80, 46, 12); ctx.fill();
-        ctx.fillStyle = C.text; ctx.font = `600 14px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        wrapText(S.toast.text, W / 2, H - 51, W - 110, 16);
-      } else S.toast = null;
+      ctx.fillStyle = 'rgba(10,19,10,0.92)';
+      roundRect(40, H - 74, W - 80, 46, 12); ctx.fill();
+      ctx.fillStyle = C.text; ctx.font = `600 14px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      wrapText(S.toast.text, W / 2, H - 51, W - 110, 16);
     }
   }
 
@@ -1339,14 +1366,14 @@
     if (onward()) { onwardLink.href = ONWARD.path; onwardLink.textContent = `Play ${ONWARD.title}, another daily puzzle`; }
   }
 
-  function render(dt) {
+  function render() {
     hitRegions = [];
     ctx.setTransform(view.dpr * view.scale, 0, 0, view.dpr * view.scale, view.dpr * view.ox, view.dpr * view.oy);
     ctx.clearRect(-view.ox / view.scale, -view.oy / view.scale, view.cssW / view.scale, view.cssH / view.scale);
     if (S.mode === 'title') drawTitle();
     else drawPlay();
     if (S.help) drawHelp();
-    drawEffects(dt);
+    drawEffects();
     syncOnward();
   }
 
@@ -1387,12 +1414,14 @@
   }
 
   canvas.addEventListener('pointerdown', (e) => {
+    invalidate();
     canvas.focus();
     const { x, y } = toLogical(e.clientX, e.clientY);
     handleAction(hitTest(x, y));
   });
 
   window.addEventListener('keydown', (e) => {
+    invalidate();
     const { station, digit, letter } = readKey(e.code, e.key);
     if (station >= 0) { e.preventDefault(); if (S.mode === 'play') selectStation(station); return; }
     if (digit >= 0 && digit < TIERS.length) {
@@ -1433,6 +1462,7 @@
   });
 
   controls.addEventListener('click', (e) => {
+    invalidate();
     const btn = e.target.closest('button,a');
     if (!btn) return;
     const act = btn.dataset.act;
@@ -1443,16 +1473,41 @@
   });
 
   window.addEventListener('resize', resize);
+  // A tab shown again is drawn again; a hidden one advances nothing (update()).
   document.addEventListener('visibilitychange', () => {
+    invalidate();
     S.hidden = document.hidden;
     if (S.hidden && audio) audio.suspend().catch(() => {});
   });
 
+  // Another tab of this game saved something: take it in, so neither tab
+  // overwrites the other's solved puzzles.
   window.addEventListener('storage', (event) => {
+    invalidate();
     if (event.key === STORE && S.runs.length) absorb(readStore());
   });
 
   // ---- run ----
+  // A still screen — the title, a board nobody has touched, the help overlay —
+  // used to be redrawn sixty times a second. Now it is drawn when something
+  // changed, the rule the other dailies follow: every listener and timer that can
+  // change the picture calls invalidate() before anything else can return, and the
+  // loop owns what no event announces — a running animation (the flash of a solve,
+  // the shake of a wrong check, the toast) plus one frame after it ends. A missed
+  // invalidate is a frozen game.
+  //
+  // Trunk Line has no ambient motion: the old clock field was advanced but read by
+  // nothing, and is gone. Every write of state now lives in update(dt), which runs
+  // every frame and stands still while the tab is hidden or the picture is posed.
+  let dirty = true, wasAnimating = false;
+  const invalidate = () => { dirty = true; };
+  // Only what moves on screen: the flash, the shake, the toast while it is up.
+  // A photograph holds still.
+  const animating = () => {
+    if (PICTURE) return false;
+    return S.flash > 0 || S.shake > 0 || !!S.toast;
+  };
+
   let lastT = 0;
   function frame(now) {
     // Booked before anything that can throw: one bad frame must not stop every frame
@@ -1460,15 +1515,25 @@
     requestAnimationFrame(frame);
     const dt = Math.min(0.05, lastT ? (now - lastT) / 1000 : 0);
     lastT = now;
-    S.clock += dt;
+    update(dt);
     if (!PICTURE) {
       S.dayCheck -= dt;
       if (S.dayCheck <= 0) { S.dayCheck = 5; checkDay(); }
     }
-    render(S.hidden ? 0 : dt);
-    if (PICTURE) window.__arkaiPosed = true;
+    const live = animating();
+    // `wasAnimating` buys one more frame after the last one ends, so the screen
+    // never keeps a half-finished animation as its final picture.
+    if (dirty || live || wasAnimating) {
+      dirty = false;
+      render();
+      // The generator waits for this before it photographs (POSED_FLAG in picture-flag.mjs).
+      if (PICTURE) window.__arkaiPosed = true;
+    }
+    wasAnimating = live;
   }
 
+  // A canvas whose backing store the browser dropped comes back blank.
+  canvas.addEventListener('contextrestored', invalidate);
   resize();
   if (PICTURE) posePicture(); else loadDay(dayFromDateParam(DATE_RAW) ?? dayNumber(new Date()));
   requestAnimationFrame(frame);
