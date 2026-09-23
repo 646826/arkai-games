@@ -616,12 +616,18 @@
     S.freezeUsedDay = cleanFreezeUsedDay(Number(data.freezeUsedDay) || 0);
   }
 
+  // Bumped by every listen and by every switch of puzzle: a listen's timers act only
+  // while it is still the latest one (doListen).
+  let listenSeq = 0;
+  const stopListening = () => { listenSeq++; S.listening = false; S.listenStep = -1; };
+
   function selectTier(tier) {
     S.tier = tier;
     S.practice = false; S.practiceRun = null;
     S.help = false;
     S.flash = 0; S.shake = 0;
     S.heading = 0;
+    stopListening();
     S.marks = new Set(run().marks);
   }
 
@@ -771,6 +777,9 @@
     r.moves++;
     if (!S.practice) { emit('progress', { moves: run().moves, tier: S.tier + 1, day: S.day, archive: archive() }); writeStore(); }
     S.listening = true; S.listenStep = 0;
+    // Each listen owns its timers: a puzzle switched mid-listen (tier, practice) bumps
+    // listenSeq, and the old listen's timers then step nothing on the new puzzle.
+    const seq = ++listenSeq;
     const t0 = audio && audio.state === 'running' ? audio.currentTime + 0.05 : 0;
     const GAP = 0.85;
     p.bearings.forEach((bearing, i) => {
@@ -779,9 +788,9 @@
       if (t0) spatialTone(pan, t0 + i * GAP, 420 + i * 70, 0.5);
       // A timer that changes the picture is an event, not an animation: it draws
       // the new highlight and then the loop stops again.
-      setTimeout(() => { invalidate(); S.listenStep = i; }, i * GAP * 1000);
+      setTimeout(() => { invalidate(); if (seq === listenSeq) S.listenStep = i; }, i * GAP * 1000);
     });
-    setTimeout(() => { invalidate(); S.listening = false; S.listenStep = -1; }, p.bearings.length * GAP * 1000 + 200);
+    setTimeout(() => { invalidate(); if (seq === listenSeq) { S.listening = false; S.listenStep = -1; } }, p.bearings.length * GAP * 1000 + 200);
     const cand = candidateSets(p, r.listens);
     const readouts = cand.map((set, i) => `source ${i + 1}: ${[...set].map((s) => POINTS[s]).join(' or ')}`).join('. ');
     announce(`Listened from ${POINTS[heading]}. ${readouts}.`);
@@ -862,6 +871,7 @@
     S.practice = true;
     S.practiceRun = { listens: [], inputs: '', moves: 0, solved: false, solvedMoves: 0, par: puzzle().par };
     S.marks = new Set();
+    stopListening();
     S.heading = 0;
     S.help = false; S.toast = null;
     S.mode = 'play';
@@ -1185,11 +1195,15 @@
     ctx.fillStyle = C.accent;
     ctx.beginPath(); ctx.arc(RING_CX, RING_CY, 5, 0, Math.PI * 2); ctx.fill();
 
-    if (S.listening && S.listenStep >= 0) {
-      const color = C.src[S.listenStep % C.src.length];
-      const pt = stopPoint(p.bearings[S.listenStep], RING_R + 20);
-      ctx.strokeStyle = color; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.arc(pt.x, pt.y, 10, 0, Math.PI * 2); ctx.stroke();
+    // The source sounding now is ringed where the listens so far place it — its
+    // candidate stops, the same ones the readout names — never at its true bearing:
+    // the picture must not tell more than the ears (it did until session #303).
+    if (S.listening && S.listenStep >= 0 && cand[S.listenStep]) {
+      ctx.strokeStyle = C.src[S.listenStep % C.src.length]; ctx.lineWidth = 3;
+      for (const s of cand[S.listenStep]) {
+        const pt = stopPoint(s, RING_R + 20);
+        ctx.beginPath(); ctx.arc(pt.x, pt.y, 10, 0, Math.PI * 2); ctx.stroke();
+      }
     }
   }
 
