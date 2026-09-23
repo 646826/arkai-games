@@ -67,6 +67,15 @@
   // layout, recomputed whenever the level changes
   const L = { cell: 40, x: 0, y: 0, w: 0, h: 0 };
 
+  // A minefield between taps is a still picture, and so is the title. Redrawn sixty
+  // times a second it cost a phone battery for identical pixels, and Lighthouse
+  // measured the page's main thread busy for seconds on a screen nobody touched.
+  // Sudoku Sixes' rule, kept here: every event handler invalidates first thing, and
+  // the loop owns what no event announces — a running animation and the clock
+  // reaching a new second. A missed invalidate is a frozen game (see the test).
+  let dirty = true, wasAnimating = false, shownSecond = -1;
+  const invalidate = () => { dirty = true; };
+
   const emit = (event, data) => {
     if (PICTURE) return;    // a photograph is not a game the portal should count
     try {
@@ -486,6 +495,7 @@
   const view = { scale: 1, ox: 0, oy: 0, dpr: 1, cw: 0, ch: 0 };
 
   function resize() {
+    invalidate();           // assigning canvas.width below wipes the picture
     const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
     const cw = window.innerWidth, ch = window.innerHeight;
     view.dpr = dpr; view.cw = cw; view.ch = ch;
@@ -794,6 +804,7 @@
   let longTimer = 0;
 
   canvas.addEventListener('pointerdown', (e) => {
+    invalidate();
     canvas.focus();
     ensureAudio();
     if (audio && audio.state === 'suspended') audio.resume().catch(() => {});
@@ -817,6 +828,7 @@
     }
     if (S.mode === 'playing') {
       longTimer = window.setTimeout(() => {
+        invalidate();
         if (!press || press.done) return;
         const cell = cellAt(press.lx, press.ly);
         // cellAt() only resolves coordinates; the revealed flag lives on the
@@ -834,6 +846,7 @@
   });
 
   canvas.addEventListener('pointermove', (e) => {
+    invalidate();
     if (!press || e.pointerId !== press.id) return;
     if (Math.abs(e.clientX - press.x) > DRAG_SLOP || Math.abs(e.clientY - press.y) > DRAG_SLOP) {
       window.clearTimeout(longTimer);
@@ -842,6 +855,7 @@
   });
 
   canvas.addEventListener('pointerup', (e) => {
+    invalidate();
     if (!press || e.pointerId !== press.id) return;
     window.clearTimeout(longTimer);
     const wasHandled = press.done;
@@ -876,6 +890,7 @@
   });
 
   canvas.addEventListener('pointercancel', (e) => {
+    invalidate();
     if (press && e.pointerId !== press.id) return;
     window.clearTimeout(longTimer);
     press = null;
@@ -883,6 +898,7 @@
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
   window.addEventListener('keydown', (e) => {
+    invalidate();
     const move = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[e.code];
     if (move) {
       e.preventDefault();
@@ -928,13 +944,29 @@
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', resize);
 
+  const animating = () => {
+    if (S.shake > 0 || S.parts.length > 0) return true;
+    if ((S.mode === 'won' || S.mode === 'lost') && S.overT < 0.8) return true;   // "tap to play again" lands at 0.6
+    for (const cell of S.grid) if (cell.revealed && cell.t < 1) return true;
+    return false;
+  };
+
   let last = 0;
   function frame(now) {
     if (!last) last = now;
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     if (!PICTURE) update(dt);   // a pose stands still
-    draw();
+    const second = Math.floor(S.time);
+    if (second !== shownSecond) { shownSecond = second; dirty = true; }
+    const live = animating();
+    // `wasAnimating` buys one more frame after the last one ends, so the screen
+    // never keeps a half-finished animation as its final picture.
+    if (dirty || live || wasAnimating) {
+      dirty = false;
+      draw();
+    }
+    wasAnimating = live;
     requestAnimationFrame(frame);
   }
 
