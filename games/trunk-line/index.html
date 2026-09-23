@@ -24,7 +24,7 @@
 </style>
 </head>
 <body>
-<canvas id="game" tabindex="0" role="application" aria-label="Trunk Line, a daily network deduction puzzle. Five stations are connected by a hidden wiring tree. Ping any two stations to learn only how many hops separate them, never the path. Mark the four true lines, then check. Letters Q, W, E, D and F select stations A through E; arrow keys move a cursor between stations and Enter selects it. M switches between ping and mark, K checks, X clears your marks, I shows a hint, R replays a solved puzzle for practice, L describes the network, H shows the rules. Comma and period open the previous or next day. Press Tab for buttons."></canvas>
+<canvas id="game" tabindex="0" role="application" aria-label="Trunk Line, a daily network deduction puzzle. Five stations are connected by a hidden wiring tree. Ping any two stations to learn only how many hops separate them, never the path. A ping that answers 1 hop has found a direct line and marks it for you. Mark the four true lines, then check. Letters Q, W, E, D and F select stations A through E; arrow keys move a cursor between stations and Enter selects it. M switches between ping and mark, K checks, X clears your marks, I shows a hint, R replays a solved puzzle for practice, L describes the network, H shows the rules. Comma and period open the previous or next day. Press Tab for buttons."></canvas>
 <div id="status" class="sr" aria-live="polite"></div>
 <div id="controls" class="sr" role="group" aria-label="Game controls">
   <button type="button" data-act="station0">Select station A</button>
@@ -661,7 +661,9 @@
     const pings = map.size ? [...map.entries()].map(([idx, d]) => `${STATIONS[PAIRS[idx][0]]}-${STATIONS[PAIRS[idx][1]]}: ${d}`).join(', ') : 'none yet';
     const marks = S.marks.size ? [...S.marks].map((idx) => `${STATIONS[PAIRS[idx][0]]}-${STATIONS[PAIRS[idx][1]]}`).join(', ') : 'none';
     const sel = S.selected === null ? 'none' : STATIONS[S.selected];
-    return `${S.tapMode} mode. Selected: ${sel}. ${r.pings.length} pings spent, par ${p.par}. Pings: ${pings}. Marks: ${marks}.`;
+    // The same next step the line over the board shows, for anyone who cannot see it.
+    const coach = S.mode === 'play' ? coachLines() : null;
+    return `${S.tapMode} mode. Selected: ${sel}. ${r.pings.length} pings spent, par ${p.par}. Pings: ${pings}. Marks: ${marks}.${coach ? ` ${coach.join(' ')}` : ''}`;
   }
 
   // Level 1 is the same every day, on purpose: it is solveTree's own first
@@ -900,17 +902,38 @@
     announce(S.tapMode === 'ping' ? 'Ping mode.' : 'Mark mode.');
   }
 
+  // A ping proves exactly one thing outright: 1 hop is a direct line, more is
+  // not. The game acts on that proof itself — marks the line, or takes back a mark
+  // the answer rules out — and says so. Players met the board without it: none of
+  // the first sixteen real starts (2026-09-21…23) found how pings become marks.
   function doPing(a, b) {
     const p = puzzle(), r = run();
     const idx = pairIndexOf(a, b);
     const dist = p.dist[a][b];
-    r.pings.push(idx);
-    r.inputs = r.inputs ? `${r.inputs}.${idx}` : String(idx);
-    r.moves++;
+    const hops = `${dist} hop${dist === 1 ? '' : 's'}`;
+    // Asking again tells nothing new, so it costs nothing: the answer is repeated.
+    const again = r.pings.includes(idx);
+    if (!again) {
+      r.pings.push(idx);
+      r.inputs = r.inputs ? `${r.inputs}.${idx}` : String(idx);
+      r.moves++;
+    }
+    let note;
+    if (dist === 1) {
+      if (S.marks.has(idx)) note = 'a direct line, as you marked';
+      else if (S.marks.size < N - 1) { S.marks.add(idx); note = 'a direct line, marked for you'; }
+      else note = 'a direct line. Clear a wrong mark to add it';
+    } else if (S.marks.has(idx)) {
+      S.marks.delete(idx);
+      note = 'not a direct line, so its mark is gone';
+    } else note = 'not a direct line';
+    r.marks = new Set(S.marks);
+    // A repeat reports the same count: to the portal it is still a move on this puzzle.
     if (!S.practice) { emit('progress', { moves: run().moves, tier: S.tier + 1, day: S.day, archive: archive() }); writeStore(); }
     ensureAudio();
     sfx.ping(dist);
-    toast(`${STATIONS[a]}–${STATIONS[b]}: ${dist} hop${dist === 1 ? '' : 's'}.`, `Pinged ${STATIONS[a]} and ${STATIONS[b]}. ${dist} hop${dist === 1 ? '' : 's'} apart.`);
+    const said = again ? `${note}. Pinged already, no charge` : note;
+    toast(`${STATIONS[a]}–${STATIONS[b]}: ${hops} — ${said}.`, `Pinged ${STATIONS[a]} and ${STATIONS[b]}. ${hops} apart: ${said}.`, 3.2);
   }
 
   function doMark(a, b) {
@@ -920,6 +943,10 @@
       sfx.unmark();
       announce(`Unmarked ${STATIONS[a]}–${STATIONS[b]}.`);
     } else {
+      // A pair already pinged at 2 hops or more is proven not to be a line: marking
+      // it could only buy a wrong check.
+      const dist = puzzle().dist[a][b];
+      if (dist > 1 && run().pings.includes(idx)) { toast(`${STATIONS[a]}–${STATIONS[b]} pinged ${dist} hops apart — not a direct line.`); sfx.bump(); return; }
       if (S.marks.size >= N - 1) { toast(`Mark up to ${N - 1} lines. Clear one first.`); sfx.bump(); return; }
       S.marks.add(idx);
       sfx.mark();
@@ -1108,6 +1135,63 @@
     if (enabled) addHit(x, y, w, h, action);
   }
 
+  // Both modes in view, the live one lit. The single button this replaces showed
+  // the current mode as its label, so "Ping" read as an action — and pressing it
+  // switched to marking.
+  function modeSwitch(x, y, w, h) {
+    const enabled = !locked(), half = w / 2;
+    ctx.fillStyle = C.card; roundRect(x, y, w, h, 10); ctx.fill();
+    ctx.fillStyle = enabled ? C.accent : C.accentDim;
+    roundRect(S.tapMode === 'ping' ? x : x + half, y, half, h, 10); ctx.fill();
+    ctx.strokeStyle = C.accentDim; ctx.lineWidth = 1; roundRect(x, y, w, h, 10); ctx.stroke();
+    ctx.font = `700 15px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ['ping', 'mark'].forEach((m, i) => {
+      ctx.fillStyle = !enabled ? C.muted : S.tapMode === m ? '#0e1c06' : C.text;
+      ctx.fillText(m === 'ping' ? 'Ping' : 'Mark', x + half * i + half / 2, y + h / 2 + 1);
+      if (enabled) addHit(x + half * i, y, half, h, `mode${m}`);
+    });
+  }
+
+  // What the pings have proved about the marks: how many of them a 1-hop ping
+  // confirmed, a proven line still left unmarked, and a mark a ping has already
+  // ruled out — only a save from before 2026-09-23 can hold one (-1: none).
+  function proof() {
+    let confirmed = 0, unmarked = -1, refuted = -1;
+    for (const [idx, dist] of pingedMap(puzzle(), run().pings)) {
+      if (dist !== 1) { if (S.marks.has(idx) && refuted < 0) refuted = idx; continue; }
+      if (S.marks.has(idx)) confirmed++;
+      else if (unmarked < 0) unmarked = idx;
+    }
+    return { confirmed, unmarked, refuted };
+  }
+  const pairName = (idx) => `${STATIONS[PAIRS[idx][0]]}–${STATIONS[PAIRS[idx][1]]}`;
+
+  // The line over the board says what to do next, in the order a first game needs
+  // it: the goal, how a ping reads, when to press Check. Reads state, writes none.
+  function coachLines() {
+    if (locked()) return null; // the solved line under the board speaks for itself
+    const sel = S.selected === null ? '' : STATIONS[S.selected];
+    if (sel && S.tapMode === 'ping') return [`Now tap another station to ping it with ${sel}.`, 'Tap the same station again to cancel.'];
+    if (sel && S.marks.size === N - 1) return [`Now tap a station to unmark its line to ${sel}.`, 'All four marks are used: free one to move it.'];
+    if (sel) return [`Now tap another station to mark its line to ${sel}.`, 'Tap a marked pair again to unmark it.'];
+    // Only a ping proves a mark. Four marks with a guess among them are not an
+    // invitation to a check that costs 2 when wrong.
+    const { confirmed, unmarked, refuted } = proof();
+    const inMark = S.tapMode === 'mark';
+    if (refuted >= 0) return [`${pairName(refuted)} is marked, but its ping says it is no line.`, inMark ? 'Tap its two stations to unmark it.' : 'Tap Mark, then its two stations, to unmark it.'];
+    if (unmarked >= 0) {
+      if (S.marks.size === N - 1) return [`${pairName(unmarked)} is a proven line, but four are marked.`, 'One of them is wrong: unmark it in Mark mode.'];
+      return [`${pairName(unmarked)} is a proven line — mark it.`, inMark ? 'Tap its two stations.' : 'Tap Mark, then its two stations.'];
+    }
+    if (S.marks.size === N - 1) {
+      if (confirmed === N - 1) return ['All four lines found — press Check.', 'Every mark is confirmed by a 1-hop ping.'];
+      return [`Four lines marked, ${N - 1 - confirmed} not confirmed by a ping.`, 'Sure? Press Check — a wrong one costs 2. Or ping it.'];
+    }
+    if (S.tapMode === 'mark') return ['Mark mode: tap two stations to mark a line.', 'Marks are free. Tap Ping to measure again.'];
+    if (!run().pings.length) return ['Find the four hidden lines.', 'Tap two stations to ping: it says how many hops apart.'];
+    return [`${S.marks.size} of ${N - 1} lines marked — keep pinging.`, '1 hop = a line, marked for you. Deduced one? Tap Mark — free.'];
+  }
+
   function iconButton(x, y, w, h, icon, action) {
     ctx.fillStyle = C.card;
     roundRect(x, y, w, h, 10); ctx.fill();
@@ -1237,10 +1321,15 @@
       const pa = stationPoint(a), pb = stationPoint(b);
       const isMark = S.marks.has(idx);
       const dist = pinged.get(idx);
-      ctx.strokeStyle = isMark ? C.accent : dist !== undefined ? C.pinged : C.ring;
+      // Solid is a line the player marked. A ping is a measurement, drawn dashed
+      // when it found no direct line: a pinged "3" drawn solid read as a line. A
+      // mark its own ping rules out (an old save) is red.
+      ctx.strokeStyle = isMark ? (dist > 1 ? C.bad : C.accent) : dist !== undefined ? C.pinged : C.ring;
       ctx.lineWidth = isMark ? 4 : dist !== undefined ? 2 : 1;
+      ctx.setLineDash(!isMark && dist > 1 ? [7, 6] : []);
       ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.stroke();
-      if (dist !== undefined && !isMark) {
+      ctx.setLineDash([]);
+      if (dist !== undefined) {
         const mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2;
         ctx.fillStyle = C.card; ctx.beginPath(); ctx.arc(mx, my, 12, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = C.text; ctx.font = `700 13px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -1297,21 +1386,29 @@
       addHit(x, tabY, tabW, tabH, `card${tier}`);
     });
 
-    const btnY = 78, btnW = 110, btnH = 32, gap = 6;
-    button(12, btnY, btnW, btnH, S.tapMode === 'ping' ? 'Ping' : 'Mark', 'mode', S.tapMode === 'mark', !locked());
-    button(12 + (btnW + gap), btnY, btnW, btnH, 'Check', 'check', false, !locked());
+    const btnY = 76, btnW = 110, btnH = 40, gap = 6;
+    modeSwitch(12, btnY, btnW, btnH);
+    button(12 + (btnW + gap), btnY, btnW, btnH, 'Check', 'check', S.marks.size === N - 1 && proof().confirmed === N - 1 && !locked(), !locked());
     button(12 + (btnW + gap) * 2, btnY, btnW, btnH, 'Clear', 'clear', false, !locked());
     button(12 + (btnW + gap) * 3, btnY, btnW, btnH, 'Share', 'share', false);
+
+    const coach = coachLines();
+    if (coach) {
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = C.accent; ctx.font = `700 16px ${FONT}`;
+      ctx.fillText(coach[0], 240, 140);
+      if (coach[1]) { ctx.fillStyle = C.text; ctx.font = `400 14px ${FONT}`; ctx.fillText(coach[1], 240, 163); }
+    }
 
     ctx.save();
     if (S.shake > 0) ctx.translate((Math.random() - 0.5) * S.shake, (Math.random() - 0.5) * S.shake);
     drawNetwork();
     ctx.restore();
 
-    const over = r.moves - p.par;
+    // Neutral: the count of marks is not a verdict. Par has its colour up in the corner.
     ctx.textAlign = 'center'; ctx.font = `400 13px ${FONT}`;
-    ctx.fillStyle = over <= 0 ? C.good : over <= 2 ? C.warn : C.bad;
-    ctx.fillText(`${r.moves} ping${r.moves === 1 ? '' : 's'} · mark all ${N - 1} lines · ${S.tapMode} mode`, 240, HUB_CY + HUB_R + 42);
+    ctx.fillStyle = C.muted;
+    ctx.fillText(`${r.moves} ping${r.moves === 1 ? '' : 's'} · ${S.marks.size} of ${N - 1} lines marked`, 240, HUB_CY + HUB_R + 42);
 
     if (locked()) {
       ctx.fillStyle = C.good; ctx.font = `700 15px ${FONT}`;
@@ -1333,18 +1430,19 @@
     const lines = [
       'Five stations, A through E, are connected by a',
       'hidden wiring tree — four lines, never shown.',
+      'Find all four.',
       '',
-      'In Ping mode, tap two stations: the network answers',
-      'with one number, how many hops separate them along',
-      'the hidden wiring. It never says which stations the',
-      'path runs through.',
+      'Ping: tap two stations. The network answers with',
+      'how many hops separate them along the hidden',
+      'wiring, never which stations the path runs through.',
+      '1 hop is a direct line, and it is marked for you.',
       '',
-      'Tap Mode to switch to Mark, then tap two stations to',
-      'mark a line between them. Marks cost nothing. Mark',
-      'all four true lines, then press Check.',
+      'Mark: tap Mark, then two stations, to mark a line',
+      'you worked out without pinging it. Marks are free.',
+      'With four lines marked, press Check.',
       '',
-      'Every ping costs 1. A wrong check costs 2. No hard',
-      'limit — an extra ping is always worth it if unsure.',
+      'Every new ping costs 1; asking again is free. A',
+      'wrong check costs 2. Finish within par for a star.',
     ];
     lines.forEach((l, i) => ctx.fillText(l, 56, 140 + i * 22));
     addHit(0, 0, W, H, 'closehelp');
@@ -1401,6 +1499,8 @@
       case 'home': goTitle(); return;
       case 'mute': toggleMute(); return;
       case 'mode': if (!locked()) toggleTapMode(); return;
+      case 'modeping': if (!locked() && S.tapMode !== 'ping') toggleTapMode(); return;
+      case 'modemark': if (!locked() && S.tapMode !== 'mark') toggleTapMode(); return;
       case 'hint': doHint(); return;
       case 'check': doCheck(); return;
       case 'clear': clearMarks(); return;
