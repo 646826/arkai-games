@@ -638,6 +638,7 @@
     streak: 0, bestStreak: 0, lastFull: 0, freezeUsedDay: 0, storageWarned: false,
     muted: storage.get(STORE_MUTE) === '1',
     clock: 0, dayCheck: 0, shake: 0, flash: 0,
+    lively: 0, stir: 0,     // seconds of ambient motion left since the last input, and how much of it is showing (0–1)
     shot: null,             // { port, exit, t } while a beam is on its way through
     parts: [], floats: [], toast: null, press: null, hover: null,
   };
@@ -784,7 +785,8 @@
   const archive = () => S.day < S.today;
   const dayDate = (day) => new Date(EPOCH_UTC + (day - 1) * DAY_MS).toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'UTC' });
   const titleSummary = () => `Day ${S.day}${archive() ? `, ${dayDate(S.day)}, from the archive` : ''}. ${solvedCount()} of 3 puzzles solved.`;
-  const wave = (speed, phase = 0) => (calm() ? 0 : Math.sin(S.clock * speed + phase));
+  // Ambient motion, scaled by how awake the board is: at rest it is the reduced-motion picture.
+  const wave = (speed, phase = 0) => (calm() ? 0 : S.stir * Math.sin(S.clock * speed + phase));
   const markCount = () => S.marks.reduce((sum, mark) => sum + (mark ? 1 : 0), 0);
   const tentCount = () => S.tent.reduce((sum, mark) => sum + (mark ? 1 : 0), 0);
   const marksText = () => Array.from(S.marks).join('');
@@ -1082,6 +1084,7 @@
 
   function checkDay() {
     if (PICTURE || dayNumber(new Date()) === S.today) return; // the posed board belongs to no day
+    invalidate(); // a new day changes the screen with no event to say so
     // Mid-puzzle on today's board, nothing is pulled away: it says so once.
     if (S.mode === 'play' && S.day === S.today) {
       if (!S.newDay) {
@@ -1490,6 +1493,10 @@
   function update(dt) {
     if (PICTURE) return; // the pose holds still
     S.clock += dt;
+    // The ambient motion comes up over half a second after an input and settles over one.
+    S.lively = Math.max(0, S.lively - dt);
+    const want = S.lively > 0 && !calm() ? 1 : 0;
+    S.stir = want > S.stir ? Math.min(want, S.stir + dt * 2) : Math.max(want, S.stir - dt);
     if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 24);
     if (S.flash > 0) S.flash = Math.max(0, S.flash - dt);
     if (S.shot) {
@@ -1525,6 +1532,7 @@
   });
 
   function resize() {
+    invalidate(); // a canvas given a new size is blank until it is drawn again
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const cw = canvas.clientWidth || window.innerWidth, ch = canvas.clientHeight || window.innerHeight;
     // Below 480:780 both shapes are limited by width and scale alike, so the one
@@ -2106,6 +2114,7 @@
   const LONG_PRESS_MS = 450;
 
   canvas.addEventListener('pointerdown', (event) => {
+    wake();
     // Only the first finger, and only the main mouse button: a second finger or
     // a right click must never become a counted roll.
     if (!event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
@@ -2121,15 +2130,18 @@
     try { canvas.setPointerCapture(event.pointerId); } catch { /* not supported */ }
   });
 
+  // Only a change of what is under the mouse is a new picture: a mouse wandering
+  // over a still box must not redraw it every frame.
   canvas.addEventListener('pointermove', (event) => {
     if (event.pointerType !== 'mouse') return;
-    if (S.help) { S.hover = null; return; }
     const at = toLogical(event);
-    const b = hitButton(at.x, at.y);
-    S.hover = b ? b.id : null;
+    const b = S.help ? null : hitButton(at.x, at.y);
+    const hover = b ? b.id : null;
+    if (hover !== S.hover) { S.hover = hover; invalidate(); }
   });
 
   canvas.addEventListener('pointerup', (event) => {
+    wake();
     const start = S.press;
     if (!start || start.pointer !== event.pointerId) return;
     S.press = null;
@@ -2154,6 +2166,7 @@
   });
 
   canvas.addEventListener('pointercancel', (event) => {
+    invalidate();
     if (S.press && S.press.pointer === event.pointerId) S.press = null;
   });
 
@@ -2164,6 +2177,7 @@
   // overlay) the browser's own menu is left alone: there is nothing here for
   // a right click to do yet.
   canvas.addEventListener('contextmenu', (event) => {
+    wake();
     if (S.mode !== 'play' || S.help) return;
     event.preventDefault();
     const at = toLogical(event);
@@ -2176,6 +2190,7 @@
   });
 
   window.addEventListener('keydown', (event) => {
+    wake();
     // While the copy dialog is open the box is not there to play, wherever focus went.
     if (copyBox.classList.contains('open')) {
       if (event.key === 'Escape') closeCopyBox();
@@ -2229,6 +2244,7 @@
   });
 
   controls.addEventListener('click', (event) => {
+    wake();
     const button = event.target instanceof Element ? event.target.closest('button[data-act]') : null;
     if (!button || copyBox.classList.contains('open')) return;
     ensureAudio();
@@ -2250,19 +2266,53 @@
   // Another tab of this game saved something: take it in, so neither tab
   // overwrites the other's solved puzzles or positions on its next roll.
   window.addEventListener('storage', (event) => {
+    invalidate();
     if (event.key === STORE && S.runs.length) absorb(readStore());
   });
 
   // ---- loop ----
+  // A box between moves is a still picture, and it used to be redrawn sixty times a
+  // second anyway: Lighthouse's mobile run spent ~10 s of main thread on a screen
+  // nobody touched (TBT 1.7 s, performance 0.71). Now it is drawn when something
+  // changed — the rule Sudoku Sixes and Minesweeper already follow: every listener
+  // that can change the picture calls invalidate() (wake(), for the player's own
+  // input) before anything else can return, and the loop owns what no event
+  // announces — a running animation, and the countdown on the title screen
+  // reaching a new minute. A missed invalidate is a frozen game.
+  //
+  // The ambient motion — the motes, the arrows breathing on the ports, the
+  // breathing "Tap to continue" — answers the player instead of running as a
+  // screensaver: wake() keeps it going for LIVELY seconds after the last input,
+  // then it fades into the reduced-motion picture and the drawing stops. A page
+  // nobody has touched yet opens still.
+  const LIVELY = 4;
+  let dirty = true, wasAnimating = false, shownText = '';
+  const invalidate = () => { dirty = true; };
+  const wake = () => { dirty = true; S.lively = LIVELY; };
+
+  const animating = () => {
+    if (S.shake > 0 || S.flash > 0 || S.shot || S.parts.length > 0 || S.floats.length > 0 || S.toast) return true;
+    return S.stir > 0 || (S.lively > 0 && !calm());
+  };
+
   let lastTime = 0, running = true;
   function frame(now) {
     const dt = Math.min(0.05, (now - lastTime) / 1000 || 0);
     lastTime = now;
     if (running) {
       update(dt);
-      render();
-      // The generator waits for this before it photographs (POSED_FLAG in picture-flag.mjs).
-      if (PICTURE) window.__arkaiPosed = true;
+      const text = S.mode === 'title' ? untilMidnight() : '';
+      if (text !== shownText) { shownText = text; dirty = true; }
+      const live = animating();
+      // `wasAnimating` buys one more frame after the last one ends, so the screen
+      // never keeps a half-finished animation as its final picture.
+      if (dirty || live || wasAnimating) {
+        dirty = false;
+        render();
+        // The generator waits for this before it photographs (POSED_FLAG in picture-flag.mjs).
+        if (PICTURE) window.__arkaiPosed = true;
+      }
+      wasAnimating = live;
     }
     requestAnimationFrame(frame);
   }
@@ -2270,6 +2320,7 @@
   // A turn-based game has no clock to stop, but a hidden tab should not keep
   // drawing, and sound must not start again on its own.
   document.addEventListener('visibilitychange', () => {
+    invalidate();
     running = !document.hidden;
     if (audio) {
       if (document.hidden) audio.suspend().catch(() => {});
@@ -2279,6 +2330,8 @@
   });
 
   window.addEventListener('resize', resize);
+  // A canvas whose backing store the browser dropped comes back blank.
+  canvas.addEventListener('contextrestored', invalidate);
   resize();
   if (PICTURE) posePicture();
   else {

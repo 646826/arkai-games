@@ -820,9 +820,13 @@
     press = { id: e.pointerId, x: e.clientX, y: e.clientY, lx: p.x, ly: p.y, button: e.button, done: false };
 
     // Right button is an immediate flag; touch has to wait to see if it is a hold.
-    if (e.button === 2 && S.mode === 'playing') {
-      const cell = cellAt(p.x, p.y);
-      if (cell) toggleFlag(cell.x, cell.y);
+    // Off the board it is nothing at all: on the title or the end screen its release
+    // used to count as a tap and start a new game.
+    if (e.button === 2) {
+      if (S.mode === 'playing') {
+        const cell = cellAt(p.x, p.y);
+        if (cell) toggleFlag(cell.x, cell.y);
+      }
       press.done = true;
       return;
     }
@@ -900,6 +904,9 @@
 
   window.addEventListener('keydown', (e) => {
     invalidate();
+    // Ctrl+F, Cmd+C, Ctrl+R belong to the browser: without this, looking for text on
+    // the page planted a flag, and copying opened the cells around the cursor.
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     const move = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[e.code];
     if (move) {
       e.preventDefault();
