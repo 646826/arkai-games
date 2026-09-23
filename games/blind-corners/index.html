@@ -760,8 +760,9 @@
   if (ONWARD) {
     onwardLink.setAttribute('href', ONWARD.path);
     onwardLink.textContent = `Play ${ONWARD.title}, another daily puzzle`;
-    // Shown once the day on screen is finished — kept in sync every frame in
-    // render(), the same gate the canvas button next to it already used.
+    // Shown once the day on screen is finished — kept in sync by render(), the
+    // same gate the canvas button next to it already used. Whatever can finish a
+    // day (the player's input, another tab's save, a new day) draws a frame.
     onwardLink.addEventListener('click', (event) => {
       const plan = onwardClickPlan(event, onward());
       if (plan === 'ignore') return;
@@ -2332,6 +2333,10 @@
   window.addEventListener('resize', resize);
   // A canvas whose backing store the browser dropped comes back blank.
   canvas.addEventListener('contextrestored', invalidate);
+  // The hints drawn on the canvas follow the pointer (tap or click, the keys on the
+  // buttons): a device that changes it — a tablet mode, a mouse plugged in —
+  // redraws a still screen. Old Safari has no addEventListener on a media query.
+  if (coarseQuery && coarseQuery.addEventListener) coarseQuery.addEventListener('change', invalidate);
   resize();
   if (PICTURE) posePicture();
   else {
