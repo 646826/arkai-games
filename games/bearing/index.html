@@ -544,7 +544,9 @@
         const pair = new Set(candidatesFor(p.bearings[i], heading));
         set = set ? new Set([...set].filter((x) => pair.has(x))) : pair;
       }
-      return set || new Set();
+      // In stop order, never in the order candidatesFor() finds them: that order puts
+      // the true bearing first, and the readout "SSE or NNE" named the answer (#303).
+      return new Set([...(set || [])].sort((a, b) => a - b));
     });
   }
 
