@@ -994,15 +994,18 @@
 
   function checkDay() {
     if (PICTURE || dayNumber(new Date()) === S.today) return; // the posed board belongs to no day
-    invalidate(); // a new day changes the screen with no event to say so
+    // A new day changes the screen with no event to say so, but only once: mid-puzzle
+    // S.today stays behind on purpose, and this check comes round every five seconds.
     // Mid-puzzle on today's board, nothing is pulled away: it says so once.
     if (S.mode === 'play' && S.day === S.today) {
       if (!S.newDay) {
+        invalidate();
         S.newDay = true;
         toast(touch() ? 'New puzzles are out. Tap the home button.' : 'New puzzles are out. Press Esc.');
       }
       return;
     }
+    invalidate(); // followToday() catches S.today up, so this runs once a day too
     followToday();
   }
 
