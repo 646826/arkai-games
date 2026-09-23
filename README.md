@@ -18,7 +18,7 @@ There are 13 of them. Together they are 807 KB.
 | **Pair Flip** | Cards, Family | Keyboard, touch & mouse | 50 KB | [play](https://arkai.win/games/pair-flip/) |
 | **Slide Merge** | Puzzle, Numbers | Keyboard, touch & swipe | 40 KB | [play](https://arkai.win/games/slide-merge/) |
 | **Sudoku Sixes** | Logic, Puzzle | Keyboard, touch & mouse | 54 KB | [play](https://arkai.win/games/sudoku-sixes/) |
-| **Brick Rebound** | Arcade, Classic | Mouse, touch & keyboard | 36 KB | [play](https://arkai.win/games/brick-rebound/) |
+| **Brick Rebound** | Arcade, Classic | Mouse, touch & keyboard | 37 KB | [play](https://arkai.win/games/brick-rebound/) |
 | **Minesweeper** | Logic, Puzzle | Mouse, touch & keyboard | 39 KB | [play](https://arkai.win/games/minesweeper/) |
 | **Snake** | Arcade, Classic | Keyboard, touch & swipe | 24 KB | [play](https://arkai.win/games/snake/) |
 

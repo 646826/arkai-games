@@ -890,9 +890,12 @@
     last = now;
     if (!manualClock) {
       acc += elapsed;
-      // Time is taken off before the step runs: an update() that throws must not leave
-      // its time owing, or the frame after a run of throws replays seconds of physics.
-      while (acc >= STEP) { acc -= STEP; update(STEP); }
+      // Every step this frame owes is taken off before the first one runs: an update()
+      // that throws must not leave time owing, or the frame after a run of throws would
+      // replay seconds of physics at once. Without a throw it is the same steps as ever.
+      const steps = Math.floor(acc / STEP);
+      acc -= steps * STEP;
+      for (let i = 0; i < steps; i++) update(STEP);
     }
     canvas.classList.toggle('menu', S.mode !== 'playing' && S.mode !== 'serve');
     render();
