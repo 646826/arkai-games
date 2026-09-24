@@ -449,7 +449,7 @@
   function spatialTone(pan, atTime, freq = 440, dur = 0.55) {
     if (S.muted || !audio || audio.state !== 'running') return null;
     const t = atTime, p = Math.max(-1, Math.min(1, pan));
-    const osc = audio.createOscillator(), gain = audio.createGain(), panner = audio.createStereoPanner();
+    const osc = audio.createOscillator(), gain = audio.createGain(), cut = audio.createGain(), panner = audio.createStereoPanner();
     const splitter = audio.createChannelSplitter(2), merger = audio.createChannelMerger(2);
     const delayL = audio.createDelay(0.01), delayR = audio.createDelay(0.01);
     osc.type = 'sine';
@@ -461,13 +461,19 @@
     panner.pan.setValueAtTime(p, t);
     delayL.delayTime.setValueAtTime(Math.max(0, p) * MAX_ITD, t);
     delayR.delayTime.setValueAtTime(Math.max(0, -p) * MAX_ITD, t);
+    // The envelope lives on `gain`; `cut` is a second stage at a fixed unity that
+    // nothing automates, so silenceListen can fade it without reading gain.value —
+    // which is still the GainNode default of 1 in the very render block a tone
+    // starts in, and would fade in from 0.09 over an envelope of 0 (ARK-37). It is the
+    // voice's last stage, after the ITD delay lines, so zeroing it silences what they
+    // still hold of the tone too (ARK-38).
     osc.connect(gain); gain.connect(panner); panner.connect(splitter);
     splitter.connect(delayL, 0); splitter.connect(delayR, 1);
     delayL.connect(merger, 0, 0); delayR.connect(merger, 0, 1);
-    merger.connect(audio.destination);
+    merger.connect(cut); cut.connect(audio.destination);
     osc.start(t); osc.stop(t + dur + 0.03);
     // Returned so a listen can be silenced before that stop time (silenceListen).
-    return { osc, gain, start: t };
+    return { osc, gain, cut, start: t };
   }
 
   // ---- canvas letterbox ----
@@ -643,7 +649,12 @@
   // The tones one listen has scheduled, so leaving the puzzle mid-listen can cut them
   // off instead of letting them ring over the next screen (silenceListen).
   let listenVoices = [];
-  const silenceListen = () => {
+  // `now`: the sound is suspended right after this (mute, a hidden tab). suspend()
+  // freezes the audio clock where it stands, so a fade scheduled on it would only play
+  // on resume — the whole 30 ms of a sounding tone at its full level, over whatever
+  // screen the sound comes back on (ARK-38). Stopped at once, the tone ends where the
+  // suspend cuts the output anyway.
+  const silenceListen = (now = false) => {
     if (audio) {
       const t = audio.currentTime;
       for (const voice of listenVoices) {
@@ -654,17 +665,32 @@
           // start, it never sounds. Faded instead, it would fade from the gain's default
           // of 1, not from its 0.09 — a pop up to ten times louder than the tone when
           // the player leaves just before it (ARK-29).
-          if (voice.start > t) { voice.osc.stop(t); continue; }
-          voice.gain.gain.cancelScheduledValues(t);
-          voice.gain.gain.setValueAtTime(Math.min(voice.gain.gain.value, 0.09), t);
-          voice.gain.gain.linearRampToValueAtTime(0.0001, t + 0.03);
+          if (now || voice.start > t) {
+            // Before a suspend the output stage is zeroed as well: the ITD delay lines
+            // still hold up to 0.65 ms of the tone for the far ear, a click on resume.
+            if (now) voice.cut.gain.setValueAtTime(0, t);
+            voice.osc.stop(t);
+            continue;
+          }
+          // Only the cut stage is faded: nothing else automates it, so its value is always
+          // the unity it was built at and the envelope's own gain is never read or
+          // cancelled — a read lands on the GainNode default of 1 in the block a tone
+          // starts in, a step up over the envelope's 0 (ARK-37). The fade is anchored by a
+          // write of that unity, not a read: a ramp with no event before it starts at the
+          // call in Chrome, but at time 0 in older engines — a cut, not a fade (ARK-38).
+          voice.cut.gain.setValueAtTime(1, t);
+          voice.cut.gain.linearRampToValueAtTime(0.0001, t + 0.03);
           voice.osc.stop(t + 0.05);
-        } catch { /* a tone that already ended has nothing left to silence */ }
+        } catch {
+          // A second osc.stop() throws in some engines; a disconnected voice cannot
+          // reach the destination, so a tone that would not stop cannot play on (ARK-37).
+          for (const node of [voice.osc, voice.gain, voice.cut]) { try { node.disconnect(); } catch { /* already detached */ } }
+        }
       }
     }
     listenVoices = [];
   };
-  const stopListening = () => { listenSeq++; S.listening = false; S.listenStep = -1; silenceListen(); };
+  const stopListening = (now = false) => { listenSeq++; S.listening = false; S.listenStep = -1; silenceListen(now); };
 
   function selectTier(tier) {
     S.tier = tier;
@@ -873,7 +899,14 @@
   function toggleMute() {
     S.muted = !S.muted;
     storage.set(STORE_MUTE, S.muted ? '1' : '0');
-    if (S.muted) { if (audio) audio.suspend().catch(() => {}); } else ensureAudio();
+    if (S.muted) {
+      // The listen's own end timer runs on the page clock and clears listenVoices while
+      // its tones are still queued on the audio clock; suspending freezes them there and
+      // unmuting would resume them over the title, another tier, or a new listen. Silence
+      // them now, but leave S.listening/listenStep so the dial highlight is unchanged (#37).
+      silenceListen(true);
+      if (audio) audio.suspend().catch(() => {});
+    } else ensureAudio();
     announce(S.muted ? 'Muted.' : 'Sound on.');
   }
 
@@ -1491,7 +1524,7 @@
     invalidate();
     S.hidden = document.hidden;
     // A hidden tab pauses the sound; a listen left running must not resume with it.
-    if (S.hidden) stopListening();
+    if (S.hidden) stopListening(true);
     if (S.hidden && audio) audio.suspend().catch(() => {});
   });
 
