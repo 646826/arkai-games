@@ -1183,6 +1183,11 @@
 
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', resize);
+  // A canvas whose backing store the browser dropped comes back blank.
+  canvas.addEventListener('contextrestored', () => {
+    invalidate();
+    sprites.key = '';   // the baked card sprites went with the main canvas
+  });
 
   // ---- loop ------------------------------------------------------------------
   // Everything update() moves on screen, and nothing it does not: a missed field

@@ -16,7 +16,7 @@ There are 13 of them. Together they are 825 KB.
 | **Mole Rush** | Arcade, Family | Keyboard, touch & mouse | 56 KB | [play](https://arkai.win/games/mole-rush/) |
 | **One Step Late** | Puzzle, Daily | Keyboard, touch & mouse | 103 KB | [play](https://arkai.win/games/one-step-late/) |
 | **Pair Flip** | Cards, Family | Keyboard, touch & mouse | 51 KB | [play](https://arkai.win/games/pair-flip/) |
-| **Slide Merge** | Puzzle, Numbers | Keyboard, touch & swipe | 43 KB | [play](https://arkai.win/games/slide-merge/) |
+| **Slide Merge** | Puzzle, Numbers | Keyboard, touch & swipe | 44 KB | [play](https://arkai.win/games/slide-merge/) |
 | **Sudoku Sixes** | Logic, Puzzle | Keyboard, touch & mouse | 54 KB | [play](https://arkai.win/games/sudoku-sixes/) |
 | **Brick Rebound** | Arcade, Classic | Mouse, touch & keyboard | 37 KB | [play](https://arkai.win/games/brick-rebound/) |
 | **Minesweeper** | Logic, Puzzle | Mouse, touch & keyboard | 39 KB | [play](https://arkai.win/games/minesweeper/) |

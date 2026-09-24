@@ -1006,6 +1006,8 @@
 
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', resize);
+  // A canvas whose backing store the browser dropped comes back blank.
+  canvas.addEventListener('contextrestored', invalidate);
 
   // ---- loop ------------------------------------------------------------------
   let last = 0;

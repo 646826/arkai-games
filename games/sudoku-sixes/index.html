@@ -1312,6 +1312,9 @@
     wasAnimating = live;
   }
 
+  // A canvas whose backing store the browser dropped comes back blank.
+  canvas.addEventListener('contextrestored', invalidate);
+
   S.best = bestTimes[S.level];
   if (PICTURE) posePicture();
   resize();
