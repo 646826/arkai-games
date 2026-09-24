@@ -476,19 +476,44 @@
   // ---- puzzle core end ----
 
   // ---- layout & state ----
-  const W = 480, H = 720;
+  // The width stays 480; the logical height follows the screen's shape
+  // (brand-system §5). A fixed 720 on a 390×844 phone letterboxed a quarter of
+  // the height in matching-colour bars, so H tracks the viewport's aspect ratio
+  // within 720..1040 and the frame fills the screen instead.
+  const W = 480, H_MIN = 720, H_MAX = 1040;
+  let H = H_MIN;
   const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+  // Headings and button labels are set in the portal's display face (§3). Its
+  // bytes are embedded below and handed to a FontFace: a game is one
+  // self-contained document and may make no request of its own (the smoke gate
+  // counts an extra same-origin request as a defect, and owned-game-validator
+  // rejects a CSS `url()`). A FontFace, not a `data:` URL, because the /play/*
+  // CSP allows no `data:` font source.
+  const DISPLAY_FONT = 'Righteous';
+  const DISPLAY = `"${DISPLAY_FONT}", ${FONT}`;
+  // The minimum touch target in logical px: at 390 px wide a 480-wide game
+  // scales by ~0.8125, so 56 logical px is ~45.5 CSS px, over the 44 px floor
+  // (brand-system §5; audit item 12).
+  const TOUCH = 56;
   const SLUG = 'trunk-line';
   const STORE = 'arkai:trunk-line:v1', STORE_MUTE = 'arkai:trunk-line:muted';
   const SHARE_URL = 'https:' + '//arkai.win/games/trunk-line/?ref=share';
-  const HUB_CX = 240, HUB_CY = 372, HUB_R = 148;
+  const HUB_CX = 240;
+  // The board's centre and radius are re-derived by resize(): it centres in the
+  // space between the controls and the status/success area, and shrinks just
+  // enough on a short landscape frame that it never meets the coach line.
+  let HUB_CY = 372, HUB_R = 148;
 
   const C = {
     bg: '#0a130a', card: '#101c10',
+    surface: '#152618',
     ring: '#1d301a', ringDim: '#24391f',
     accent: '#9ae64c', accentDim: '#33531f', cursor: '#facc15',
     text: '#eaffe4', muted: '#8fae82', good: '#6ee7a8', warn: '#fbbf24', bad: '#f87171',
     pinged: '#4d8a3f',
+    warm: '#ffb020', warm2: '#ff7a45', inkWarm: '#1a1000', outlineWarm: '#7a4a08',
+    violet: '#3a2680', violetLo: '#2c1c62', violetHi: '#a3b2f5', violetLip: '#241a52',
+    bevelHi: 'rgba(255,255,255,.18)', bevelLo: 'rgba(0,0,0,.35)',
   };
 
   const stationAngle = (i) => (i * 2 * Math.PI) / N - Math.PI / 2;
@@ -523,6 +548,9 @@
     muted: storage.get(STORE_MUTE) === '1',
     dayCheck: 5, flash: 0, shake: 0, toast: null,
     hidden: false,
+    // The action under the pointer right now, so its button can sink onto its
+    // lip; and the element to hand focus back to when the help panel closes.
+    pressed: null, helpReturn: null,
   };
   const started = new Set();
 
@@ -595,6 +623,17 @@
     invalidate(); // a canvas given a new size is blank until it is drawn again
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const cssW = Math.max(1, canvas.clientWidth), cssH = Math.max(1, canvas.clientHeight);
+    // Height follows the screen's shape, clamped so a very tall phone does not
+    // stretch the layout without bound and a short landscape one keeps a frame
+    // no taller than the screen allows (brand-system §5, §6).
+    H = Math.max(H_MIN, Math.min(H_MAX, Math.round((W * cssH) / cssW)));
+    // The board sits between the coach line (top) and the status area (bottom);
+    // on a short landscape frame it shrinks a little rather than collide with
+    // either, and the whole picture still fits the frame with no scroll.
+    const boardTop = 270, boardBottom = 120;
+    const avail = H - boardTop - boardBottom;
+    HUB_R = Math.max(108, Math.min(155, avail / 2 - 8));
+    HUB_CY = boardTop + avail / 2;
     canvas.width = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
     const scale = Math.min(cssW / W, cssH / H);
@@ -1125,14 +1164,75 @@
     ctx.closePath();
   }
 
-  function button(x, y, w, h, label, action, active, enabled = true) {
-    ctx.fillStyle = active ? C.accent : C.card;
-    roundRect(x, y, w, h, 10); ctx.fill();
-    ctx.strokeStyle = C.accentDim; ctx.lineWidth = 1; roundRect(x, y, w, h, 10); ctx.stroke();
-    ctx.fillStyle = !enabled ? C.muted : active ? '#0e1c06' : C.text;
-    ctx.font = `700 15px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(label, x + w / 2, y + h / 2 + 1);
-    if (enabled) addHit(x, y, w, h, action);
+  // Every control is an object, built like the portal's `.button` (brand-system
+  // §4): a 2 px darker outline, a solid darker lip under the body as its own
+  // shape (so a press collapses just it), a glossy highlight band over a
+  // gradient body, and a display-face label. The one primary action per screen
+  // is warm; every other button is flat violet. Pressed = the body sinks onto
+  // the lip. The drawn pill may stay smaller than the touch floor; hitBox()
+  // pads the tap target independently of what is drawn.
+  const LIP = 5;
+  const BTN = {
+    primary: { hi: '#ffd166', mid: C.warm, lo: C.warm2, outline: C.outlineWarm, lip: C.outlineWarm, ink: C.inkWarm, gloss: 'rgba(255,255,255,.5)' },
+    secondary: { hi: '#4a3596', mid: C.violet, lo: C.violetLo, outline: C.violetHi, lip: C.violetLip, ink: '#eef2ff', gloss: C.bevelHi },
+  };
+
+  // A tap target at least TOUCH logical px on both axes, centred on the drawn
+  // rect so it never drifts and never pushes a neighbour off the board.
+  function hitBox(x, y, w, h, action) {
+    const hw = Math.max(TOUCH, w), hh = Math.max(TOUCH, h);
+    addHit(x + (w - hw) / 2, y + (h - hh) / 2, hw, hh, action);
+  }
+
+  // The framed panel (brand-system §4): a 3.5 px accent frame, an inner bevel —
+  // a light line on top, a dark line at the bottom — over a surface lighter
+  // than the board, so a panel reads as a raised tile, not a hole.
+  function panelFrame(x, y, w, h, r = 16) {
+    ctx.fillStyle = C.surface; roundRect(x, y, w, h, r); ctx.fill();
+    ctx.strokeStyle = C.accent; ctx.lineWidth = 3.5; roundRect(x, y, w, h, r); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x + r + 2, y + 4); ctx.lineTo(x + w - r - 2, y + 4);
+    ctx.strokeStyle = C.bevelHi; ctx.lineWidth = 2; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x + r + 2, y + h - 4); ctx.lineTo(x + w - r - 2, y + h - 4);
+    ctx.strokeStyle = C.bevelLo; ctx.lineWidth = 2; ctx.stroke();
+  }
+
+  // The title plaque, a warm pill overlapping a panel's top edge (§4).
+  function plaque(cx, cy, label) {
+    ctx.font = `400 17px ${DISPLAY}`;
+    const pw = ctx.measureText(label).width + 34, ph = 30;
+    const grad = ctx.createLinearGradient(0, cy - ph / 2, 0, cy + ph / 2);
+    grad.addColorStop(0, C.warm); grad.addColorStop(1, C.warm2);
+    ctx.fillStyle = grad; roundRect(cx - pw / 2, cy - ph / 2, pw, ph, ph / 2); ctx.fill();
+    ctx.strokeStyle = C.outlineWarm; ctx.lineWidth = 2; roundRect(cx - pw / 2, cy - ph / 2, pw, ph, ph / 2); ctx.stroke();
+    ctx.fillStyle = C.inkWarm; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(label, cx, cy + 1);
+  }
+
+  function button(x, y, w, h, label, action, kind = 'secondary', enabled = true) {
+    const spec = kind === 'primary' ? BTN.primary : BTN.secondary;
+    const pressed = enabled && S.pressed === action;
+    const bodyY = pressed ? y + LIP : y, bodyH = h - LIP, r = Math.min(14, bodyH / 2);
+    // The lip is the body's own shape dropped by LIP, so only its rounded lower
+    // edge shows under the body. A LIP-high strip with the body's radius made
+    // arcTo overshoot into a tail at the lower right of every button.
+    if (!pressed) {
+      ctx.fillStyle = enabled ? spec.lip : '#101a0e';
+      roundRect(x, y + LIP, w, bodyH, r); ctx.fill();
+    }
+    const body = ctx.createLinearGradient(0, bodyY, 0, bodyY + bodyH);
+    if (enabled) { body.addColorStop(0, spec.hi); body.addColorStop(0.45, spec.mid); body.addColorStop(1, spec.lo); }
+    else { body.addColorStop(0, '#1b2a17'); body.addColorStop(1, '#12200f'); }
+    ctx.fillStyle = body; roundRect(x, bodyY, w, bodyH, r); ctx.fill();
+    const gloss = ctx.createLinearGradient(0, bodyY, 0, bodyY + bodyH);
+    gloss.addColorStop(0, enabled ? spec.gloss : 'rgba(255,255,255,.06)');
+    gloss.addColorStop(0.5, 'rgba(255,255,255,0)');
+    ctx.fillStyle = gloss; roundRect(x, bodyY, w, bodyH, r); ctx.fill();
+    ctx.strokeStyle = enabled ? spec.outline : C.accentDim; ctx.lineWidth = 2;
+    roundRect(x, bodyY, w, bodyH, r); ctx.stroke();
+    ctx.fillStyle = !enabled ? C.muted : spec.ink;
+    ctx.font = `400 18px ${DISPLAY}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(label, x + w / 2, bodyY + bodyH / 2 + 1);
+    if (enabled) hitBox(x, y, w, h, action);
   }
 
   // Both modes in view, the live one lit. The single button this replaces showed
@@ -1140,15 +1240,18 @@
   // switched to marking.
   function modeSwitch(x, y, w, h) {
     const enabled = !locked(), half = w / 2;
-    ctx.fillStyle = C.card; roundRect(x, y, w, h, 10); ctx.fill();
+    ctx.fillStyle = C.card; roundRect(x, y, w, h, 12); ctx.fill();
     ctx.fillStyle = enabled ? C.accent : C.accentDim;
-    roundRect(S.tapMode === 'ping' ? x : x + half, y, half, h, 10); ctx.fill();
-    ctx.strokeStyle = C.accentDim; ctx.lineWidth = 1; roundRect(x, y, w, h, 10); ctx.stroke();
-    ctx.font = `700 15px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    roundRect(S.tapMode === 'ping' ? x : x + half, y, half, h, 12); ctx.fill();
+    ctx.strokeStyle = C.accent; ctx.lineWidth = 3; roundRect(x, y, w, h, 12); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x + 12, y + 3); ctx.lineTo(x + w - 12, y + 3);
+    ctx.strokeStyle = C.bevelHi; ctx.lineWidth = 2; ctx.stroke();
+    ctx.font = `400 16px ${DISPLAY}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ['ping', 'mark'].forEach((m, i) => {
-      ctx.fillStyle = !enabled ? C.muted : S.tapMode === m ? '#0e1c06' : C.text;
+      const on = S.tapMode === m;
+      ctx.fillStyle = !enabled ? C.muted : on ? C.inkWarm : C.text;
       ctx.fillText(m === 'ping' ? 'Ping' : 'Mark', x + half * i + half / 2, y + h / 2 + 1);
-      if (enabled) addHit(x + half * i, y, half, h, `mode${m}`);
+      if (enabled) hitBox(x + half * i, y, half, h, `mode${m}`);
     });
   }
 
@@ -1193,9 +1296,9 @@
   }
 
   function iconButton(x, y, w, h, icon, action) {
-    ctx.fillStyle = C.card;
+    ctx.fillStyle = C.surface;
     roundRect(x, y, w, h, 10); ctx.fill();
-    ctx.strokeStyle = C.accentDim; ctx.lineWidth = 1; roundRect(x, y, w, h, 10); ctx.stroke();
+    ctx.strokeStyle = C.accentDim; ctx.lineWidth = 2; roundRect(x, y, w, h, 10); ctx.stroke();
     const cx = x + w / 2, cy = y + h / 2;
     ctx.strokeStyle = C.text; ctx.fillStyle = C.text; ctx.lineWidth = 2; ctx.lineCap = 'round';
     if (icon === 'home') {
@@ -1231,7 +1334,7 @@
       ctx.stroke();
     }
     ctx.lineCap = 'butt';
-    addHit(x, y, w, h, action);
+    hitBox(x, y, w, h, action);
   }
 
   function wrapText(text, x, y, maxW, lineH) {
@@ -1250,66 +1353,73 @@
     ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
     addHit(0, 0, W, H, 'titledefault');
 
-    iconButton(W - 10 - 34, 4, 34, 32, 'mute', 'mute');
+    // Three zones of the frame's own height, each allowed to grow with it
+    // (brand-system §5): the day row and wordmark up top, the Line cards and
+    // the one primary action in the middle, Share/How to play and the footer at
+    // the bottom. On any aspect ratio the drawn content spans the frame.
+    const third = H / 3;
 
-    // The nextday pill (x426..470, y20..60) used to be a bare '›' glyph and
-    // never collided with mute (x436..470, y4..36); as an opaque icon button
-    // it overlapped mute's bottom 16px and, because hitTest resolves the
-    // last-added region first, stole taps meant for mute (dual-review found
-    // this while closing BENCHMARK gap #2). Dropping the row 20px clears it.
-    const DAY_ROW_Y = 40;
+    iconButton(10, 8, 40, 40, 'mute', 'mute');
     const prevOk = S.day > 1, nextOk = S.day < S.today;
-    // Only drawn when navigable — matches the sibling games' dayArrows(),
-    // which omit the arrow entirely rather than showing it greyed out.
-    if (prevOk) iconButton(10, DAY_ROW_Y, 44, 40, 'prev', 'prevday');
-    if (nextOk) iconButton(426, DAY_ROW_Y, 44, 40, 'next', 'nextday');
+    // Only drawn when navigable — matches the sibling games' dayArrows(), which
+    // omit the arrow entirely rather than showing it greyed out.
+    if (prevOk) iconButton(10, 64, 40, 40, 'prev', 'prevday');
+    if (nextOk) iconButton(W - 10 - 40, 64, 40, 40, 'next', 'nextday');
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillStyle = C.muted; ctx.font = `600 15px ${FONT}`;
-    ctx.fillText(titleDay(S.day, dayDate(S.day), archive()), 240, DAY_ROW_Y + 20);
+    ctx.fillText(titleDay(S.day, dayDate(S.day), archive()), 240, 84);
 
-    ctx.fillStyle = C.accent; ctx.font = `800 38px ${FONT}`;
-    ctx.fillText('Trunk Line', 240, 90);
+    ctx.fillStyle = C.accent; ctx.font = `400 40px ${DISPLAY}`;
+    ctx.fillText('Trunk Line', 240, third * 0.6);
     ctx.fillStyle = C.muted; ctx.font = `400 15px ${FONT}`;
-    ctx.fillText('Ping the hidden network. Trace every line.', 240, 118);
+    ctx.fillText('Ping the hidden network. Trace every line.', 240, third * 0.6 + 30);
     ctx.font = `400 13px ${FONT}`;
-    ctx.fillText('Five stations, one hidden tree, three networks a day.', 240, 138);
+    ctx.fillText('Five stations, one hidden tree, three networks a day.', 240, third * 0.6 + 52);
 
-    const cardY = [166, 258, 350], cardH = 84;
+    const gap = 12, primaryH = 54;
+    const cardH = Math.max(56, Math.min(96, Math.floor((third - primaryH - gap * 3) / 3)));
+    const cardTop = third + gap;
     TIERS.forEach((t, tier) => {
-      const y = cardY[tier], r = S.runs[tier], p = S.puzzles[tier];
-      ctx.fillStyle = C.card;
-      roundRect(40, y, 400, cardH, 14); ctx.fill();
-      ctx.strokeStyle = r.solved ? C.good : C.accentDim; ctx.lineWidth = 2;
-      roundRect(40, y, 400, cardH, 14); ctx.stroke();
-      ctx.fillStyle = C.text; ctx.font = `800 20px ${FONT}`; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-      ctx.fillText(t.label, 62, y + 32);
+      const y = cardTop + tier * (cardH + gap), r = S.runs[tier], p = S.puzzles[tier];
+      panelFrame(40, y, 400, cardH, 14);
+      ctx.fillStyle = C.text; ctx.font = `400 21px ${DISPLAY}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText(t.label, 62, y + cardH * 0.34);
       ctx.fillStyle = C.muted; ctx.font = `400 13px ${FONT}`;
-      ctx.fillText(`5 stations · par ${p.par}`, 62, y + 52);
+      ctx.fillText(`5 stations · par ${p.par}`, 62, y + cardH * 0.68);
       ctx.textAlign = 'right';
       if (r.solved) {
         ctx.fillStyle = r.solvedMoves - r.par <= 0 ? C.good : C.warn;
-        ctx.font = `700 15px ${FONT}`;
-        ctx.fillText(parNote(r.solvedMoves, r.par), 418, y + 32);
+        ctx.font = `400 16px ${DISPLAY}`;
+        ctx.fillText(parNote(r.solvedMoves, r.par), 418, y + cardH * 0.34);
         ctx.fillStyle = C.muted; ctx.font = `400 12px ${FONT}`;
-        ctx.fillText(`${r.solvedMoves} pings spent`, 418, y + 52);
+        ctx.fillText(`${r.solvedMoves} pings spent`, 418, y + cardH * 0.68);
       } else {
-        ctx.fillStyle = C.accent; ctx.font = `700 15px ${FONT}`;
-        ctx.fillText(r.moves ? 'In progress' : 'Not started', 418, y + 32);
+        ctx.fillStyle = C.accent; ctx.font = `400 16px ${DISPLAY}`;
+        ctx.fillText(r.moves ? 'In progress' : 'Not started', 418, y + cardH * 0.34);
       }
       ctx.textAlign = 'center';
-      addHit(40, y, 400, cardH, `card${tier}`);
+      hitBox(40, y, 400, cardH, `card${tier}`);
     });
 
-    if (solvedCount() === TIERS.length) {
-      ctx.fillStyle = S.streak > 0 ? C.good : C.muted; ctx.font = `700 15px ${FONT}`;
-      ctx.fillText(S.streak > 0 ? `Streak ${S.streak}${S.bestStreak > S.streak ? ` · best ${S.bestStreak}` : ''}` : 'All three networks solved.', 240, 460);
-    }
+    const allDone = solvedCount() === TIERS.length;
+    button(40, cardTop + 3 * cardH + 3 * gap, 400, primaryH, allDone ? 'Share' : 'Play', allDone ? 'share' : 'play', 'primary');
 
-    button(40, 484, 400, 48, 'Share', 'share', false);
-    button(40, 544, 400, 44, 'How to play', 'help', false);
+    const secY = H - 128; // the row ends at H - 76, clear of the toast (H - 74)
+    if (allDone) {
+      ctx.fillStyle = S.streak > 0 ? C.good : C.muted; ctx.font = `400 15px ${DISPLAY}`;
+      ctx.fillText(S.streak > 0 ? `Streak ${S.streak}${S.bestStreak > S.streak ? ` · best ${S.bestStreak}` : ''}` : 'All three networks solved.', 240, secY - 34);
+    }
+    // Once the day is done the warm primary above is Share, so the row below
+    // keeps How to play alone: one action is never offered twice.
+    if (allDone) button(144, secY, 192, 52, 'How to play', 'help', 'secondary');
+    else {
+      button(40, secY, 192, 52, 'Share', 'share', 'secondary');
+      button(248, secY, 192, 52, 'How to play', 'help', 'secondary');
+    }
     ctx.fillStyle = C.muted; ctx.font = `400 12px ${FONT}`;
-    ctx.fillText('Missed a day? The arrows above open every earlier one.', 240, 610);
-    ctx.fillText('Self-contained, no network. Made by an AI agent.', 240, 686);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText('Missed a day? The arrows above open every earlier one.', 240, H - 40);
+    ctx.fillText('Self-contained, no network. Made by an AI agent.', 240, H - 20);
   }
 
   function drawNetwork() {
@@ -1346,7 +1456,9 @@
       ctx.beginPath(); ctx.arc(pt.x, pt.y, 26, 0, Math.PI * 2); ctx.stroke();
       ctx.fillStyle = selected ? '#0e1c06' : C.text; ctx.font = `800 18px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(STATIONS[i], pt.x, pt.y + 1);
-      addHit(pt.x - 26, pt.y - 26, 52, 52, `station${i}`);
+      // The drawn chip stays 52 px; the tap target grows to the 56 px floor
+      // with nothing near to hit (stations are 174 px apart). Audit item 12.
+      hitBox(pt.x - 26, pt.y - 26, 52, 52, `station${i}`);
     }
 
     // The arrow-key cursor: a dashed ring, independent of `selected` (a tap's
@@ -1365,39 +1477,44 @@
     ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
     const p = puzzle(), r = run();
 
-    iconButton(8, 4, 34, 32, 'home', 'home');
-    iconButton(48, 4, 34, 32, 'mute', 'mute');
-    iconButton(88, 4, 34, 32, 'hint', 'hint');
+    // Icon buttons 60 px apart, so their padded 56 px hit boxes never touch
+    // (brand-system §5).
+    iconButton(10, 8, 40, 40, 'home', 'home');
+    iconButton(70, 8, 40, 40, 'mute', 'mute');
+    iconButton(130, 8, 40, 40, 'hint', 'hint');
     ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
     ctx.fillStyle = r.moves > p.par ? C.warn : C.text; ctx.font = `700 15px ${FONT}`;
-    ctx.fillText(`${r.moves} · par ${p.par}`, 466, 22);
+    ctx.fillText(`${r.moves} · par ${p.par}`, 466, 28);
     ctx.textAlign = 'center';
     ctx.fillStyle = C.muted; ctx.font = `600 13px ${FONT}`;
-    ctx.fillText(`Day ${S.day} · ${TIERS[S.tier].label}${S.practice ? ' · practice' : ''}`, 240, 22);
+    ctx.fillText(`Day ${S.day} · ${TIERS[S.tier].label}${S.practice ? ' · practice' : ''}`, 314, 28);
 
-    const tabY = 40, tabW = 148, tabH = 30;
+    const tabY = 70, tabW = 148, tabH = 36;
     TIERS.forEach((t, tier) => {
       const x = 14 + tier * (tabW + 6), active = tier === S.tier;
       ctx.fillStyle = active ? C.accent : C.card;
       roundRect(x, tabY, tabW, tabH, 8); ctx.fill();
-      ctx.fillStyle = active ? '#0e1c06' : C.text; ctx.font = `700 13px ${FONT}`;
+      ctx.strokeStyle = C.accent; ctx.lineWidth = 2; roundRect(x, tabY, tabW, tabH, 8); ctx.stroke();
+      ctx.fillStyle = active ? C.inkWarm : C.text; ctx.font = `400 16px ${DISPLAY}`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(t.label, x + tabW / 2, tabY + tabH / 2 + 1);
-      addHit(x, tabY, tabW, tabH, `card${tier}`);
+      hitBox(x, tabY, tabW, tabH, `card${tier}`);
     });
 
-    const btnY = 76, btnW = 110, btnH = 40, gap = 6;
-    modeSwitch(12, btnY, btnW, btnH);
-    button(12 + (btnW + gap), btnY, btnW, btnH, 'Check', 'check', S.marks.size === N - 1 && proof().confirmed === N - 1 && !locked(), !locked());
-    button(12 + (btnW + gap) * 2, btnY, btnW, btnH, 'Clear', 'clear', false, !locked());
-    button(12 + (btnW + gap) * 3, btnY, btnW, btnH, 'Share', 'share', false);
+    const btnY = 126, btnW = 106, btnH = 48, gap = 6;
+    modeSwitch(12, btnY, 120, btnH);
+    // Check is the play screen's one primary action; it stays warm and is
+    // disabled only once the line is solved.
+    button(12 + 120 + gap, btnY, btnW, btnH, 'Check', 'check', 'primary', !locked());
+    button(12 + 120 + gap + (btnW + gap), btnY, btnW, btnH, 'Clear', 'clear', 'secondary', !locked());
+    button(12 + 120 + gap + (btnW + gap) * 2, btnY, btnW, btnH, 'Share', 'share', 'secondary');
 
     const coach = coachLines();
     if (coach) {
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillStyle = C.accent; ctx.font = `700 16px ${FONT}`;
-      ctx.fillText(coach[0], 240, 140);
-      if (coach[1]) { ctx.fillStyle = C.text; ctx.font = `400 14px ${FONT}`; ctx.fillText(coach[1], 240, 163); }
+      ctx.fillText(coach[0], 240, 200);
+      if (coach[1]) { ctx.fillStyle = C.text; ctx.font = `400 14px ${FONT}`; ctx.fillText(coach[1], 240, 223); }
     }
 
     ctx.save();
@@ -1410,23 +1527,39 @@
     ctx.fillStyle = C.muted;
     ctx.fillText(`${r.moves} ping${r.moves === 1 ? '' : 's'} · ${S.marks.size} of ${N - 1} lines marked`, 240, HUB_CY + HUB_R + 42);
 
-    if (locked()) {
-      ctx.fillStyle = C.good; ctx.font = `700 15px ${FONT}`;
-      ctx.fillText('Solved! Replay or Next.', 240, HUB_CY + HUB_R + 66);
-      button(120, HUB_CY + HUB_R + 78, 110, 30, 'Replay', 'replay');
-      button(250, HUB_CY + HUB_R + 78, 110, 30, 'Next', 'next');
-    }
+    if (locked()) drawSuccess(p, r);
+  }
+
+  // Success is a panel (brand-system §5) over the action row a solved line no
+  // longer needs: the Line tabs above it still switch lines, and the network
+  // the player just traced stays in full view below it, undimmed. It holds the
+  // result and one warm primary — "Next line", or "Share" once all three are
+  // done — with Replay as the secondary; the toast carries the full message.
+  // It starts below the tabs' hit boxes (60..116) and ends above the top
+  // station's cursor ring on the shortest frame (H 720: 246).
+  function drawSuccess(p, r) {
+    const dayDone = solvedCount() === TIERS.length;
+    const px = 8, pw = W - 16, py = 122, ph = 118;
+    panelFrame(px, py, pw, ph, 18);
+    addHit(px, py, pw, ph, 'successnone');
+    plaque(240, py, dayDone ? 'Day complete' : 'Line solved');
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = C.text; ctx.font = `400 20px ${DISPLAY}`;
+    ctx.fillText(`${parNote(r.solvedMoves, r.par)} · ${r.solvedMoves} ping${r.solvedMoves === 1 ? '' : 's'}`, 240, py + 36);
+    button(48, py + 56, 176, 52, dayDone ? 'Share' : 'Next line', dayDone ? 'share' : 'next', 'primary');
+    button(256, py + 56, 176, 52, 'Replay', 'replay', 'secondary');
   }
 
   function drawHelp() {
-    ctx.fillStyle = 'rgba(4,10,4,0.92)'; ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = C.card;
-    roundRect(30, 70, W - 60, H - 140, 16); ctx.fill();
-    ctx.strokeStyle = C.accentDim; ctx.lineWidth = 1; roundRect(30, 70, W - 60, H - 140, 16); ctx.stroke();
-    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-    ctx.fillStyle = C.accent; ctx.font = `800 22px ${FONT}`;
-    ctx.fillText('How to play', 240, 106);
-    ctx.fillStyle = C.text; ctx.font = `400 14px ${FONT}`; ctx.textAlign = 'left';
+    // The dim and its tap-to-close cover the whole canvas, letterbox included: a
+    // dim that stopped at the logical frame left a seam down both of its sides.
+    const bx = -view.ox / view.scale, by = -view.oy / view.scale, bw = view.cssW / view.scale, bh = view.cssH / view.scale;
+    ctx.fillStyle = 'rgba(4,10,4,0.9)'; ctx.fillRect(bx, by, bw, bh);
+    addHit(bx, by, bw, bh, 'closehelp'); // a tap on the dim backdrop closes
+    const pw = W - 60, ph = 500, px = 30, py = Math.max(24, (H - ph) / 2);
+    panelFrame(px, py, pw, ph, 18);
+    addHit(px, py, pw, ph, 'helpnone'); // a tap inside the panel is not a close
+    plaque(240, py, 'How to play');
     const lines = [
       'Five stations, A through E, are connected by a',
       'hidden wiring tree — four lines, never shown.',
@@ -1444,8 +1577,12 @@
       'Every new ping costs 1; asking again is free. A',
       'wrong check costs 2. Finish within par for a star.',
     ];
-    lines.forEach((l, i) => ctx.fillText(l, 56, 140 + i * 22));
-    addHit(0, 0, W, H, 'closehelp');
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = C.text; ctx.font = `400 14px ${FONT}`;
+    lines.forEach((l, i) => ctx.fillText(l, px + 26, py + 62 + i * 24));
+    // A close control — its hit box padded past the drawn pill — for anyone who
+    // does not reach for Esc or the backdrop.
+    button(px + pw - 20 - 96, py + ph - 66, 96, 46, 'Close', 'closehelp', 'secondary');
   }
 
   function drawEffects() {
@@ -1476,9 +1613,22 @@
   }
 
   // ---- input ----
+  // Help remembers the element that had focus when it opened and hands it back,
+  // so a keyboard player lands where they left (brand-system §5).
+  function openHelp() {
+    S.helpReturn = document.activeElement;
+    S.help = true;
+  }
+  function closeHelp() {
+    S.help = false;
+    const back = S.helpReturn;
+    S.helpReturn = null;
+    if (back && typeof back.focus === 'function') back.focus();
+  }
+
   function handleAction(action) {
     if (!action) return;
-    if (action === 'titledefault') {
+    if (action === 'titledefault' || action === 'play') {
       const first = S.runs.findIndex((r) => !r.solved);
       startPlay(first < 0 ? 0 : first);
       return;
@@ -1508,8 +1658,9 @@
       case 'replay': startPractice(); return;
       case 'next': goNext(); return;
       case 'onward': goOnward(); return;
-      case 'help': S.help = !S.help; return;
-      case 'closehelp': S.help = false; return;
+      case 'help': if (S.help) closeHelp(); else openHelp(); return;
+      case 'closehelp': closeHelp(); return;
+      case 'helpnone': case 'successnone': return; // inside a panel: not a tap-through
     }
   }
 
@@ -1517,7 +1668,27 @@
     invalidate();
     canvas.focus();
     const { x, y } = toLogical(e.clientX, e.clientY);
-    handleAction(hitTest(x, y));
+    // Remember what is pressed so its button can sink onto its lip; release()
+    // and cancel() clear it. Capturing the pointer keeps the release ours even
+    // if the finger leaves the canvas.
+    S.pressed = hitTest(x, y);
+    handleAction(S.pressed);
+    if (e.pointerId !== undefined && canvas.setPointerCapture) {
+      try { canvas.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+    }
+  });
+
+  canvas.addEventListener('pointerup', (e) => {
+    invalidate();
+    S.pressed = null;
+    if (e.pointerId !== undefined && canvas.releasePointerCapture) {
+      try { canvas.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+    }
+  });
+
+  canvas.addEventListener('pointercancel', () => {
+    invalidate();
+    S.pressed = null;
   });
 
   window.addEventListener('keydown', (e) => {
@@ -1541,7 +1712,7 @@
     switch (letter) {
       case ' ':
         e.preventDefault();
-        if (S.help) { S.help = false; return; }
+        if (S.help) { closeHelp(); return; }
         if (S.mode === 'title') handleAction('titledefault');
         else if (S.mode === 'play' && !locked()) toggleTapMode();
         return;
@@ -1551,11 +1722,11 @@
       case 'x': if (S.mode === 'play') clearMarks(); return;
       case 'c': share(); return;
       case 'l': if (S.mode === 'play') announce(describeState()); return;
-      case 'h': S.help = !S.help; sfx.click(); return;
+      case 'h': if (S.help) closeHelp(); else openHelp(); sfx.click(); return;
       case 'r': if (S.mode === 'play') startPractice(); return;
       case 'n': if (S.mode === 'play') goNext(); return;
       case 'Escape':
-        if (S.help) { S.help = false; return; }
+        if (S.help) { closeHelp(); return; }
         if (S.mode === 'play') goTitle();
         return;
     }
@@ -1568,7 +1739,7 @@
     const act = btn.dataset.act;
     if (!act) return;
     if (act === 'board') { announce(describeState()); return; }
-    if (act === 'help') { S.help = !S.help; return; }
+    if (act === 'help') { if (S.help) closeHelp(); else openHelp(); return; }
     handleAction(act);
   });
 
@@ -1586,6 +1757,26 @@
     invalidate();
     if (event.key === STORE && S.runs.length) absorb(readStore());
   });
+
+  // ---- display face ----
+  // The portal's Righteous, embedded as its exact bytes: a game is one
+  // self-contained document and may make no request of its own, so the font
+  // travels inside the file and is decoded into a FontFace (a `data:` URL would
+  // be blocked by the /play/* CSP; the bytes are the same file the portal
+  // self-hosts at /fonts/righteous-latin-400-normal.woff2). Until it is ready the
+  // labels fall back to the system stack; frame() redraws once when it loads.
+  const FONT_WOFF2 = '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';
+  let displayFace = null, displayFaceSettled = false;
+  function installDisplayFont() {
+    try {
+      const bin = atob(FONT_WOFF2);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      displayFace = new FontFace(DISPLAY_FONT, bytes.buffer);
+      document.fonts.add(displayFace);
+      displayFace.load().catch(() => {}); // a font that will not load just falls back
+    } catch { displayFace = null; }
+  }
 
   // ---- run ----
   // A still screen — the title, a board nobody has touched, the help overlay —
@@ -1616,6 +1807,12 @@
     const dt = Math.min(0.05, lastT ? (now - lastT) / 1000 : 0);
     lastT = now;
     update(dt);
+    // The display face loads a hair after the first frame: redraw once when it
+    // has settled (loaded or failed), so labels are never left in the fallback.
+    if (displayFace && !displayFaceSettled && displayFace.status !== 'unloaded' && displayFace.status !== 'loading') {
+      displayFaceSettled = true;
+      dirty = true;
+    }
     if (!PICTURE) {
       S.dayCheck -= dt;
       if (S.dayCheck <= 0) { S.dayCheck = 5; checkDay(); }
@@ -1626,14 +1823,17 @@
     if (dirty || live || wasAnimating) {
       dirty = false;
       render();
-      // The generator waits for this before it photographs (POSED_FLAG in picture-flag.mjs).
-      if (PICTURE) window.__arkaiPosed = true;
+      // The generator waits for this before it photographs (POSED_FLAG in
+      // picture-flag.mjs) — but only once the display face has settled, so a
+      // card is never shot with the fallback lettering.
+      if (PICTURE && (!displayFace || displayFaceSettled)) window.__arkaiPosed = true;
     }
     wasAnimating = live;
   }
 
   // A canvas whose backing store the browser dropped comes back blank.
   canvas.addEventListener('contextrestored', invalidate);
+  installDisplayFont();
   resize();
   if (PICTURE) posePicture(); else loadDay(dayFromDateParam(DATE_RAW) ?? dayNumber(new Date()));
   requestAnimationFrame(frame);
