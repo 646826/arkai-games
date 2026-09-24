@@ -6,7 +6,7 @@
 <meta name="color-scheme" content="dark">
 <title>Snake — Arkai</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #04120c; overflow: hidden; }
+  html, body { margin: 0; height: 100%; background: #123d27; overflow: hidden; }
   body { -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
   canvas { display: block; width: 100vw; height: 100vh; touch-action: none; outline: none; cursor: pointer; }
 </style>
@@ -18,10 +18,10 @@
   'use strict';
 
   // ---- board (logical pixels, origin top-left, x right, y down) ----
-  const W = 540, H = 720, TOP = 64;
+  const W = 540, H = 720, TOP = 84, BOTTOM = 36;
   const COLS = 21, ROWS = 25, CELL = 24;
   const BOARD_X = (W - COLS * CELL) / 2;          // 18
-  const BOARD_Y = TOP + (H - TOP - 48 - ROWS * CELL) / 2;
+  const BOARD_Y = TOP + (H - TOP - BOTTOM - ROWS * CELL) / 2;
   const BOARD_W = COLS * CELL, BOARD_H = ROWS * CELL;
   const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
@@ -30,6 +30,7 @@
   const SPEED_START = 7, SPEED_MAX = 16, SPEED_RAMP = 34; // foods eaten to reach max
   const GOLD_EVERY = 5, GOLD_LIFE = 6;                    // every Nth food, seconds alive
   const STORE_BEST = 'arkai:snake:best', STORE_MUTE = 'arkai:snake:muted';
+  const BITE_TIME = 0.22;
 
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -39,6 +40,14 @@
   // `posePicture`). A pose is the same every time, so it neither reads nor
   // writes what a player has stored.
   const PICTURE = window.__arkaiPicture === true;
+
+  // A player who asked the OS for less motion gets the same rules and the same
+  // feedback, just without screen shake, flying particles or rising score text —
+  // state changes still read clearly, they just don't move to say so.
+  const REDUCED_MOTION = (() => {
+    try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
+  })();
+  const MOTION = REDUCED_MOTION ? 0 : 1;
 
   const storage = {
     get(key) { if (PICTURE) return null; try { return localStorage.getItem(key); } catch { return null; } },
@@ -52,7 +61,7 @@
     food: null, gold: null, goldT: 0,
     eaten: 0, score: 0, best: Number(storage.get(STORE_BEST)) || 0, newBest: false,
     muted: storage.get(STORE_MUTE) === '1',
-    acc: 0, clock: 0, shake: 0, overT: 0, flash: 0,
+    acc: 0, clock: 0, shake: 0, overT: 0, flash: 0, bite: 0,
     parts: [], floats: [],
   };
 
@@ -129,6 +138,7 @@
   }
 
   function spawnParts(x, y, color, count) {
+    if (REDUCED_MOTION) return;
     for (let i = 0; i < count; i++) {
       const a = Math.random() * Math.PI * 2, s = 40 + Math.random() * 140;
       S.parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.45 + Math.random() * 0.35, t: 0, color });
@@ -148,7 +158,7 @@
     S.prevTail = null;
     S.grew = false;
     S.eaten = 0; S.score = 0; S.newBest = false;
-    S.acc = 0; S.shake = 0; S.overT = 0; S.flash = 0;
+    S.acc = 0; S.shake = 0; S.overT = 0; S.flash = 0; S.bite = 0;
     S.parts = []; S.floats = [];
     S.gold = null; S.goldT = 0;
     S.food = freeCell(null);
@@ -200,6 +210,11 @@
       S.best = S.score;
       S.newBest = true;
       storage.set(STORE_BEST, String(S.best));
+      // A new best gets its own small fireworks, not just a colour change on a number.
+      if (!REDUCED_MOTION) {
+        spawnParts(GO_PANEL.x + GO_PANEL.w * 0.3, GO_PANEL.y + 70, '#fbbf24', 16);
+        spawnParts(GO_PANEL.x + GO_PANEL.w * 0.7, GO_PANEL.y + 70, '#4ade80', 16);
+      }
     }
     tone(300, 0.14, 'sawtooth', 0.05);
     tone(200, 0.2, 'sawtooth', 0.05, 0.1);
@@ -248,6 +263,7 @@
     if (eatsFood) {
       S.eaten++;
       S.score += 10;
+      S.bite = 1;
       spawnParts(cellX(next.x), cellY(next.y), '#f97316', 12);
       float(cellX(next.x), cellY(next.y) - 6, '+10', '#fdba74');
       tone(520 + Math.min(12, S.eaten) * 18, 0.07, 'square', 0.05);
@@ -261,6 +277,7 @@
     if (eatsGold) {
       S.score += 50;
       S.gold = null;
+      S.bite = 1.4;
       spawnParts(cellX(next.x), cellY(next.y), '#fbbf24', 20);
       float(cellX(next.x), cellY(next.y) - 6, '+50', '#fde68a');
       tone(700, 0.08, 'triangle', 0.05);
@@ -281,6 +298,7 @@
     S.clock += dt;
     if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 30);
     if (S.flash > 0) S.flash = Math.max(0, S.flash - dt);
+    if (S.bite > 0) S.bite = Math.max(0, S.bite - dt / BITE_TIME);
 
     for (let i = S.parts.length - 1; i >= 0; i--) {
       const p = S.parts[i];
@@ -328,60 +346,133 @@
     canvas.height = Math.round(ch * dpr);
   }
 
-  const roundRect = (x, y, w, h, r) => {
+  const roundRect = (x, y, w, h, r, c = ctx) => {
     const rr = Math.min(r, w / 2, h / 2);
-    ctx.beginPath();
-    ctx.moveTo(x + rr, y);
-    ctx.arcTo(x + w, y, x + w, y + h, rr);
-    ctx.arcTo(x + w, y + h, x, y + h, rr);
-    ctx.arcTo(x, y + h, x, y, rr);
-    ctx.arcTo(x, y, x + w, y, rr);
-    ctx.closePath();
+    c.beginPath();
+    c.moveTo(x + rr, y);
+    c.arcTo(x + w, y, x + w, y + h, rr);
+    c.arcTo(x + w, y + h, x, y + h, rr);
+    c.arcTo(x, y + h, x, y, rr);
+    c.arcTo(x, y, x + w, y, rr);
+    c.closePath();
   };
 
-  function drawBoard() {
-    ctx.fillStyle = '#071b12';
-    roundRect(BOARD_X - 6, BOARD_Y - 6, BOARD_W + 12, BOARD_H + 12, 14);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(52, 211, 153, 0.22)';
-    ctx.lineWidth = 2;
-    ctx.stroke();
+  // A lit playing field: a radial gradient standing in for a lamp above the
+  // board, a checker texture for material, and a soft vignette for depth —
+  // the near-black grid the owner rejected (#28) had none of these.
+  function paintBoard(c) {
+    const x = BOARD_X - 8, y = BOARD_Y - 8, w = BOARD_W + 16, h = BOARD_H + 16;
+    const g = c.createRadialGradient(x + w * 0.3, y + h * 0.22, 24, x + w * 0.5, y + h * 0.58, w * 0.95);
+    g.addColorStop(0, '#2c8a56');
+    g.addColorStop(0.42, '#1c5c3a');
+    g.addColorStop(1, '#134127');
+    c.fillStyle = g;
+    roundRect(x, y, w, h, 20, c);
+    c.fill();
 
-    // Checkerboard, two shades apart by a hair: it gives the eye a grid to judge
-    // distance by without turning the board into graph paper.
-    for (let y = 0; y < ROWS; y++) {
-      for (let x = 0; x < COLS; x++) {
-        if ((x + y) % 2 === 0) continue;
-        ctx.fillStyle = 'rgba(255,255,255,0.022)';
-        ctx.fillRect(BOARD_X + x * CELL, BOARD_Y + y * CELL, CELL, CELL);
+    c.save();
+    c.shadowColor = 'rgba(74, 222, 128, 0.35)';
+    c.shadowBlur = 16;
+    c.strokeStyle = 'rgba(134, 239, 172, 0.55)';
+    c.lineWidth = 2.5;
+    c.stroke();
+    c.restore();
+
+    // Checkerboard, alternating a touch lighter and a touch darker than the
+    // gradient beneath it: a grid the eye can judge distance by, not graph paper.
+    for (let cy = 0; cy < ROWS; cy++) {
+      for (let cx = 0; cx < COLS; cx++) {
+        if ((cx + cy) % 2 === 0) {
+          c.fillStyle = 'rgba(255,255,255,0.05)';
+        } else {
+          c.fillStyle = 'rgba(0,0,0,0.05)';
+        }
+        c.fillRect(BOARD_X + cx * CELL, BOARD_Y + cy * CELL, CELL, CELL);
       }
     }
+
+    const vg = c.createRadialGradient(
+      BOARD_X + BOARD_W / 2, BOARD_Y + BOARD_H / 2, BOARD_H * 0.3,
+      BOARD_X + BOARD_W / 2, BOARD_Y + BOARD_H / 2, BOARD_H * 0.78);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(0,0,0,0.14)');
+    c.fillStyle = vg;
+    c.fillRect(BOARD_X, BOARD_Y, BOARD_W, BOARD_H);
+  }
+
+  // The field never changes during a run, yet a board-sized gradient and a
+  // blurred glow repainted every frame took a phone's whole frame budget
+  // (ARK-62: 50 ms a frame instead of 16.7 at 390×844, DPR 3, software canvas).
+  // So it is painted once per canvas size into a canvas of its own and copied
+  // each frame. The copy lands on whole device pixels and is 1:1, the fraction
+  // of a pixel going into the painting, so the picture is the one painted
+  // directly — the blur too, which ignores the transform.
+  const boardCache = { canvas: null, key: '' };
+  function drawBoard() {
+    const unit = view.scale * view.dpr;            // device pixels per logical pixel
+    if (!(unit > 0)) return;
+    const m = 2 + 24 / unit;                       // room for the glow: 24 device px
+    const x = BOARD_X - 8 - m, y = BOARD_Y - 8 - m;
+    const w = BOARD_W + 16 + 2 * m, h = BOARD_H + 16 + 2 * m;
+    const px = view.dpr * view.ox + unit * x, py = view.dpr * view.oy + unit * y;
+    const fx = px - Math.floor(px), fy = py - Math.floor(py);
+    const key = `${unit}:${fx}:${fy}`;
+    if (boardCache.key !== key) {
+      const oc = boardCache.canvas || document.createElement('canvas');
+      oc.width = Math.ceil(w * unit + 1);
+      oc.height = Math.ceil(h * unit + 1);
+      const c = oc.getContext('2d');
+      c.setTransform(unit, 0, 0, unit, fx - x * unit, fy - y * unit);
+      paintBoard(c);
+      boardCache.canvas = oc;
+      boardCache.key = key;
+    }
+    const oc = boardCache.canvas;
+    ctx.drawImage(oc, x - fx / unit, y - fy / unit, oc.width / unit, oc.height / unit);
   }
 
   function drawFood(f, t) {
     const pulse = 1 + Math.sin(t * 6) * 0.06;
-    const x = cellX(f.x), y = cellY(f.y), r = CELL * 0.3 * pulse;
-    const g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.2, x, y, r);
-    g.addColorStop(0, '#fdba74');
-    g.addColorStop(1, '#ea580c');
+    const x = cellX(f.x), y = cellY(f.y), r = CELL * 0.32 * pulse;
+    ctx.save();
+    ctx.shadowColor = 'rgba(251, 146, 60, 0.65)';
+    ctx.shadowBlur = 12;
+    const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.35, r * 0.15, x, y, r);
+    g.addColorStop(0, '#fed7aa');
+    g.addColorStop(0.5, '#fb923c');
+    g.addColorStop(1, '#c2410c');
     ctx.fillStyle = g;
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = 'rgba(253, 186, 116, 0.5)';
-    ctx.lineWidth = 2;
+    ctx.restore();
+    // A small stem: an ordinary bite is still a fruit, not just a dot.
+    ctx.strokeStyle = '#4ade80';
+    ctx.lineWidth = 2.5;
     ctx.beginPath();
-    ctx.arc(x, y, r + 3, 0, Math.PI * 2);
+    ctx.moveTo(x, y - r * 0.9);
+    ctx.lineTo(x + r * 0.35, y - r * 1.35);
     ctx.stroke();
+    // specular glint
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.beginPath();
+    ctx.arc(x - r * 0.32, y - r * 0.35, r * 0.22, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   function drawGold(f, t) {
     const left = S.goldT / GOLD_LIFE;
     const pulse = 1 + Math.sin(t * 12) * 0.1;
-    const x = cellX(f.x), y = cellY(f.y), r = CELL * 0.32 * pulse;
+    const x = cellX(f.x), y = cellY(f.y), r = CELL * 0.34 * pulse;
     ctx.save();
+    ctx.shadowColor = 'rgba(251, 191, 36, 0.85)';
+    ctx.shadowBlur = 18;
     ctx.translate(x, y);
-    ctx.fillStyle = '#fbbf24';
+    const g = ctx.createRadialGradient(-r * 0.3, -r * 0.3, r * 0.1, 0, 0, r);
+    g.addColorStop(0, '#fef3c7');
+    g.addColorStop(0.5, '#fbbf24');
+    g.addColorStop(1, '#b45309');
+    ctx.fillStyle = g;
     ctx.beginPath();
     for (let i = 0; i < 10; i++) {
       const a = (Math.PI / 5) * i - Math.PI / 2;
@@ -395,7 +486,7 @@
     ctx.strokeStyle = 'rgba(251, 191, 36, 0.85)';
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.arc(x, y, CELL * 0.46, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * left);
+    ctx.arc(x, y, CELL * 0.48, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * left);
     ctx.stroke();
   }
 
@@ -417,113 +508,304 @@
     return pts;
   }
 
-  function drawSnake(t) {
-    const pts = snakePoints(t);
-    if (!pts.length) return;
-    const dead = S.mode === 'gameover';
+  // Width shrinks from head to tail so the last few segments taper to a point
+  // instead of ending in a flat stub.
+  function segWidth(i, n) {
+    const t = n <= 1 ? 0 : i / (n - 1);
+    return lerp(CELL * 0.86, CELL * 0.3, Math.pow(t, 0.85));
+  }
 
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = dead ? 'rgba(248, 113, 113, 0.28)' : 'rgba(52, 211, 153, 0.22)';
-    ctx.lineWidth = CELL * 0.92;
+  const LIGHT_DIR = { x: -0.55, y: -0.83 };
+
+  // Shared renderer for both the live snake and the idle one shown on the
+  // title screen: a light source picked once so every segment shades the same
+  // way, per-segment tapering for a body with volume, and a head with eyes
+  // that look the way it is facing.
+  function paintSnakeBody(pts, dir, dead, biteK) {
+    const n = pts.length;
+    if (!n) return;
+
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.strokeStyle = dead ? 'rgba(248,113,113,0.18)' : 'rgba(74,222,128,0.18)';
     ctx.beginPath();
     ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-    if (pts.length === 1) ctx.lineTo(pts[0].x + 0.01, pts[0].y);
+    for (let i = 1; i < n; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    if (n === 1) ctx.lineTo(pts[0].x + 0.01, pts[0].y);
+    ctx.lineWidth = CELL * 1.0;
     ctx.stroke();
 
-    const grad = ctx.createLinearGradient(pts[0].x, pts[0].y, pts[pts.length - 1].x, pts[pts.length - 1].y);
-    grad.addColorStop(0, dead ? '#f87171' : '#4ade80');
-    grad.addColorStop(1, dead ? '#7f1d1d' : '#15803d');
-    ctx.strokeStyle = grad;
-    ctx.lineWidth = CELL * 0.72;
+    for (let i = 0; i < Math.max(1, n - 1); i++) {
+      const p0 = pts[i], p1 = pts[Math.min(i + 1, n - 1)];
+      const dx = p1.x - p0.x, dy = p1.y - p0.y;
+      const len = Math.hypot(dx, dy) || 1;
+      let nx = -dy / len, ny = dx / len;
+      if (nx * LIGHT_DIR.x + ny * LIGHT_DIR.y < 0) { nx = -nx; ny = -ny; }
+      const w = (segWidth(i, n) + segWidth(Math.min(i + 1, n - 1), n)) / 2;
+      const hw = w * 0.6;
+      const grad = ctx.createLinearGradient(p0.x + nx * hw, p0.y + ny * hw, p0.x - nx * hw, p0.y - ny * hw);
+      if (dead) {
+        grad.addColorStop(0, '#fca5a5');
+        grad.addColorStop(0.45, '#ef4444');
+        grad.addColorStop(1, '#7f1d1d');
+      } else {
+        grad.addColorStop(0, '#bbf7d0');
+        grad.addColorStop(0.45, '#4ade80');
+        grad.addColorStop(1, '#14532d');
+      }
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = w;
+      ctx.beginPath();
+      ctx.moveTo(p0.x, p0.y);
+      ctx.lineTo(p1.x, p1.y);
+      ctx.stroke();
+    }
+
+    drawHead(pts[0], dir, dead, biteK);
+  }
+
+  function drawHead(head, dir, dead, biteK) {
+    const ang = Math.atan2(dir.y, dir.x);
+    const squash = 1 + biteK * 0.24 * MOTION;
+    const rx = CELL * 0.58 * squash, ry = CELL * 0.52 / squash;
+
+    ctx.save();
+    ctx.translate(head.x, head.y);
+    ctx.rotate(ang);
+    const g = ctx.createRadialGradient(-rx * 0.15, -ry * 0.4, 2, 0, 0, rx * 1.3);
+    if (dead) { g.addColorStop(0, '#fecaca'); g.addColorStop(0.55, '#ef4444'); g.addColorStop(1, '#7f1d1d'); }
+    else { g.addColorStop(0, '#e4f9d0'); g.addColorStop(0.55, '#4ade80'); g.addColorStop(1, '#15803d'); }
+    ctx.fillStyle = g;
     ctx.beginPath();
-    ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-    if (pts.length === 1) ctx.lineTo(pts[0].x + 0.01, pts[0].y);
+    ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = dead ? 'rgba(127,29,29,0.55)' : 'rgba(21,128,61,0.55)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(rx * 0.15, -ry * 0.55);
+    ctx.quadraticCurveTo(rx * 0.85, 0, rx * 0.15, ry * 0.55);
     ctx.stroke();
+    ctx.restore();
 
     // eyes, looking where the snake is going
-    const head = pts[0];
-    const d = S.dir;
-    const side = { x: -d.y, y: d.x };
-    const eo = CELL * 0.17, ef = CELL * 0.12;
+    const side = { x: -dir.y, y: dir.x };
+    const eo = CELL * 0.2, ef = CELL * 0.17;
     for (const sign of [1, -1]) {
-      const ex = head.x + side.x * eo * sign + d.x * ef;
-      const ey = head.y + side.y * eo * sign + d.y * ef;
+      const ex = head.x + side.x * eo * sign + dir.x * ef;
+      const ey = head.y + side.y * eo * sign + dir.y * ef;
       ctx.fillStyle = '#04120c';
       ctx.beginPath();
-      ctx.arc(ex, ey, CELL * 0.1, 0, Math.PI * 2);
+      ctx.arc(ex, ey, CELL * 0.115, 0, Math.PI * 2);
       ctx.fill();
       if (!dead) {
         ctx.fillStyle = '#ecfdf5';
         ctx.beginPath();
-        ctx.arc(ex + d.x * 1.2, ey + d.y * 1.2, CELL * 0.045, 0, Math.PI * 2);
+        ctx.arc(ex + dir.x * 1.4, ey + dir.y * 1.4, CELL * 0.05, 0, Math.PI * 2);
         ctx.fill();
+      } else {
+        ctx.strokeStyle = '#450a0a';
+        ctx.lineWidth = 2;
+        const s = CELL * 0.08;
+        ctx.beginPath();
+        ctx.moveTo(ex - s, ey - s); ctx.lineTo(ex + s, ey + s);
+        ctx.moveTo(ex - s, ey + s); ctx.lineTo(ex + s, ey - s);
+        ctx.stroke();
       }
     }
   }
 
+  function drawSnake(t) {
+    const pts = snakePoints(t);
+    if (!pts.length) return;
+    paintSnakeBody(pts, S.dir, S.mode === 'gameover', S.bite);
+  }
+
+  // A short, idle snake drawn purely for the title screen: it never touches
+  // `S.cells` (the real run's starting position), so showing it costs nothing
+  // in gameplay state and nothing is animated — the title stays idle.
+  const TITLE_SNAKE_CELLS = (() => {
+    const corners = [[16, 5], [12, 5], [12, 3], [6, 3], [6, 7], [2, 7]];
+    const cells = [{ x: corners[0][0], y: corners[0][1] }];
+    for (const [cx, cy] of corners.slice(1)) {
+      let c = cells[cells.length - 1];
+      while (c.x !== cx || c.y !== cy) {
+        c = { x: c.x + Math.sign(cx - c.x), y: c.y + Math.sign(cy - c.y) };
+        cells.push(c);
+      }
+    }
+    return cells;
+  })();
+
+  function drawTitleSnake() {
+    const pts = TITLE_SNAKE_CELLS.map((c) => ({ x: cellX(c.x), y: cellY(c.y) }));
+    paintSnakeBody(pts, { x: 1, y: 0 }, false, 0);
+    // A food dot ahead of the head explains "eat" without another line of copy.
+    // A fixed time, not S.clock: the title stays a still picture, not a pulsing one.
+    drawFood({ x: 18, y: 5 }, 0);
+  }
+
   function drawHud() {
-    ctx.textBaseline = 'middle';
+    ctx.textBaseline = 'alphabetic';
+    const dim = S.mode === 'title';
+    ctx.globalAlpha = dim ? 0.6 : 1;
+
     ctx.textAlign = 'left';
-    ctx.font = `600 15px ${FONT}`;
+    ctx.font = `700 30px ${FONT}`;
     ctx.fillStyle = '#6ee7b7';
-    ctx.fillText('SCORE', 20, 24);
-    ctx.font = `700 26px ${FONT}`;
+    ctx.fillText('SCORE', 22, 28);
+    ctx.font = `800 40px ${FONT}`;
     ctx.fillStyle = '#ecfdf5';
-    ctx.fillText(String(S.score), 20, 46);
+    ctx.fillText(String(S.score), 22, 74);
 
     ctx.textAlign = 'center';
-    ctx.font = `600 15px ${FONT}`;
+    ctx.font = `700 30px ${FONT}`;
     ctx.fillStyle = '#6ee7b7';
-    ctx.fillText('LENGTH', W / 2, 24);
-    ctx.font = `700 26px ${FONT}`;
+    ctx.fillText('LENGTH', W / 2, 28);
+    ctx.font = `800 40px ${FONT}`;
     ctx.fillStyle = '#ecfdf5';
-    ctx.fillText(String(S.cells.length), W / 2, 46);
+    ctx.fillText(String(S.cells.length), W / 2, 74);
 
     ctx.textAlign = 'right';
-    ctx.font = `600 15px ${FONT}`;
+    ctx.font = `700 30px ${FONT}`;
     ctx.fillStyle = '#6ee7b7';
-    ctx.fillText('BEST', W - 20, 24);
-    ctx.font = `700 26px ${FONT}`;
+    ctx.fillText('BEST', W - 22, 28);
+    ctx.font = `800 40px ${FONT}`;
     ctx.fillStyle = S.newBest ? '#fbbf24' : '#ecfdf5';
-    ctx.fillText(String(S.best), W - 20, 46);
+    ctx.fillText(String(S.best), W - 22, 74);
+    ctx.globalAlpha = 1;
 
     // The key hints are instructions, and the picture carries none.
     if (PICTURE) return;
     ctx.textAlign = 'center';
-    ctx.font = `500 13px ${FONT}`;
-    ctx.fillStyle = 'rgba(167, 243, 208, 0.55)';
-    ctx.fillText(S.muted ? 'P pause · M sound off' : 'P pause · M sound on', W / 2, H - 22);
+    ctx.font = `600 30px ${FONT}`;
+    ctx.fillStyle = 'rgba(167, 243, 208, 0.75)';
+    ctx.fillText(S.muted ? 'P pause · M sound off' : 'P pause · M sound on', W / 2, H - 14);
   }
 
-  function drawOverlay(title, lines, accent) {
-    ctx.fillStyle = 'rgba(4, 18, 12, 0.82)';
-    ctx.fillRect(0, 0, W, H);
+  function drawPanel(x, y, w, h, r, accent) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(16, 52, 34, 0.66)';
+    roundRect(x, y, w, h, r);
+    ctx.fill();
+    ctx.strokeStyle = accent || 'rgba(134, 239, 172, 0.45)';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawButton(cx, cy, w, h, label) {
+    ctx.save();
+    ctx.shadowColor = 'rgba(74, 222, 128, 0.55)';
+    ctx.shadowBlur = 20;
+    const g = ctx.createLinearGradient(cx, cy - h / 2, cx, cy + h / 2);
+    g.addColorStop(0, '#86efac');
+    g.addColorStop(1, '#16a34a');
+    ctx.fillStyle = g;
+    roundRect(cx - w / 2, cy - h / 2, w, h, h / 2);
+    ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = 2;
+    roundRect(cx - w / 2, cy - h / 2, w, h, h / 2);
+    ctx.stroke();
+    ctx.fillStyle = '#04120c';
+    ctx.font = `800 34px ${FONT}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = accent;
-    ctx.font = `800 54px ${FONT}`;
-    ctx.fillText(title, W / 2, H / 2 - 90);
-    ctx.font = `500 19px ${FONT}`;
-    lines.forEach((line, i) => {
-      ctx.fillStyle = i === 0 ? '#ecfdf5' : 'rgba(209, 250, 229, 0.72)';
-      ctx.fillText(line, W / 2, H / 2 - 30 + i * 32);
-    });
+    ctx.fillText(label, cx, cy + 2);
+  }
+
+  const TITLE_PANEL = { x: BOARD_X + 10, y: 296, w: BOARD_W - 20, h: 380 };
+  const BTN_W = 240, BTN_H = 112;
+
+  function drawTitleScreen() {
+    drawTitleSnake();
+    const p = TITLE_PANEL;
+    drawPanel(p.x, p.y, p.w, p.h, 22);
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#4ade80';
+    ctx.font = `800 60px ${FONT}`;
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText('SNAKE', W / 2, p.y + 62);
+
+    // The rule, said once, split across two short lines so it stays readable
+    // at 30 logical px instead of shrinking below the phone-legibility floor.
+    ctx.font = `600 30px ${FONT}`;
+    ctx.fillStyle = '#ecfdf5';
+    ctx.fillText('Eat to grow.', W / 2, p.y + 104);
+    ctx.fillText('Don’t hit walls or yourself.', W / 2, p.y + 140);
+
+    ctx.font = `600 30px ${FONT}`;
+    ctx.fillStyle = 'rgba(209, 250, 229, 0.72)';
+    ctx.fillText('Arrows, WASD, or swipe to steer.', W / 2, p.y + 176);
+
+    const btnCy = p.y + 266;
+    drawButton(W / 2, btnCy, BTN_W, BTN_H, 'PLAY');
+
+    if (S.best > 0) {
+      ctx.font = `700 32px ${FONT}`;
+      ctx.fillStyle = '#fbbf24';
+      ctx.fillText(`Best ${S.best}`, W / 2, p.y + p.h - 26);
+    }
+  }
+
+  function drawPausedScreen() {
+    const w = 430, h = 200;
+    const x = W / 2 - w / 2, y = BOARD_Y + BOARD_H / 2 - h / 2;
+    drawPanel(x, y, w, h, 22);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#6ee7b7';
+    ctx.font = `800 46px ${FONT}`;
+    ctx.fillText('PAUSED', W / 2, y + 84);
+    ctx.font = `600 30px ${FONT}`;
+    ctx.fillStyle = '#ecfdf5';
+    ctx.fillText('Tap or press P to continue', W / 2, y + 134);
+  }
+
+  const GO_PANEL = { x: BOARD_X + 20, y: 168, w: BOARD_W - 40, h: 400 };
+
+  function drawGameOverScreen() {
+    const p = GO_PANEL;
+    drawPanel(p.x, p.y, p.w, p.h, 24, S.newBest ? 'rgba(251, 191, 36, 0.6)' : 'rgba(248, 113, 113, 0.4)');
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = S.newBest ? '#fbbf24' : '#f87171';
+    ctx.font = `800 52px ${FONT}`;
+    ctx.fillText('GAME OVER', W / 2, p.y + 70);
+
+    ctx.font = `600 30px ${FONT}`;
+    ctx.fillStyle = '#ecfdf5';
+    ctx.fillText(`Score ${S.score} · length ${S.cells.length}`, W / 2, p.y + 122);
+
+    ctx.font = `700 34px ${FONT}`;
+    ctx.fillStyle = S.newBest ? '#fbbf24' : 'rgba(209, 250, 229, 0.85)';
+    ctx.fillText(S.newBest ? 'New personal best!' : `Best ${S.best}`, W / 2, p.y + 168);
+
+    const ready = S.overT > 0.7;
+    const btnCy = p.y + 268;
+    ctx.save();
+    if (!ready) ctx.globalAlpha = 0.55;
+    drawButton(W / 2, btnCy, BTN_W, BTN_H, 'PLAY AGAIN');
+    ctx.restore();
+
+    ctx.font = `600 30px ${FONT}`;
+    ctx.fillStyle = 'rgba(209, 250, 229, 0.65)';
+    ctx.fillText(ready ? 'Tap or press Space' : ' ', W / 2, p.y + p.h - 22);
   }
 
   function draw() {
     const dpr = view.dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = '#04120c';
+    ctx.fillStyle = '#123d27';
     ctx.fillRect(0, 0, view.cw, view.ch);
 
     ctx.save();
     ctx.translate(view.ox, view.oy);
     ctx.scale(view.scale, view.scale);
     if (S.shake > 0) {
-      ctx.translate((Math.random() - 0.5) * S.shake, (Math.random() - 0.5) * S.shake);
+      ctx.translate((Math.random() - 0.5) * S.shake * MOTION, (Math.random() - 0.5) * S.shake * MOTION);
     }
 
     drawBoard();
@@ -542,9 +824,9 @@
     for (const f of S.floats) {
       ctx.globalAlpha = Math.max(0, 1 - f.t / 0.9);
       ctx.fillStyle = f.color;
-      ctx.font = `700 18px ${FONT}`;
+      ctx.font = `700 30px ${FONT}`;
       ctx.textAlign = 'center';
-      ctx.fillText(f.text, f.x, f.y - f.t * 34);
+      ctx.fillText(f.text, f.x, f.y - f.t * 34 * MOTION);
     }
     ctx.globalAlpha = 1;
 
@@ -556,27 +838,11 @@
     }
 
     if (S.mode === 'title') {
-      drawOverlay('SNAKE', [
-        'Eat, grow, and never bite yourself.',
-        'Arrow keys, WASD or swipe to steer.',
-        'Gold stars are worth 50 — and they do not wait.',
-        '',
-        'Tap or press Space to play',
-      ], '#4ade80');
-      if (S.best > 0) {
-        ctx.fillStyle = '#fbbf24';
-        ctx.font = `700 20px ${FONT}`;
-        ctx.fillText(`Best ${S.best}`, W / 2, H / 2 + 150);
-      }
+      drawTitleScreen();
     } else if (S.mode === 'paused') {
-      drawOverlay('PAUSED', ['Tap or press P to continue'], '#6ee7b7');
+      drawPausedScreen();
     } else if (S.mode === 'gameover') {
-      drawOverlay('GAME OVER', [
-        `Score ${S.score} · length ${S.cells.length}`,
-        S.newBest ? 'New personal best!' : `Best ${S.best}`,
-        '',
-        S.overT > 0.7 ? 'Tap or press Space to play again' : '',
-      ], S.newBest ? '#fbbf24' : '#f87171');
+      drawGameOverScreen();
     }
 
     ctx.restore();
