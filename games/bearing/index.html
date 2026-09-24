@@ -447,7 +447,7 @@
   // synthetic shortcut.
   const MAX_ITD = 0.00065;
   function spatialTone(pan, atTime, freq = 440, dur = 0.55) {
-    if (S.muted || !audio || audio.state !== 'running') return;
+    if (S.muted || !audio || audio.state !== 'running') return null;
     const t = atTime, p = Math.max(-1, Math.min(1, pan));
     const osc = audio.createOscillator(), gain = audio.createGain(), panner = audio.createStereoPanner();
     const splitter = audio.createChannelSplitter(2), merger = audio.createChannelMerger(2);
@@ -466,6 +466,8 @@
     delayL.connect(merger, 0, 0); delayR.connect(merger, 0, 1);
     merger.connect(audio.destination);
     osc.start(t); osc.stop(t + dur + 0.03);
+    // Returned so a listen can be silenced before that stop time (silenceListen).
+    return { osc, gain, start: t };
   }
 
   // ---- canvas letterbox ----
@@ -550,13 +552,30 @@
     });
   }
 
+  // What to do next, in two lines: the goal, what a listen gives, and how to
+  // finish. A pure function of what the readouts below the dial already print —
+  // the tier's source count, the candidate sets, the marks and whether the puzzle
+  // is solved — so it never tells the picture more than the ears (session #303).
+  function coachLines(k, cand, marks, isLocked) {
+    if (isLocked) return null; // the solved screen speaks for itself
+    if (cand.every((set) => set.size === 0)) {
+      return [`Find the ${k === 3 ? 'three' : 'two'} hidden sources.`, 'Tap Listen: the lines below say where each could be.'];
+    }
+    if (cand.some((set) => set.size > 1)) {
+      return ['One listen gives two points: a front and a back.', 'Turn with ‹ ›, then Listen again: the shared point is the source.'];
+    }
+    if (marks.size < k) return ['Every source is pinned down — mark it.', 'Tap its point on the dial.'];
+    return ['All marked — press Check.', 'A wrong check costs 2.'];
+  }
+
   function describeState() {
     const p = puzzle(), r = run();
     const heading = `facing ${POINTS[S.heading]}`;
     const cand = candidateSets(p, r.listens);
     const readouts = cand.map((set, i) => `source ${i + 1}: ${set.size ? [...set].map((s) => POINTS[s]).join(' or ') : 'not listened yet'}`).join('. ');
     const marks = S.marks.size ? Array.from(S.marks).map((s) => POINTS[s]).join(', ') : 'none';
-    return `${p.k} sources, ${heading}, ${r.listens.length} listens spent. ${readouts}. Marks: ${marks}.`;
+    const coach = coachLines(p.k, cand, S.marks, locked());
+    return `${p.k} sources, ${heading}, ${r.listens.length} listens spent. ${readouts}. Marks: ${marks}.${coach ? ` ${coach.join(' ')}` : ''}`;
   }
 
   // ---- persistence ----
@@ -621,7 +640,31 @@
   // Bumped by every listen and by every switch of puzzle: a listen's timers act only
   // while it is still the latest one (doListen).
   let listenSeq = 0;
-  const stopListening = () => { listenSeq++; S.listening = false; S.listenStep = -1; };
+  // The tones one listen has scheduled, so leaving the puzzle mid-listen can cut them
+  // off instead of letting them ring over the next screen (silenceListen).
+  let listenVoices = [];
+  const silenceListen = () => {
+    if (audio) {
+      const t = audio.currentTime;
+      for (const voice of listenVoices) {
+        if (voice.stopped) continue;
+        voice.stopped = true;
+        try {
+          // A tone still waiting for its turn is cancelled outright: stopped before its
+          // start, it never sounds. Faded instead, it would fade from the gain's default
+          // of 1, not from its 0.09 — a pop up to ten times louder than the tone when
+          // the player leaves just before it (ARK-29).
+          if (voice.start > t) { voice.osc.stop(t); continue; }
+          voice.gain.gain.cancelScheduledValues(t);
+          voice.gain.gain.setValueAtTime(Math.min(voice.gain.gain.value, 0.09), t);
+          voice.gain.gain.linearRampToValueAtTime(0.0001, t + 0.03);
+          voice.osc.stop(t + 0.05);
+        } catch { /* a tone that already ended has nothing left to silence */ }
+      }
+    }
+    listenVoices = [];
+  };
+  const stopListening = () => { listenSeq++; S.listening = false; S.listenStep = -1; silenceListen(); };
 
   function selectTier(tier) {
     S.tier = tier;
@@ -725,6 +768,9 @@
 
   // ---- game flow ----
   function goTitle() {
+    // A listen the player walks away from stops here: its scheduled tones are cut and
+    // its timers no longer step, so nothing of the old puzzle sounds over the title.
+    stopListening();
     S.mode = 'title';
     S.help = false;
     followToday();
@@ -782,17 +828,21 @@
     // Each listen owns its timers: a puzzle switched mid-listen (tier, practice) bumps
     // listenSeq, and the old listen's timers then step nothing on the new puzzle.
     const seq = ++listenSeq;
+    listenVoices = [];
     const t0 = audio && audio.state === 'running' ? audio.currentTime + 0.05 : 0;
     const GAP = 0.85;
     p.bearings.forEach((bearing, i) => {
       const rel = norm16(bearing - heading);
       const pan = Math.sin((rel * Math.PI) / (DIAL / 2));
-      if (t0) spatialTone(pan, t0 + i * GAP, 420 + i * 70, 0.5);
+      if (t0) {
+        const voice = spatialTone(pan, t0 + i * GAP, 420 + i * 70, 0.5);
+        if (voice) listenVoices.push(voice);
+      }
       // A timer that changes the picture is an event, not an animation: it draws
       // the new highlight and then the loop stops again.
       setTimeout(() => { invalidate(); if (seq === listenSeq) S.listenStep = i; }, i * GAP * 1000);
     });
-    setTimeout(() => { invalidate(); if (seq === listenSeq) { S.listening = false; S.listenStep = -1; } }, p.bearings.length * GAP * 1000 + 200);
+    setTimeout(() => { invalidate(); if (seq === listenSeq) { S.listening = false; S.listenStep = -1; listenVoices = []; } }, p.bearings.length * GAP * 1000 + 200);
     const cand = candidateSets(p, r.listens);
     const readouts = cand.map((set, i) => `source ${i + 1}: ${[...set].map((s) => POINTS[s]).join(' or ')}`).join('. ');
     announce(`Listened from ${POINTS[heading]}. ${readouts}.`);
@@ -1006,7 +1056,14 @@
     ctx.fillStyle = !enabled ? C.muted : active ? '#06222f' : C.text;
     ctx.font = `700 15px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(label, x + w / 2, y + h / 2 + 1);
-    if (enabled) addHit(x, y, w, h, action);
+    // The drawn pill stays as it is; only its hit box grows. On a 390×844 phone the
+    // 480-wide canvas scales by 0.8125, so a 44 logical px button is 35.8 CSS px —
+    // under the 44 px touch floor. Grow the hit box to at least 55 logical px and
+    // let it reach 4 px past every drawn edge, centred so it never drifts.
+    if (enabled) {
+      const hitH = Math.max(55, h + 8);
+      addHit(x, y - (hitH - h) / 2, w, hitH, action);
+    }
   }
 
   function iconButton(x, y, w, h, icon, action) {
@@ -1242,6 +1299,18 @@
       ctx.fillText(text, 30, 470 + i * 20);
     });
 
+    // The coach over the dial: what to find, what a listen gives, how to finish.
+    // It sits between the "Facing" row and the dial's top label, and reads only the
+    // candidate sets the readouts print, never the bearings (session #303).
+    const coach = coachLines(p.k, cand, S.marks, locked());
+    if (coach) {
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = C.accent; ctx.font = `700 16px ${FONT}`;
+      ctx.fillText(coach[0], 240, 88);
+      ctx.fillStyle = C.muted; ctx.font = `400 13px ${FONT}`;
+      ctx.fillText(coach[1], 240, 112);
+    }
+
     button(30, 540, 200, 50, locked() ? 'Solved' : 'Listen', 'listen', false, !locked());
     button(250, 540, 100, 50, '‹', 'rotateccw', false);
     button(350, 540, 100, 50, '›', 'rotatecw', false);
@@ -1421,6 +1490,8 @@
   document.addEventListener('visibilitychange', () => {
     invalidate();
     S.hidden = document.hidden;
+    // A hidden tab pauses the sound; a listen left running must not resume with it.
+    if (S.hidden) stopListening();
     if (S.hidden && audio) audio.suspend().catch(() => {});
   });
 
