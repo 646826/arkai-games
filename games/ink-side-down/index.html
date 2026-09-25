@@ -504,15 +504,15 @@
       buttonH: 64, toastY: 726, footerY: 744, small: 22, tabText: 22,
       title: {
         name: 81, nameSize: 42, day: 120, tagline: 174, cube: 240, cubeSize: 100,
-        cardH: 100, cards: 306, caption: 430, cta: 448, playH: 112, sub: 586, howto: 614, howtoH: 48, share: 674, shareH: 46, footer: 744,
+        cardH: 100, cards: 306, caption: 430, cta: 448, playH: 112, sub: 582, howto: 608, howtoH: 60, share: 676, shareH: 60, footer: 752,
       },
     },
     compact: {
-      H: 640, heading: false, iconY: 6, icon: 64, tabsY: 6, tabH: 64, infoY: 88, boardY: 104,
-      buttonH: 64, toastY: 68, footerY: 0, small: 26, tabText: 25,
+      H: 640, heading: false, iconY: 6, icon: 68, tabsY: 6, tabH: 64, infoY: 88, boardY: 104,
+      buttonH: 68, toastY: 68, footerY: 0, small: 26, tabText: 25,
       title: {
-        name: 66, nameSize: 38, day: 98, tagline: 142, cube: 196, cubeSize: 86,
-        cardH: 84, cards: 250, caption: 352, cta: 366, playH: 92, sub: 480, howto: 508, howtoH: 44, share: 560, shareH: 50, footer: 626,
+        name: 66, nameSize: 38, day: 98, tagline: 142, cube: 188, cubeSize: 74,
+        cardH: 84, cards: 230, caption: 346, cta: 364, playH: 88, sub: 460, howto: 482, howtoH: 62, share: 550, shareH: 62, footer: 626,
       },
     },
   };
@@ -530,6 +530,10 @@
   // apart from `direct`: chats and apps send no referrer at all.
   const SHARE_URL = 'https:' + '//arkai.win/games/ink-side-down/?ref=share';
   const ROLL_TIME = 0.17, PRINT_TIME = 0.35, DEMO_STEP = 0.42;
+  // The win, in seconds from the winning roll: each print lights in turn
+  // (WIN_STEP apart), the solved card fades in under them from WIN_CARD on,
+  // and WIN_TOTAL is the whole show, after which the board is a still picture.
+  const WIN_STEP = 0.13, WIN_CARD = 1.25, WIN_FADE = 0.3, WIN_TOTAL = WIN_CARD + WIN_FADE;
   const COLS_NAMES = 'ABCDEF';
   const DIR_NAMES = ['up', 'right', 'down', 'left'];
   // Never "facing down" for a side: the rules say "face down" for the bottom,
@@ -580,6 +584,7 @@
     clock: 0, dayCheck: 0, shake: 0, flash: 0,
     lively: 0, stir: 0,     // seconds of ambient motion left since the last input, and how much of it is showing (0–1)
     cubeAnim: null, stamps: new Map(),
+    win: null,              // { t } from the winning roll while the win shows
     parts: [], floats: [], toast: null, press: null, hover: null,
   };
   const started = new Set();
@@ -734,11 +739,11 @@
   // A tween between two cells. Same cell means nothing moved, so nothing animates.
   const still = (cell, ink) => ({ from: cell, to: cell, inkFrom: ink, inkTo: ink, dir: -1, t: 1, bump: -1, bt: 1 });
 
-  function spawnParts(x, y, color, count, speed = 160) {
+  function spawnParts(x, y, color, count, speed = 160, size = 2.4) {
     if (calm()) return;
     for (let i = 0; i < count; i++) {
       const a = Math.random() * Math.PI * 2, s = speed * (0.3 + Math.random() * 0.7);
-      S.parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.5 + Math.random() * 0.4, t: 0, color });
+      S.parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.5 + Math.random() * 0.4, t: 0, color, size });
     }
   }
   const float = (x, y, message, color) => S.floats.push({ x, y, text: message, color, t: 0 });
@@ -821,6 +826,7 @@
         r.inputs = replay(S.puzzles[tier], digits(entry.i)).inputs;
         if (tier === S.tier && !S.practice) {
           S.demo = null;
+          S.win = { t: WIN_TOTAL };
           placeSolved();
           toast(`${TIERS[tier].label} was solved in another tab, in ${entry.s} rolls.`);
         }
@@ -939,6 +945,9 @@
     S.shake = 0;
     const state = replay(puzzle(), run().inputs);
     run().inputs = state.inputs;
+    // A board already solved is opened on its finished card, not on a replay
+    // of the win: the celebration belongs to the moment of solving.
+    S.win = run().solved ? { t: WIN_TOTAL } : null;
     if (run().solved) placeSolved();
     else placeCube(state);
   }
@@ -1131,13 +1140,16 @@
   function celebrate() {
     sfx.win();
     if (!calm()) S.flash = 0.5;
-    for (const cell of marksOf(puzzle().board)) spawnParts(cx(cell), cy(cell), C.inkHi, 10, 200);
+    // A burst big enough to read at the scale of a phone frame: the win is the
+    // one moment the game has to be seen having happened.
+    for (const cell of marksOf(puzzle().board)) spawnParts(cx(cell), cy(cell), C.inkHi, 12, 230, 4.2);
   }
 
   function solvedNow() {
     const p = puzzle();
     if (S.practice) {
       celebrate();
+      S.win = { t: calm() ? WIN_TOTAL : 0 };
       const over = S.practiceMoves - p.par;
       toast(`Practice solved in ${S.practiceMoves}. ${over <= 0 ? 'Par!' : `${over} over par.`}`);
       return;
@@ -1153,6 +1165,9 @@
     // puzzle, that win was reported by its own tab and stands.
     if (writeStore()) return;
     celebrate();
+    // The prints light up in turn first, on the open board; only then, from
+    // WIN_CARD on, does the solved card fade in under them (drawWin).
+    S.win = { t: calm() ? WIN_TOTAL : 0 };
     const over = r.solvedMoves - p.par;
     emit('gameover', { won: true, score: r.solvedMoves, par: p.par, tier: S.tier + 1, day: S.day, archive: archive() });
     const allDone = solvedCount() === TIERS.length;
@@ -1395,6 +1410,7 @@
     S.stir = want > S.stir ? Math.min(want, S.stir + dt * 2) : Math.max(want, S.stir - dt);
     if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 24);
     if (S.flash > 0) S.flash = Math.max(0, S.flash - dt);
+    if (S.win && S.win.t < WIN_TOTAL) S.win.t += dt;
     const a = S.cubeAnim;
     if (a.t < 1) a.t = Math.min(1, a.t + dt / ROLL_TIME);
     if (a.bt < 1) a.bt = Math.min(1, a.bt + dt / 0.16);
@@ -1706,12 +1722,31 @@
     for (let i = 1; i < COLS; i++) { ctx.moveTo(BOARD_X + i * CELL, top0); ctx.lineTo(BOARD_X + i * CELL, top0 + BOARD_H); }
     for (let i = 1; i < ROWS; i++) { ctx.moveTo(BOARD_X, top0 + i * CELL); ctx.lineTo(BOARD_X + BOARD_W, top0 + i * CELL); }
     ctx.stroke();
-    for (const cell of marksOf(p.board)) {
+    const marks = marksOf(p.board);
+    marks.forEach((cell, k) => {
       const t = S.stamps.get(cell);
-      if (t !== undefined && t < 0) { drawMark(cx(cell), cy(cell), CELL); continue; } // the cube has not landed yet
-      if (S.printed.has(cell)) drawSeal(cx(cell), cy(cell), CELL, cell, t === undefined ? 1 : 1 + 0.25 * Math.sin((t / PRINT_TIME) * Math.PI));
-      else drawMark(cx(cell), cy(cell), CELL);
-    }
+      if (t !== undefined && t < 0) { drawMark(cx(cell), cy(cell), CELL); return; } // the cube has not landed yet
+      if (S.printed.has(cell)) {
+        const glow = winPop(k);
+        drawSeal(cx(cell), cy(cell), CELL, cell, Math.max(t === undefined ? 1 : 1 + 0.25 * Math.sin((t / PRINT_TIME) * Math.PI), 1 + 0.35 * glow));
+        if (glow > 0) {
+          ctx.globalAlpha = glow;
+          ctx.strokeStyle = C.inkHi;
+          ctx.lineWidth = 3;
+          roundRect(cx(cell) - CELL * 0.36, cy(cell) - CELL * 0.36, CELL * 0.72, CELL * 0.72, 10);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
+      } else drawMark(cx(cell), cy(cell), CELL);
+    });
+  }
+
+  // The win lights each print in turn: seal k of the board pops and glows in
+  // its own window of the win clock — 0 outside it, the top of a sine in it.
+  function winPop(k) {
+    if (!S.win) return 0;
+    const at = (S.win.t - (0.15 + k * WIN_STEP)) / 0.35;
+    return at <= 0 || at >= 1 ? 0 : Math.sin(at * Math.PI);
   }
 
   function cubePos(anim) {
@@ -1771,13 +1806,13 @@
       ctx.globalAlpha = 1 - p.t / p.life;
       ctx.fillStyle = p.color;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 2.4, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, p.size || 2.4, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.globalAlpha = 1;
     for (const f of S.floats) {
       ctx.globalAlpha = 1 - f.t;
-      label(f.text, f.x, f.y - (calm() ? 0 : f.t * 30), 20, f.color, 'center', '800');
+      label(f.text, f.x, f.y - (calm() ? 0 : f.t * 30), 24, f.color, 'center', '800');
     }
     ctx.globalAlpha = 1;
   }
@@ -1810,7 +1845,7 @@
       else if (solvedCount()) list.push({ id: 'share', label: archive() ? `Share Day ${S.day}` : 'Share today’s result', x: 40, y: T.share, w: W - 80, h: T.shareH, primary: true });
       return list;
     }
-    const y = L.boardY + BOARD_H + (L.heading ? 18 : 12), h = L.buttonH;
+    const y = L.boardY + BOARD_H + (L.heading ? 18 : 8), h = L.buttonH;
     const key = (k) => (touch() ? '' : `  ${k}`);
     if (locked()) {
       const allDone = solvedCount() === TIERS.length;
@@ -1829,29 +1864,29 @@
   }
 
   /**
-   * Where the solved celebration sits: a card over the lower part of the
-   * still-visible board, tall enough that its 2x2 button grid clears 44 CSS px
-   * even at the shallow scale a landscape phone gives this frame — the ~80
-   * logical px left below the board at that scale never could.
+   * Where the solved actions sit: a bar under the board, tall enough that one
+   * row of four clears 44 CSS px even at the shallowest scale a phone frame
+   * gives this canvas (0.50, a landscape phone on the portal page: 88 logical
+   * px = 44.2 CSS). It may touch the board's last row but never covers a mark
+   * or the cube: the finished board stays whole, and the strip above it already
+   * reads the result ("Solved in N · par M").
    */
   function solvedOverlayRect() {
-    const top = L.boardY + BOARD_H * 0.4;
-    const bottom = L.H - (L.heading ? 16 : 6);
-    return { x: BOARD_X - 8, y: top, w: BOARD_W + 16, h: bottom - top };
+    const bottom = L.H - (L.heading ? 8 : 2);
+    return { x: BOARD_X - 8, y: bottom - 96, w: BOARD_W + 16, h: 96 };
   }
 
   function solvedGrid(items) {
     const rect = solvedOverlayRect();
-    const pad = 16, gap = 10, top = rect.y + 90;
-    const colW = (rect.w - pad * 2 - gap) / 2;
-    const rowH = (rect.y + rect.h - top - pad - gap) / 2;
-    return items.map(([id, text, primary], i) => {
-      const col = i % 2, rowAt = (i / 2) | 0;
-      return { id, label: text, x: rect.x + pad + col * (colW + gap), y: top + rowAt * (rowH + gap), w: colW, h: rowH, primary };
-    });
+    const pad = 4, gap = 10;
+    const colW = (rect.w - pad * 2 - gap * (items.length - 1)) / items.length;
+    return items.map(([id, text, primary], i) => ({
+      id, label: text, x: rect.x + pad + i * (colW + gap), y: rect.y + pad, w: colW, h: rect.h - pad * 2, primary,
+    }));
   }
 
   // Either side of the day line on the title screen, each only where there is a day to go to.
+  // 64 keeps them clear of the rule line under the day (72 reached into it in the compact shape).
   const ARROW = 64;
   function dayArrows() {
     const y = L.title.day - ARROW / 2, list = [];
@@ -1941,8 +1976,16 @@
     ctx.lineWidth = active ? 2 : 1.5;
     ctx.stroke();
     const size = L.tabText;
-    label(`${TIERS[tier].name} · ${TIERS[tier].label}`, b.x + b.w / 2, b.y + b.h * 0.32, size + 1, active || r.solved ? C.text : C.muted, 'center', '700', b.w - 8);
-    label(r.solved ? resultText(r.solvedMoves, p.par) : `par ${p.par}`, b.x + b.w / 2, b.y + b.h * 0.7, size, r.solved ? C.inkHi : C.muted, 'center', '600', b.w - 8);
+    // The wide tier cards on the title carry "II · Medium"; the narrow play
+    // tabs carry the word alone, so at 24 px+ it never fills the pill to its
+    // edges (the numeral is on the card, and 1 2 3 already picks a tab).
+    const name = b.card ? `${TIERS[tier].name} · ${TIERS[tier].label}` : TIERS[tier].label;
+    label(name, b.x + b.w / 2, b.y + b.h * 0.32, b.card ? size + 1 : size, active || r.solved ? C.text : C.muted, 'center', '700', b.w - 8);
+    // The wide tier cards spell it out; a play tab is narrow, so its result is
+    // the short form ("24+11"), never a line squeezed into the pill.
+    const line = r.solved ? (r.solvedMoves - p.par <= 0 ? `★ ${r.solvedMoves}` : `${r.solvedMoves}+${r.solvedMoves - p.par}`) : `par ${p.par}`;
+    const cardLine = r.solved ? resultText(r.solvedMoves, p.par) : `par ${p.par}`;
+    label(b.card ? cardLine : line, b.x + b.w / 2, b.y + b.h * 0.7, size, r.solved ? C.inkHi : C.muted, 'center', '600', b.w - 8);
   }
 
   function drawArrow(x, y, dir, color, size = 1) {
@@ -2044,31 +2087,44 @@
 
   function drawFooter(y) {
     if (S.toast || !y) return;
-    if (S.newDay) { label(touch() ? 'New puzzles are out: tap the home button' : 'New puzzles are out: press Esc', W / 2, y, 22, C.inkHi, 'center', '700'); return; }
-    if (touch()) { label('Swipe, or tap toward a square', W / 2, y, 22, C.muted, 'center', '500'); return; }
-    const hint = S.mode === 'title'
-      ? S.today > 1 ? 'Arrows or WASD · U undo · R restart · < > other days' : 'Arrow keys or WASD · U undo · R restart · L reads the board'
-      : 'Arrows or WASD · 1 2 3 switch · Esc home · M sound';
-    label(hint, W / 2, y, 22, C.muted, 'center', '500');
+    if (S.newDay) { label(touch() ? 'New puzzles are out: tap the home button' : 'New puzzles are out: press Esc', W / 2, y, 24, C.inkHi, 'center', '700'); return; }
+    if (touch()) { label('Swipe, or tap toward a square', W / 2, y, 24, C.muted, 'center', '500'); return; }
+    // 24 px is the smallest text the game draws: at the shallowest scale a
+    // phone frame gives this canvas (0.50, landscape on the portal page) that
+    // stays 12 CSS px. The tall shape has the height for two lines; the
+    // compact one keeps one short line that never reaches the frame's edge.
+    const lines = L.heading
+      ? (S.mode === 'title'
+        ? (S.today > 1 ? ['Arrows or WASD roll · U undo · R restart', '< and > step through earlier days'] : ['Arrow keys or WASD roll the cube', 'U undo · R restart · L reads the board'])
+        : ['Arrows or WASD · 1 2 3 switch puzzle', 'Esc home · M sound'])
+      : [S.mode === 'title'
+        ? (S.today > 1 ? 'WASD or arrows · U undo · < > days' : 'Arrows or WASD · U undo · R restart')
+        : 'WASD or arrows · 1 2 3 puzzle · Esc home'];
+    lines.forEach((line, i) => label(line, W / 2, y + (i - (lines.length - 1) / 2) * 28, 24, C.muted, 'center', '500'));
   }
 
   /**
-   * The win, as a card over the lower board: every solve gets it, at or over
-   * par alike — only the headline and its color change. The upper board stays
-   * visible above the card, marks and all.
+   * The win, as a bar under the whole, still-visible board: every solve gets
+   * it, at or over par alike. It carries no words of its own — the strip
+   * above the board already reads "Solved in N · par M", and the toast said
+   * the star — only the four actions, none of them on a mark or the cube. It
+   * fades in after the prints have lit up in turn (WIN_CARD); before that the
+   * win is the board itself, open and celebrating.
    */
   function drawSolvedOverlay() {
-    const p = puzzle(), r = run(), rect = solvedOverlayRect();
+    const rect = solvedOverlayRect();
+    const wt = S.win ? S.win.t : WIN_TOTAL;
+    const a = wt <= WIN_CARD ? 0 : Math.min(1, (wt - WIN_CARD) / WIN_FADE);
+    if (a <= 0) return;
+    ctx.globalAlpha = a;
     ctx.fillStyle = 'rgba(17, 13, 21, 0.93)';
-    roundRect(rect.x, rect.y, rect.w, rect.h, 18);
+    roundRect(rect.x, rect.y, rect.w, rect.h, 14);
     ctx.fill();
     ctx.strokeStyle = C.inkHi;
     ctx.lineWidth = 2;
-    roundRect(rect.x, rect.y, rect.w, rect.h, 18);
+    roundRect(rect.x, rect.y, rect.w, rect.h, 14);
     ctx.stroke();
-    const over = r.solvedMoves - p.par, cx0 = rect.x + rect.w / 2;
-    label(over <= 0 ? 'Solved — a star!' : 'Solved!', cx0, rect.y + 32, 26, C.text, 'center', '900');
-    label(resultText(r.solvedMoves, p.par), cx0, rect.y + 64, 24, C.inkHi, 'center', '700');
+    ctx.globalAlpha = 1;
   }
 
   function drawPlay() {
@@ -2141,6 +2197,10 @@
   }
 
   function render() {
+    // A frame with no pixels (a canvas hidden to 0×0 in some layouts) draws
+    // nothing: drawImage from a 0-sized canvas throws, and a gradient built on
+    // a 0 scale is not finite — neither is a crash in the game.
+    if (!canvas.width || !canvas.height) return;
     if (ONWARD) onwardLink.hidden = !onward();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     drawBackdrop();
@@ -2339,6 +2399,7 @@
     const a = S.cubeAnim;
     if (a.t < 1 || a.bt < 1 || S.stamps.size > 0 || S.demo) return true;
     if (S.shake > 0 || S.flash > 0 || S.parts.length > 0 || S.floats.length > 0 || S.toast) return true;
+    if (S.win && S.win.t < WIN_TOTAL) return true;
     return S.stir > 0 || (S.lively > 0 && !calm());
   };
 
@@ -2370,6 +2431,10 @@
   // drawing, and sound must not start again on its own.
   document.addEventListener('visibilitychange', () => {
     invalidate();
+    // iOS Safari can drop a canvas's backing store in a background tab with no
+    // event at all: back to visible, the lamp-lit desk is painted again rather
+    // than copied from a canvas that no longer holds it.
+    backdropKey = '';
     running = !document.hidden;
     if (audio) {
       if (document.hidden) audio.suspend().catch(() => {});
