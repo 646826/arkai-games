@@ -1202,18 +1202,26 @@
     ctx.fillStyle = C.text; ctx.font = `600 ${DETAIL}px ${FONT}`;
     ctx.fillText(`Streak ${S.streak}${S.bestStreak > S.streak ? ` · best ${S.bestStreak}` : ''}`, 240, 32);
 
-    // Its own row, wrapped: "Day N · three new puzzles every day" is too long
-    // for one line at a readable size — and 415 keeps the break at "puzzles /
-    // every day" instead of stranding the lone word "day" (ARK-84 visual check).
+    // Its own row, one line again: the string is 445 px at DETAIL (461 once the
+    // day number takes two digits), so 472 — the full frame less 4 px a side —
+    // holds it whole, where ARK-84's 415 broke it and left the lone word "day"
+    // sitting on the title. A device font that runs wider still wraps it; the
+    // 34 px line pitch and the title at 142 keep that second line 12 px clear
+    // of "Echo Sounding" instead of on top of it (ARK-90).
     ctx.fillStyle = C.muted; ctx.font = `600 ${DETAIL}px ${FONT}`;
-    wrapText(titleDay(S.day, dayDate(S.day), archive()), 240, 88, 415, 34);
+    wrapText(titleDay(S.day, dayDate(S.day), archive()), 240, 88, 472, 34);
 
     ctx.fillStyle = C.accent; ctx.font = `800 40px ${FONT}`;
-    ctx.fillText('Echo Sounding', 240, 136);
+    ctx.fillText('Echo Sounding', 240, 142);
 
     // The rule, said once, sized to read at the portal frame's smallest scale.
+    // Two drawn lines, not a wrap: a 420 wrap broke it as "…the / distance to
+    // the nearest / reflector." — "reflector." alone on a third line (ARK-90).
+    // Both halves clear the frame with room to spare in wider device fonts
+    // (344 and 436 of 480 at BODY).
     ctx.fillStyle = C.text; ctx.font = `600 ${BODY}px ${FONT}`;
-    wrapText('Ping a cell. Its echo is the distance to the nearest reflector.', 240, 206, 420, 34);
+    ctx.fillText('Ping a cell. Its echo is the', 240, 189);
+    ctx.fillText('distance to the nearest reflector.', 240, 223);
 
     // The sonar — the game's central object — inside its own Play button: a
     // lit device with a sweeping face, not a bare label (ARK-58 title-screen
@@ -1386,14 +1394,17 @@
 
     // No star on the solve itself: ★ stays the par mark the tier cards and
     // How to play promise it for (ARK-84). parNote carries it when earned.
+    // The headline gets the room the rest of the card has (ARK-90): 12 px under
+    // the top border, was 8 — the buttons give back 6 px of their 106 and still
+    // clear 44 CSS px at the portal's smallest landscape scale (100 × 0.45).
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillStyle = C.accent; ctx.font = `800 30px ${FONT}`;
-    ctx.fillText('Solved!', W / 2, panelY + 19);
+    ctx.fillText('Solved!', W / 2, panelY + 24);
     ctx.fillStyle = C.text; ctx.font = `600 ${DETAIL}px ${FONT}`;
-    ctx.fillText(`${parNote(r.solvedMoves, r.par)} · ${spent(r.solvedMoves)}`, W / 2, panelY + 49);
+    ctx.fillText(`${parNote(r.solvedMoves, r.par)} · ${spent(r.solvedMoves)}`, W / 2, panelY + 53);
 
     const allDone = solvedCount() === TIERS.length;
-    const btnY = panelY + 62, btnH = panelH - 66;
+    const btnY = panelY + 68, btnH = panelH - 72;
     button(12, btnY, 200, btnH, allDone ? 'Share result' : 'Next puzzle', allDone ? 'share' : 'next', true, DETAIL);
     button(220, btnY, 120, btnH, 'Replay', 'replay', false, DETAIL);
     button(348, btnY, 120, btnH, allDone ? 'Title' : 'Share', allDone ? 'home' : 'share', false, DETAIL);
