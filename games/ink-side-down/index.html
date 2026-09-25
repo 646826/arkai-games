@@ -1169,7 +1169,7 @@
     // WIN_CARD on, does the solved card fade in under them (drawWin).
     S.win = { t: calm() ? WIN_TOTAL : 0 };
     const over = r.solvedMoves - p.par;
-    emit('gameover', { won: true, score: r.solvedMoves, par: p.par, tier: S.tier + 1, day: S.day, archive: archive() });
+    emit('gameover', { won: true, score: r.solvedMoves, par: p.par, tier: S.tier + 1, day: S.day, archive: archive(), streak: S.streak });
     const allDone = solvedCount() === TIERS.length;
     toast(`${over <= 0 ? 'Par! A star.' : `Solved, ${over} over par.`} ${allDone ? 'All three done.' : 'Next when ready.'}`);
   }

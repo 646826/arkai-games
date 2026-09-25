@@ -1012,7 +1012,7 @@
     writeStore();
     celebrate(p);
     const over = r.solvedMoves - p.par;
-    emit('gameover', { won: true, score: r.solvedMoves, par: p.par, tier: S.tier + 1, day: S.day, archive: archive() });
+    emit('gameover', { won: true, score: r.solvedMoves, par: p.par, tier: S.tier + 1, day: S.day, archive: archive(), streak: S.streak });
     // The overlay now shows this message visually; screen readers still get it.
     announce(solvedNotice(over, solvedCount() === TIERS.length));
   }

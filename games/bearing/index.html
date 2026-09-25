@@ -979,7 +979,7 @@
     writeStore();
     celebrate();
     const over = r.solvedMoves - p.par;
-    emit('gameover', { won: true, score: r.solvedMoves, par: p.par, tier: S.tier + 1, day: S.day, archive: archive() });
+    emit('gameover', { won: true, score: r.solvedMoves, par: p.par, tier: S.tier + 1, day: S.day, archive: archive(), streak: S.streak });
     const verdict = over < 0 ? `${-over} under par: a very clean triangulation.` : over === 0 ? 'Par! A star.' : `Solved, ${over} over par.`;
     toast(`${verdict} ${solvedCount() === TIERS.length ? 'Both done.' : 'The other puzzle is next when ready.'}`);
   }

@@ -1083,7 +1083,7 @@
     // Meeting or beating par is the celebration worth the name: a longer, warmer
     // wash over the lit board, the star on the panel below, and the chord.
     celebrate(over <= 0 ? 0.9 : 0.5);
-    emit('gameover', { won: true, score: r.solvedMoves, par: p.par, tier: S.tier + 1, day: S.day, archive: archive() });
+    emit('gameover', { won: true, score: r.solvedMoves, par: p.par, tier: S.tier + 1, day: S.day, archive: archive(), streak: S.streak });
     // The panel above already says the verdict and the star, so the toast is only
     // the nudge onwards — and only ever one line: the old verdict toast wrapped to
     // three lines, started at y≈582 and stood over station D for its whole 3 s at
