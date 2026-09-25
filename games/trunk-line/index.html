@@ -6,21 +6,21 @@
 <meta name="color-scheme" content="dark">
 <title>Trunk Line — Arkai</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #0a130a; overflow: hidden; }
+  html, body { margin: 0; height: 100%; background: #16321f; overflow: hidden; }
   body { -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
   canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; outline: none; cursor: pointer; }
   canvas:focus-visible { outline: 2px solid rgba(154, 230, 76, 0.5); outline-offset: -2px; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   #controls:focus-within { position: fixed; left: 8px; right: 8px; bottom: 8px; width: auto; height: auto; clip: auto; white-space: normal; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border-radius: 12px; background: #101c10; border: 1px solid #24391f; }
-  #controls button, #controls a { min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center; text-decoration: none; padding: 0 12px; border-radius: 10px; border: 1px solid #24391f; background: #172717; color: #eaffe4; font: 600 15px system-ui, sans-serif; }
+  #controls button, #controls a { min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center; text-decoration: none; padding: 0 12px; border-radius: 10px; border: 1px solid #24391f; background: #172717; color: #eaffe4; font: 600 16px system-ui, sans-serif; }
   #controls a[hidden] { display: none; }
   #controls button:focus, #controls a:focus { outline: 2px solid #9ae64c; }
   #copybox { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(4, 10, 4, 0.82); }
   #copybox.open { display: flex; }
-  #copybox .card { width: min(92vw, 420px); box-sizing: border-box; padding: 18px; border-radius: 16px; background: #101c10; border: 1px solid #24391f; color: #eaffe4; }
-  #copybox p { margin: 0 0 10px; font-size: 15px; line-height: 1.4; }
-  #copybox textarea { width: 100%; height: 100px; box-sizing: border-box; padding: 10px; border-radius: 10px; border: 1px solid #24391f; background: #0a130a; color: #cdf5b8; font: 15px/1.45 ui-monospace, Menlo, Consolas, monospace; resize: none; -webkit-user-select: text; user-select: text; }
-  #copybox button { margin-top: 12px; width: 100%; height: 44px; border: 0; border-radius: 10px; background: #9ae64c; color: #0e1c06; font-weight: 700; font-size: 16px; cursor: pointer; }
+  #copybox .card { width: min(92vw, 420px); box-sizing: border-box; padding: 18px; border-radius: 16px; background: #16281b; border: 1px solid #24391f; color: #eaffe4; }
+  #copybox p { margin: 0 0 10px; font-size: 16px; line-height: 1.4; }
+  #copybox textarea { width: 100%; height: 100px; box-sizing: border-box; padding: 10px; border-radius: 10px; border: 1px solid #24391f; background: #10231a; color: #cdf5b8; font: 16px/1.45 ui-monospace, Menlo, Consolas, monospace; resize: none; -webkit-user-select: text; user-select: text; }
+  #copybox button { margin-top: 12px; width: 100%; height: 48px; border: 0; border-radius: 10px; background: #9ae64c; color: #0e1c06; font-weight: 700; font-size: 17px; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -491,10 +491,18 @@
   // CSP allows no `data:` font source.
   const DISPLAY_FONT = 'Righteous';
   const DISPLAY = `"${DISPLAY_FONT}", ${FONT}`;
-  // The minimum touch target in logical px: at 390 px wide a 480-wide game
-  // scales by ~0.8125, so 56 logical px is ~45.5 CSS px, over the 44 px floor
-  // (brand-system §5; audit item 12).
-  const TOUCH = 56;
+  // The minimum touch target in logical px. In the portal's 3/4 frame a 480-wide
+  // game scales by ~0.65 on a 390×844 phone (measured: canvas 350×469, H 720),
+  // so 68 logical px is ~44.3 CSS px — over the 44 px floor where the frame is
+  // narrowest; everywhere else the same 68 leaves the targets larger still
+  // (bare /play at 390×844 scales 0.81 → 55 CSS px, landscape-in-frame 0.45 →
+  // 31 CSS px against the 24 px landscape floor).
+  const TOUCH = 68;
+  // The smallest type in the game. The same measured scales that set TOUCH set
+  // this: 27 logical px is 17.6 CSS px on a 390×844 phone in the frame (floor
+  // 16) and 12.2 CSS px on an 844×390 one (floor 12) — the two tightest screens
+  // there are, so nothing anywhere is set smaller (ARK-76).
+  const SMALL = 27;
   const SLUG = 'trunk-line';
   const STORE = 'arkai:trunk-line:v1', STORE_MUTE = 'arkai:trunk-line:muted';
   const SHARE_URL = 'https:' + '//arkai.win/games/trunk-line/?ref=share';
@@ -505,18 +513,26 @@
   let HUB_CY = 372, HUB_R = 148;
 
   const C = {
-    bg: '#0a130a', card: '#101c10',
-    surface: '#152618',
-    ring: '#1d301a', ringDim: '#24391f',
-    accent: '#9ae64c', accentDim: '#33531f', cursor: '#facc15',
-    text: '#eaffe4', muted: '#8fae82', good: '#6ee7a8', warn: '#fbbf24', bad: '#f87171',
-    pinged: '#4d8a3f',
+    // The lit field (ARK-76): a switchboard room in Trunk Line's own greens —
+    // the old near-black #0a130a is gone, every stop keeps its green channel
+    // well above the near-black line, and the lamp pool over the board does the
+    // lighting. Brand hues (ARK-41) unchanged: accent, warm, violet, faces.
+    bgTop: '#22452d', bgMid: '#1a3a26', bgLow: '#16321f',
+    card: '#1b3323', surface: '#213d2b',
+    ring: '#3a5a42', ringDim: '#2c4a33',
+    accent: '#9ae64c', accentDim: '#4e7a35', cursor: '#facc15',
+    text: '#eaffe4', muted: '#b9d3ab', good: '#6ee7a8', warn: '#fbbf24', bad: '#f87171',
+    pinged: '#7db06a',
     warm: '#ffb020', warm2: '#ff7a45', inkWarm: '#1a1000', outlineWarm: '#7a4a08',
     violet: '#3a2680', violetLo: '#2c1c62', violetHi: '#a3b2f5', violetLip: '#241a52',
     bevelHi: 'rgba(255,255,255,.18)', bevelLo: 'rgba(0,0,0,.35)',
   };
 
-  const stationAngle = (i) => (i * 2 * Math.PI) / N - Math.PI / 2;
+  // Stations sit on a half-step-rotated ring (first at −126°, not −90°): the
+  // flat of the pentagon faces up, so the coach line above the board never
+  // meets a station's cursor ring, and the one station that points straight
+  // down points at the status line instead of the help of an overlapping pair.
+  const stationAngle = (i) => (i * 2 * Math.PI) / N - Math.PI / 2 - Math.PI / 5;
   const stationPoint = (i, r = HUB_R) => ({ x: HUB_CX + r * Math.cos(stationAngle(i)), y: HUB_CY + r * Math.sin(stationAngle(i)) });
 
   const canvas = document.getElementById('game');
@@ -547,6 +563,9 @@
     streak: 0, bestStreak: 0, lastFull: 0, freezeUsedDay: 0, storageWarned: false,
     muted: storage.get(STORE_MUTE) === '1',
     dayCheck: 5, flash: 0, shake: 0, toast: null,
+    // The pair a just-made connection lit (drawn as the warm burst while the
+    // flash decays), or null when the flash belongs to a solve instead.
+    spark: null,
     hidden: false,
     // The action under the pointer right now, so its button can sink onto its
     // lip; and the element to hand focus back to when the help panel closes.
@@ -629,10 +648,12 @@
     H = Math.max(H_MIN, Math.min(H_MAX, Math.round((W * cssH) / cssW)));
     // The board sits between the coach line (top) and the status area (bottom);
     // on a short landscape frame it shrinks a little rather than collide with
-    // either, and the whole picture still fits the frame with no scroll.
-    const boardTop = 270, boardBottom = 120;
+    // either, and the whole picture still fits the frame with no scroll. The
+    // bands are wider than they were: at the 27-logical-px type floor the tabs,
+    // the action row and two coach lines reach y≈282 before the board starts.
+    const boardTop = 292, boardBottom = 112;
     const avail = H - boardTop - boardBottom;
-    HUB_R = Math.max(108, Math.min(155, avail / 2 - 8));
+    HUB_R = Math.max(120, Math.min(158, avail / 2 - 10));
     HUB_CY = boardTop + avail / 2;
     canvas.width = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
@@ -966,6 +987,10 @@
       S.marks.delete(idx);
       note = 'not a direct line, so its mark is gone';
     } else note = 'not a direct line';
+    // A connection made is the moment the whole game leans on: the copper line
+    // lights, and a warm burst opens from the pair's midpoint while the flash
+    // decays. Reduced motion gets the line and the mark, not the burst.
+    if (dist === 1 && !calm()) { S.spark = idx; S.flash = 0.5; }
     r.marks = new Set(S.marks);
     // A repeat reports the same count: to the portal it is still a move on this puzzle.
     if (!S.practice) { emit('progress', { moves: run().moves, tier: S.tier + 1, day: S.day, archive: archive() }); writeStore(); }
@@ -1034,9 +1059,10 @@
     announce(S.muted ? 'Muted.' : 'Sound on.');
   }
 
-  function celebrate() {
+  function celebrate(brightness = 0.5) {
     sfx.win();
-    if (!calm()) S.flash = 0.5;
+    S.spark = null; // the flash is the solve's own glow, not a pair's burst
+    if (!calm()) S.flash = brightness;
   }
 
   function solvedNow() {
@@ -1049,8 +1075,10 @@
     }
     r.solved = true; r.solvedMoves = r.moves; r.par = p.par;
     writeStore();
-    celebrate();
     const over = r.solvedMoves - p.par;
+    // Meeting or beating par is the celebration worth the name: a longer, warmer
+    // wash over the lit board, the star on the panel below, and the chord.
+    celebrate(over <= 0 ? 0.9 : 0.5);
     emit('gameover', { won: true, score: r.solvedMoves, par: p.par, tier: S.tier + 1, day: S.day, archive: archive() });
     const verdict = over < 0 ? `${-over} under par: a very clean trace.` : over === 0 ? 'Par! A star.' : `Solved, ${over} over par.`;
     toast(`${verdict} ${solvedCount() === TIERS.length ? 'All three done.' : 'The next line is ready when you are.'}`);
@@ -1143,7 +1171,7 @@
     }
   }
 
-  // ---- rendering ----
+  // ---- hit testing & shared shapes ----
   let hitRegions = [];
   const addHit = (x, y, w, h, action) => hitRegions.push({ x, y, w, h, action });
   function hitTest(x, y) {
@@ -1164,6 +1192,70 @@
     ctx.closePath();
   }
 
+  // ---- the lit field (painted once per canvas size) ----
+  // The scene behind every screen: a deep-green switchboard room, a lamp pool
+  // where the board sits, a faint linen of fixed threads for material, and a
+  // vignette for depth — the flat near-black #0a130a the owner rejected had
+  // none of this. None of it changes while you play, so, the pattern Snake's
+  // ARK-62 board cache set, it is painted once per canvas size into a canvas of
+  // its own and copied by render(). This block sits above the rendering marker
+  // only because building the cache writes to the offscreen canvas (oc.width),
+  // which the drawing audit below reads as a mutation of something: nothing
+  // here touches game state, the clock or randomness — the threads are a fixed
+  // pattern, so two photographs of the same frame are the same picture.
+  function paintBackdrop(ctx) {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, C.bgTop);
+    g.addColorStop(0.55, C.bgMid);
+    g.addColorStop(1, C.bgLow);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+    // The lamp over the board: one pool of light, where the eye is meant to go.
+    const pool = ctx.createRadialGradient(HUB_CX, HUB_CY, HUB_R * 0.2, HUB_CX, HUB_CY, HUB_R * 1.9);
+    pool.addColorStop(0, 'rgba(122,204,138,0.20)');
+    pool.addColorStop(0.55, 'rgba(74,168,92,0.10)');
+    pool.addColorStop(1, 'rgba(74,168,92,0)');
+    ctx.fillStyle = pool;
+    ctx.fillRect(0, 0, W, H);
+    // Linen: fixed horizontal and vertical threads, a texture the eye can feel
+    // without reading it as graph paper.
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(178,255,196,0.028)';
+    ctx.beginPath();
+    for (let y = 3; y < H; y += 7) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(178,255,196,0.016)';
+    ctx.beginPath();
+    for (let x = 5; x < W; x += 11) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+    ctx.stroke();
+    // Vignette: the corners fall away from the lamp, but never into near-black.
+    const v = ctx.createRadialGradient(W / 2, H * 0.46, H * 0.28, W / 2, H * 0.52, H * 0.78);
+    v.addColorStop(0, 'rgba(0,0,0,0)');
+    v.addColorStop(1, 'rgba(4,12,6,0.34)');
+    ctx.fillStyle = v;
+    ctx.fillRect(0, 0, W, H);
+  }
+  let backdropCanvas = null, backdropKey = '';
+  function drawBackdrop() {
+    const unit = view.dpr * view.scale; // device pixels per logical pixel
+    if (!(unit > 0)) return;
+    const px = view.dpr * view.ox, py = view.dpr * view.oy;
+    const fx = px - Math.floor(px), fy = py - Math.floor(py);
+    const key = `${unit}:${fx}:${fy}:${H}:${Math.round(HUB_CY)}:${Math.round(HUB_R)}`;
+    if (backdropKey !== key) {
+      const oc = backdropCanvas || document.createElement('canvas');
+      oc.width = Math.ceil(W * unit + 1);
+      oc.height = Math.ceil(H * unit + 1);
+      const c = oc.getContext('2d');
+      c.setTransform(unit, 0, 0, unit, fx, fy);
+      paintBackdrop(c);
+      backdropCanvas = oc;
+      backdropKey = key;
+    }
+    ctx.drawImage(backdropCanvas, -fx / unit, -fy / unit, backdropCanvas.width / unit, backdropCanvas.height / unit);
+  }
+
+  // ---- rendering ----
   // Every control is an object, built like the portal's `.button` (brand-system
   // §4): a 2 px darker outline, a solid darker lip under the body as its own
   // shape (so a press collapses just it), a glossy highlight band over a
@@ -1171,7 +1263,7 @@
   // is warm; every other button is flat violet. Pressed = the body sinks onto
   // the lip. The drawn pill may stay smaller than the touch floor; hitBox()
   // pads the tap target independently of what is drawn.
-  const LIP = 5;
+  const LIP = 6;
   const BTN = {
     primary: { hi: '#ffd166', mid: C.warm, lo: C.warm2, outline: C.outlineWarm, lip: C.outlineWarm, ink: C.inkWarm, gloss: 'rgba(255,255,255,.5)' },
     secondary: { hi: '#4a3596', mid: C.violet, lo: C.violetLo, outline: C.violetHi, lip: C.violetLip, ink: '#eef2ff', gloss: C.bevelHi },
@@ -1186,7 +1278,7 @@
 
   // The framed panel (brand-system §4): a 3.5 px accent frame, an inner bevel —
   // a light line on top, a dark line at the bottom — over a surface lighter
-  // than the board, so a panel reads as a raised tile, not a hole.
+  // than the field, so a panel reads as a raised tile, not a hole.
   function panelFrame(x, y, w, h, r = 16) {
     ctx.fillStyle = C.surface; roundRect(x, y, w, h, r); ctx.fill();
     ctx.strokeStyle = C.accent; ctx.lineWidth = 3.5; roundRect(x, y, w, h, r); ctx.stroke();
@@ -1198,14 +1290,33 @@
 
   // The title plaque, a warm pill overlapping a panel's top edge (§4).
   function plaque(cx, cy, label) {
-    ctx.font = `400 17px ${DISPLAY}`;
-    const pw = ctx.measureText(label).width + 34, ph = 30;
+    ctx.font = `400 ${SMALL}px ${DISPLAY}`;
+    const pw = ctx.measureText(label).width + 44, ph = 42;
     const grad = ctx.createLinearGradient(0, cy - ph / 2, 0, cy + ph / 2);
     grad.addColorStop(0, C.warm); grad.addColorStop(1, C.warm2);
     ctx.fillStyle = grad; roundRect(cx - pw / 2, cy - ph / 2, pw, ph, ph / 2); ctx.fill();
     ctx.strokeStyle = C.outlineWarm; ctx.lineWidth = 2; roundRect(cx - pw / 2, cy - ph / 2, pw, ph, ph / 2); ctx.stroke();
     ctx.fillStyle = C.inkWarm; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(label, cx, cy + 1);
+  }
+
+  // The reward, drawn wherever a line was met or beaten: a gold star with a
+  // radial shade and (optionally) a glow — never a text glyph, never a flash.
+  function star(cx, cy, r, glow) {
+    ctx.save();
+    if (glow) { ctx.shadowColor = 'rgba(251,191,36,0.85)'; ctx.shadowBlur = 14; }
+    const g = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.1, cx, cy, r);
+    g.addColorStop(0, '#fef3c7'); g.addColorStop(0.5, '#fbbf24'); g.addColorStop(1, '#b45309');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = (Math.PI / 5) * i - Math.PI / 2;
+      const rr = i % 2 === 0 ? r : r * 0.45;
+      ctx.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
   }
 
   function button(x, y, w, h, label, action, kind = 'secondary', enabled = true) {
@@ -1216,7 +1327,7 @@
     // edge shows under the body. A LIP-high strip with the body's radius made
     // arcTo overshoot into a tail at the lower right of every button.
     if (!pressed) {
-      ctx.fillStyle = enabled ? spec.lip : '#101a0e';
+      ctx.fillStyle = enabled ? spec.lip : '#1b2a17';
       roundRect(x, y + LIP, w, bodyH, r); ctx.fill();
     }
     const body = ctx.createLinearGradient(0, bodyY, 0, bodyY + bodyH);
@@ -1230,7 +1341,7 @@
     ctx.strokeStyle = enabled ? spec.outline : C.accentDim; ctx.lineWidth = 2;
     roundRect(x, bodyY, w, bodyH, r); ctx.stroke();
     ctx.fillStyle = !enabled ? C.muted : spec.ink;
-    ctx.font = `400 18px ${DISPLAY}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = `400 28px ${DISPLAY}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(label, x + w / 2, bodyY + bodyH / 2 + 1);
     if (enabled) hitBox(x, y, w, h, action);
   }
@@ -1246,7 +1357,7 @@
     ctx.strokeStyle = C.accent; ctx.lineWidth = 3; roundRect(x, y, w, h, 12); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(x + 12, y + 3); ctx.lineTo(x + w - 12, y + 3);
     ctx.strokeStyle = C.bevelHi; ctx.lineWidth = 2; ctx.stroke();
-    ctx.font = `400 16px ${DISPLAY}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = `400 ${SMALL}px ${DISPLAY}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ['ping', 'mark'].forEach((m, i) => {
       const on = S.tapMode === m;
       ctx.fillStyle = !enabled ? C.muted : on ? C.inkWarm : C.text;
@@ -1269,67 +1380,66 @@
   }
   const pairName = (idx) => `${STATIONS[PAIRS[idx][0]]}–${STATIONS[PAIRS[idx][1]]}`;
 
-  // The line over the board says what to do next, in the order a first game needs
-  // it: the goal, how a ping reads, when to press Check. Reads state, writes none.
+  // The coach line over the board says what to do next, in the order a first
+  // game needs it. Reads state, writes none. Kept to one line each: at the
+  // 27-logical-px floor a wrapped coach would meet the board's first ring.
   function coachLines() {
-    if (locked()) return null; // the solved line under the board speaks for itself
+    if (locked()) return null; // the solved panel under the tabs speaks for itself
     const sel = S.selected === null ? '' : STATIONS[S.selected];
-    if (sel && S.tapMode === 'ping') return [`Now tap another station to ping it with ${sel}.`, 'Tap the same station again to cancel.'];
-    if (sel && S.marks.size === N - 1) return [`Now tap a station to unmark its line to ${sel}.`, 'All four marks are used: free one to move it.'];
-    if (sel) return [`Now tap another station to mark its line to ${sel}.`, 'Tap a marked pair again to unmark it.'];
+    if (sel && S.tapMode === 'ping') return [`Ping with ${sel}: tap a second station.`, 'Tap the same station to cancel.'];
+    if (sel && S.marks.size === N - 1) return [`Unmark: tap ${sel}’s other station.`, 'Four marks used — free one first.'];
+    if (sel) return [`Mark to ${sel}: tap a second station.`, 'A marked pair taps off again.'];
     // Only a ping proves a mark. Four marks with a guess among them are not an
     // invitation to a check that costs 2 when wrong.
     const { confirmed, unmarked, refuted } = proof();
     const inMark = S.tapMode === 'mark';
-    if (refuted >= 0) return [`${pairName(refuted)} is marked, but its ping says it is no line.`, inMark ? 'Tap its two stations to unmark it.' : 'Tap Mark, then its two stations, to unmark it.'];
+    if (refuted >= 0) return [`${pairName(refuted)}: marked, but no line.`, inMark ? 'Tap its two stations.' : 'Tap Mark, then its two stations.'];
     if (unmarked >= 0) {
-      if (S.marks.size === N - 1) return [`${pairName(unmarked)} is a proven line, but four are marked.`, 'One of them is wrong: unmark it in Mark mode.'];
-      return [`${pairName(unmarked)} is a proven line — mark it.`, inMark ? 'Tap its two stations.' : 'Tap Mark, then its two stations.'];
+      if (S.marks.size === N - 1) return [`${pairName(unmarked)}: proven, four marked.`, 'One is wrong — unmark one first.'];
+      return [`${pairName(unmarked)} is a proven line.`, inMark ? 'Tap its two stations.' : 'Tap Mark, then its two stations.'];
     }
     if (S.marks.size === N - 1) {
-      if (confirmed === N - 1) return ['All four lines found — press Check.', 'Every mark is confirmed by a 1-hop ping.'];
-      return [`Four lines marked, ${N - 1 - confirmed} not confirmed by a ping.`, 'Sure? Press Check — a wrong one costs 2. Or ping it.'];
+      if (confirmed === N - 1) return ['All four lines found — Check.', 'Every mark has a 1-hop ping.'];
+      return [`Four marked, ${N - 1 - confirmed} unconfirmed.`, 'Sure? A wrong check costs 2.'];
     }
-    if (S.tapMode === 'mark') return ['Mark mode: tap two stations to mark a line.', 'Marks are free. Tap Ping to measure again.'];
-    if (!run().pings.length) return ['Find the four hidden lines.', 'Tap two stations to ping: it says how many hops apart.'];
-    return [`${S.marks.size} of ${N - 1} lines marked — keep pinging.`, '1 hop = a line, marked for you. Deduced one? Tap Mark — free.'];
+    if (S.tapMode === 'mark') return ['Mark mode: tap two stations.', 'Marks are free. Tap Ping to measure.'];
+    if (!run().pings.length) return ['Find the four hidden lines.', 'Tap two stations to ping.'];
+    return [`${S.marks.size} of ${N - 1} lines marked — ping on.`, '1 hop = a line. Deduced? Mark it.'];
   }
 
   function iconButton(x, y, w, h, icon, action) {
     ctx.fillStyle = C.surface;
-    roundRect(x, y, w, h, 10); ctx.fill();
-    ctx.strokeStyle = C.accentDim; ctx.lineWidth = 2; roundRect(x, y, w, h, 10); ctx.stroke();
+    roundRect(x, y, w, h, 12); ctx.fill();
+    ctx.strokeStyle = C.accentDim; ctx.lineWidth = 2.5; roundRect(x, y, w, h, 12); ctx.stroke();
     const cx = x + w / 2, cy = y + h / 2;
-    ctx.strokeStyle = C.text; ctx.fillStyle = C.text; ctx.lineWidth = 2; ctx.lineCap = 'round';
+    ctx.strokeStyle = C.text; ctx.fillStyle = C.text; ctx.lineWidth = 3; ctx.lineCap = 'round';
     if (icon === 'home') {
       ctx.beginPath();
-      ctx.moveTo(cx - 8, cy - 1); ctx.lineTo(cx, cy - 8); ctx.lineTo(cx + 8, cy - 1);
-      ctx.moveTo(cx - 5, cy - 3); ctx.lineTo(cx - 5, cy + 8); ctx.lineTo(cx + 5, cy + 8); ctx.lineTo(cx + 5, cy - 3);
+      ctx.moveTo(cx - 11, cy - 1); ctx.lineTo(cx, cy - 11); ctx.lineTo(cx + 11, cy - 1);
+      ctx.moveTo(cx - 6, cy - 4); ctx.lineTo(cx - 6, cy + 10); ctx.lineTo(cx + 6, cy + 10); ctx.lineTo(cx + 6, cy - 4);
       ctx.stroke();
     } else if (icon === 'prev' || icon === 'next') {
-      // Same chevron the sibling games (One Step Late, Ink Side Down, Blind
-      // Corners) draw for day-nav — was bare text here, the one control that
-      // didn't get the pill treatment (IDEA-BACKLOG.md/BENCHMARK.md gap #2).
+      // Same chevron the sibling games draw for day-nav.
       const back = icon === 'prev' ? 1 : -1;
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 4;
       ctx.beginPath();
-      ctx.moveTo(cx + 5 * back, cy - 11); ctx.lineTo(cx - 6 * back, cy); ctx.lineTo(cx + 5 * back, cy + 11);
+      ctx.moveTo(cx + 6 * back, cy - 12); ctx.lineTo(cx - 7 * back, cy); ctx.lineTo(cx + 6 * back, cy + 12);
       ctx.stroke();
     } else if (icon === 'hint') {
-      ctx.font = `800 18px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = `800 30px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText('?', cx, cy + 1);
     } else {
       ctx.beginPath();
-      ctx.moveTo(cx - 9, cy - 3); ctx.lineTo(cx - 5, cy - 3); ctx.lineTo(cx, cy - 8);
-      ctx.lineTo(cx, cy + 8); ctx.lineTo(cx - 5, cy + 3); ctx.lineTo(cx - 9, cy + 3);
+      ctx.moveTo(cx - 11, cy - 4); ctx.lineTo(cx - 6, cy - 4); ctx.lineTo(cx, cy - 10);
+      ctx.lineTo(cx, cy + 10); ctx.lineTo(cx - 6, cy + 4); ctx.lineTo(cx - 11, cy + 4);
       ctx.closePath(); ctx.fill();
       ctx.beginPath();
       if (S.muted) {
-        ctx.moveTo(cx + 3, cy - 4); ctx.lineTo(cx + 10, cy + 4);
-        ctx.moveTo(cx + 10, cy - 4); ctx.lineTo(cx + 3, cy + 4);
+        ctx.moveTo(cx + 4, cy - 5); ctx.lineTo(cx + 12, cy + 5);
+        ctx.moveTo(cx + 12, cy - 5); ctx.lineTo(cx + 4, cy + 5);
       } else {
-        ctx.arc(cx + 2, cy, 5, -0.9, 0.9);
-        ctx.moveTo(cx + 6, cy - 8); ctx.arc(cx + 2, cy, 9, -0.9, 0.9);
+        ctx.arc(cx + 3, cy, 6, -0.9, 0.9);
+        ctx.moveTo(cx + 8, cy - 10); ctx.arc(cx + 3, cy, 11, -0.9, 0.9);
       }
       ctx.stroke();
     }
@@ -1337,128 +1447,194 @@
     hitBox(x, y, w, h, action);
   }
 
-  function wrapText(text, x, y, maxW, lineH) {
-    const words = text.split(' ');
-    let line = '', ly = y;
-    for (const w of words) {
-      const test = line ? `${line} ${w}` : w;
-      if (ctx.measureText(test).width > maxW && line) { ctx.fillText(line, x, ly); line = w; ly += lineH; }
+  // Measure-first text wrapping: the helper the toast, the help panel and the
+  // title footer all size their boxes with, so nothing is drawn over its own
+  // background. The font must be set before it is called.
+  function wrapLines(text, maxW) {
+    const words = String(text).split(' ');
+    const lines = [];
+    let line = '';
+    for (const word of words) {
+      const test = line ? `${line} ${word}` : word;
+      if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = word; }
       else line = test;
     }
-    if (line) ctx.fillText(line, x, ly);
-    return ly;
+    if (line) lines.push(line);
+    return lines;
   }
 
+  // A patch cord's droop: real cables hang between their jacks, straight graph
+  // edges do not. The sag is what makes a marked pair read as one laid cord.
+  const sagOf = (pa, pb) => Math.min(26, Math.max(10, Math.hypot(pb.x - pa.x, pb.y - pa.y) * 0.14));
+  function cablePath(pa, pb) {
+    ctx.beginPath();
+    ctx.moveTo(pa.x, pa.y);
+    ctx.quadraticCurveTo((pa.x + pb.x) / 2, (pa.y + pb.y) / 2 + sagOf(pa, pb), pb.x, pb.y);
+  }
+  const cableMid = (pa, pb) => ({ x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 + sagOf(pa, pb) / 2 });
+
   function drawTitle() {
-    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+    drawBackdrop();
     addHit(0, 0, W, H, 'titledefault');
 
-    // Three zones of the frame's own height, each allowed to grow with it
-    // (brand-system §5): the day row and wordmark up top, the Line cards and
-    // the one primary action in the middle, Share/How to play and the footer at
-    // the bottom. On any aspect ratio the drawn content spans the frame.
-    const third = H / 3;
-
-    iconButton(10, 8, 40, 40, 'mute', 'mute');
+    iconButton(12, 14, 48, 48, 'mute', 'mute');
     const prevOk = S.day > 1, nextOk = S.day < S.today;
-    // Only drawn when navigable — matches the sibling games' dayArrows(), which
-    // omit the arrow entirely rather than showing it greyed out.
-    if (prevOk) iconButton(10, 64, 40, 40, 'prev', 'prevday');
-    if (nextOk) iconButton(W - 10 - 40, 64, 40, 40, 'next', 'nextday');
+    // Only drawn when navigable — matches the sibling games' day nav, which
+    // omits the arrow entirely rather than showing it greyed out.
+    if (prevOk) iconButton(12, 84, 48, 48, 'prev', 'prevday');
+    if (nextOk) iconButton(W - 12 - 48, 84, 48, 48, 'next', 'nextday');
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = C.muted; ctx.font = `600 15px ${FONT}`;
-    ctx.fillText(titleDay(S.day, dayDate(S.day), archive()), 240, 84);
+    ctx.fillStyle = C.muted; ctx.font = `600 ${SMALL}px ${FONT}`;
+    ctx.fillText(archive() ? `Day ${S.day} · ${dayDate(S.day)}` : `Day ${S.day}`, 240, 108);
 
-    ctx.fillStyle = C.accent; ctx.font = `400 40px ${DISPLAY}`;
-    ctx.fillText('Trunk Line', 240, third * 0.6);
-    ctx.fillStyle = C.muted; ctx.font = `400 15px ${FONT}`;
-    ctx.fillText('Ping the hidden network. Trace every line.', 240, third * 0.6 + 30);
-    ctx.font = `400 13px ${FONT}`;
-    ctx.fillText('Five stations, one hidden tree, three networks a day.', 240, third * 0.6 + 52);
+    // The frame is laid out from the bottom up: footer (tall frames only), the
+    // two-button row, the one primary action, then the three line cards; the
+    // wordmark block takes whatever is left at the top (brand-system §5).
+    const secH = 56, primH = 64, cardH = 84, cardGap = 12;
+    let footerTop = H;
+    if (H >= 820) {
+      ctx.fillStyle = C.muted; ctx.font = `400 ${SMALL}px ${FONT}`;
+      const nav = wrapLines('Missed a day? The arrows above open every earlier one.', 420);
+      const brandY = H - 22;
+      ctx.fillText('Self-contained · made by an AI agent', 240, brandY);
+      nav.forEach((l, i) => ctx.fillText(l, 240, brandY - 40 - (nav.length - 1 - i) * 32));
+      footerTop = brandY - 40 - nav.length * 32 - 10;
+    }
+    const secY = footerTop - 18 - secH;
+    const primY = secY - 14 - primH;
+    const cardsBottom = primY - 16;
+    const cardTop = cardsBottom - 3 * cardH - 2 * cardGap;
 
-    const gap = 12, primaryH = 54;
-    const cardH = Math.max(56, Math.min(96, Math.floor((third - primaryH - gap * 3) / 3)));
-    const cardTop = third + gap;
+    const wmY = Math.max(164, Math.min(cardTop - 106, 108 + 84 + (H - 720) * 0.3));
+    ctx.fillStyle = C.accent; ctx.font = `400 64px ${DISPLAY}`;
+    ctx.fillText('Trunk Line', 240, wmY);
+    ctx.fillStyle = C.text; ctx.font = `600 28px ${FONT}`;
+    ctx.fillText('Find the four hidden lines.', 240, wmY + 50);
+    ctx.fillStyle = C.muted; ctx.font = `400 ${SMALL}px ${FONT}`;
+    ctx.fillText('Five stations. One tree. Daily.', 240, wmY + 82);
+
     TIERS.forEach((t, tier) => {
-      const y = cardTop + tier * (cardH + gap), r = S.runs[tier], p = S.puzzles[tier];
+      const y = cardTop + tier * (cardH + cardGap), r = S.runs[tier], p = S.puzzles[tier];
       panelFrame(40, y, 400, cardH, 14);
-      ctx.fillStyle = C.text; ctx.font = `400 21px ${DISPLAY}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      ctx.fillText(t.label, 62, y + cardH * 0.34);
-      ctx.fillStyle = C.muted; ctx.font = `400 13px ${FONT}`;
-      ctx.fillText(`5 stations · par ${p.par}`, 62, y + cardH * 0.68);
+      ctx.fillStyle = C.text; ctx.font = `400 34px ${DISPLAY}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText(t.label, 64, y + cardH * 0.36);
+      ctx.fillStyle = C.muted; ctx.font = `400 ${SMALL}px ${FONT}`;
+      ctx.fillText(`5 stations · par ${p.par}`, 64, y + cardH * 0.72);
       ctx.textAlign = 'right';
       if (r.solved) {
-        ctx.fillStyle = r.solvedMoves - r.par <= 0 ? C.good : C.warn;
-        ctx.font = `400 16px ${DISPLAY}`;
-        ctx.fillText(parNote(r.solvedMoves, r.par), 418, y + cardH * 0.34);
-        ctx.fillStyle = C.muted; ctx.font = `400 12px ${FONT}`;
-        ctx.fillText(`${r.solvedMoves} pings spent`, 418, y + cardH * 0.68);
+        // The lasting mark: a star on the card of every line met or beaten,
+        // straight from the saved solve — it is there on the next visit too.
+        const over = r.solvedMoves - (r.par || p.par);
+        if (over <= 0) star(414, y + cardH * 0.34, 13, true);
+        ctx.fillStyle = over < 0 ? C.warn : over === 0 ? C.good : C.text;
+        ctx.font = `400 28px ${DISPLAY}`;
+        ctx.fillText(over < 0 ? `${-over} under` : over === 0 ? 'par' : `+${over}`, over <= 0 ? 390 : 416, y + cardH * 0.36);
+        ctx.fillStyle = C.muted; ctx.font = `400 ${SMALL}px ${FONT}`;
+        ctx.fillText(`${r.solvedMoves} pings`, 416, y + cardH * 0.72);
       } else {
-        ctx.fillStyle = C.accent; ctx.font = `400 16px ${DISPLAY}`;
-        ctx.fillText(r.moves ? 'In progress' : 'Not started', 418, y + cardH * 0.34);
+        ctx.fillStyle = C.accent; ctx.font = `400 28px ${DISPLAY}`;
+        ctx.fillText(r.moves ? 'In progress' : 'Play', 416, y + cardH * 0.36);
       }
       ctx.textAlign = 'center';
       hitBox(40, y, 400, cardH, `card${tier}`);
     });
 
     const allDone = solvedCount() === TIERS.length;
-    button(40, cardTop + 3 * cardH + 3 * gap, 400, primaryH, allDone ? 'Share' : 'Play', allDone ? 'share' : 'play', 'primary');
+    button(40, primY, 400, primH, allDone ? 'Share the day' : 'Play', allDone ? 'share' : 'play', 'primary');
 
-    const secY = H - 128; // the row ends at H - 76, clear of the toast (H - 74)
     if (allDone) {
-      ctx.fillStyle = S.streak > 0 ? C.good : C.muted; ctx.font = `400 15px ${DISPLAY}`;
-      ctx.fillText(S.streak > 0 ? `Streak ${S.streak}${S.bestStreak > S.streak ? ` · best ${S.bestStreak}` : ''}` : 'All three networks solved.', 240, secY - 34);
+      ctx.fillStyle = S.streak > 0 ? C.good : C.muted; ctx.font = `400 28px ${DISPLAY}`;
+      ctx.fillText(S.streak > 0 ? `Streak ${S.streak}${S.bestStreak > S.streak ? ` · best ${S.bestStreak}` : ''}` : 'All three networks solved.', 240, secY - 40);
+      // Once the day is done the warm primary above is Share, so the row below
+      // keeps How to play alone: one action is never offered twice.
+      button(144, secY, 192, secH, 'How to play', 'help', 'secondary');
+    } else {
+      button(40, secY, 192, secH, 'Share', 'share', 'secondary');
+      button(248, secY, 192, secH, 'How to play', 'help', 'secondary');
     }
-    // Once the day is done the warm primary above is Share, so the row below
-    // keeps How to play alone: one action is never offered twice.
-    if (allDone) button(144, secY, 192, 52, 'How to play', 'help', 'secondary');
-    else {
-      button(40, secY, 192, 52, 'Share', 'share', 'secondary');
-      button(248, secY, 192, 52, 'How to play', 'help', 'secondary');
-    }
-    ctx.fillStyle = C.muted; ctx.font = `400 12px ${FONT}`;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-    ctx.fillText('Missed a day? The arrows above open every earlier one.', 240, H - 40);
-    ctx.fillText('Self-contained, no network. Made by an AI agent.', 240, H - 20);
   }
 
   function drawNetwork() {
     const p = puzzle(), r = run();
     const pinged = pingedMap(p, r.pings);
+    const solvedAll = locked();
 
     for (let idx = 0; idx < PAIR_COUNT; idx++) {
       const [a, b] = PAIRS[idx];
       const pa = stationPoint(a), pb = stationPoint(b);
       const isMark = S.marks.has(idx);
       const dist = pinged.get(idx);
-      // Solid is a line the player marked. A ping is a measurement, drawn dashed
-      // when it found no direct line: a pinged "3" drawn solid read as a line. A
-      // mark its own ping rules out (an old save) is red.
-      ctx.strokeStyle = isMark ? (dist > 1 ? C.bad : C.accent) : dist !== undefined ? C.pinged : C.ring;
-      ctx.lineWidth = isMark ? 4 : dist !== undefined ? 2 : 1;
-      ctx.setLineDash(!isMark && dist > 1 ? [7, 6] : []);
-      ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.stroke();
-      ctx.setLineDash([]);
+      // A marked pair is a laid copper cord — glow under it, a core shaded
+      // across its width, a lit filament on top — the central object the
+      // player builds. Everything else is quieter on purpose: a ping that
+      // found no line is a dashed measurement, an untouched pair a ghost.
+      if (isMark) {
+        const refuted = dist > 1;
+        cablePath(pa, pb);
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = refuted ? 'rgba(248,113,113,0.20)' : `rgba(255,176,60,${solvedAll ? 0.32 : 0.22})`;
+        ctx.lineWidth = 15; ctx.stroke();
+        const mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2 + sagOf(pa, pb) / 2;
+        const dx = pb.x - pa.x, dy = pb.y - pa.y, len = Math.hypot(dx, dy) || 1;
+        const nx = -dy / len, ny = dx / len;
+        const core = ctx.createLinearGradient(mx + nx * 4, my + ny * 4, mx - nx * 4, my - ny * 4);
+        if (refuted) { core.addColorStop(0, '#fca5a5'); core.addColorStop(0.5, '#ef4444'); core.addColorStop(1, '#7f1d1d'); }
+        else { core.addColorStop(0, '#ffe3a3'); core.addColorStop(0.5, '#eda23f'); core.addColorStop(1, '#8a5316'); }
+        cablePath(pa, pb);
+        ctx.strokeStyle = core; ctx.lineWidth = 7; ctx.stroke();
+        ctx.save();
+        ctx.translate(-1.5, -2);
+        cablePath(pa, pb);
+        ctx.strokeStyle = refuted ? 'rgba(254,226,226,0.4)' : 'rgba(255,244,214,0.5)';
+        ctx.lineWidth = 2; ctx.stroke();
+        ctx.restore();
+        ctx.lineCap = 'butt';
+      } else if (dist !== undefined) {
+        cablePath(pa, pb);
+        ctx.setLineDash([10, 9]);
+        ctx.strokeStyle = C.pinged; ctx.lineWidth = 3; ctx.stroke();
+        ctx.setLineDash([]);
+      } else {
+        cablePath(pa, pb);
+        ctx.strokeStyle = 'rgba(158,214,164,0.11)'; ctx.lineWidth = 2; ctx.stroke();
+      }
       if (dist !== undefined) {
-        const mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2;
-        ctx.fillStyle = C.card; ctx.beginPath(); ctx.arc(mx, my, 12, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = C.text; ctx.font = `700 13px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(String(dist), mx, my);
+        const m = cableMid(pa, pb);
+        ctx.fillStyle = '#1e3a28';
+        ctx.beginPath(); ctx.arc(m.x, m.y, 17, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = C.ring; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(m.x, m.y, 17, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = C.text; ctx.font = `800 ${SMALL}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(String(dist), m.x, m.y + 1);
       }
     }
 
     for (let i = 0; i < N; i++) {
       const pt = stationPoint(i);
       const selected = S.selected === i;
-      ctx.fillStyle = selected ? C.cursor : C.card;
-      ctx.beginPath(); ctx.arc(pt.x, pt.y, 26, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = selected ? C.cursor : C.accentDim; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(pt.x, pt.y, 26, 0, Math.PI * 2); ctx.stroke();
-      ctx.fillStyle = selected ? '#0e1c06' : C.text; ctx.font = `800 18px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      // The socket the jack sits in: a dark ring pressed into the field.
+      ctx.strokeStyle = 'rgba(8,22,12,0.55)'; ctx.lineWidth = 6;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, 36, 0, Math.PI * 2); ctx.stroke();
+      if (selected) {
+        ctx.strokeStyle = 'rgba(250,204,21,0.65)'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(pt.x, pt.y, 33, 0, Math.PI * 2); ctx.stroke();
+      }
+      // The jack itself: brass, shaded from its own upper left, matching the
+      // light the backdrop's lamp already put there.
+      const g = ctx.createRadialGradient(pt.x - 8, pt.y - 10, 4, pt.x, pt.y, 30);
+      if (selected) { g.addColorStop(0, '#fff3b8'); g.addColorStop(0.55, C.cursor); g.addColorStop(1, '#9a6b06'); }
+      else { g.addColorStop(0, '#ffe9b0'); g.addColorStop(0.55, '#d9a34a'); g.addColorStop(1, '#7c5216'); }
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, 30, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = selected ? '#7a5604' : '#5d3c0e'; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, 30, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      ctx.beginPath(); ctx.arc(pt.x - 9, pt.y - 11, 4.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#2a1a05'; ctx.font = `800 30px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(STATIONS[i], pt.x, pt.y + 1);
-      // The drawn chip stays 52 px; the tap target grows to the 56 px floor
-      // with nothing near to hit (stations are 174 px apart). Audit item 12.
-      hitBox(pt.x - 26, pt.y - 26, 52, 52, `station${i}`);
+      // The drawn jack stays 60 px; the tap target grows to the 68 px floor
+      // with nothing near to hit (stations sit ≥ 170 px apart).
+      hitBox(pt.x - 30, pt.y - 30, 60, 60, `station${i}`);
     }
 
     // The arrow-key cursor: a dashed ring, independent of `selected` (a tap's
@@ -1466,55 +1642,57 @@
     if (S.mode === 'play') {
       const cp = stationPoint(S.cursor);
       ctx.save();
-      ctx.setLineDash([4, 4]);
-      ctx.strokeStyle = C.accent; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(cp.x, cp.y, 33, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([6, 6]);
+      ctx.strokeStyle = C.accent; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(cp.x, cp.y, 41, 0, Math.PI * 2); ctx.stroke();
       ctx.restore();
     }
   }
 
   function drawPlay() {
-    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+    drawBackdrop();
     const p = puzzle(), r = run();
 
-    // Icon buttons 60 px apart, so their padded 56 px hit boxes never touch
-    // (brand-system §5).
-    iconButton(10, 8, 40, 40, 'home', 'home');
-    iconButton(70, 8, 40, 40, 'mute', 'mute');
-    iconButton(130, 8, 40, 40, 'hint', 'hint');
+    // Icon buttons 72 px apart, so their padded 68 px hit boxes never touch.
+    iconButton(12, 14, 48, 48, 'home', 'home');
+    iconButton(84, 14, 48, 48, 'mute', 'mute');
+    iconButton(156, 14, 48, 48, 'hint', 'hint');
     ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = r.moves > p.par ? C.warn : C.text; ctx.font = `700 15px ${FONT}`;
-    ctx.fillText(`${r.moves} · par ${p.par}`, 466, 28);
+    ctx.fillStyle = r.moves > p.par ? C.warn : C.text; ctx.font = `700 30px ${FONT}`;
+    ctx.fillText(`${r.moves} · par ${p.par}`, 466, 30);
+    ctx.fillStyle = C.muted; ctx.font = `600 ${SMALL}px ${FONT}`;
+    ctx.fillText(S.practice ? `Practice · ${TIERS[S.tier].label}` : `Day ${S.day} · ${TIERS[S.tier].label}`, 466, 62);
     ctx.textAlign = 'center';
-    ctx.fillStyle = C.muted; ctx.font = `600 13px ${FONT}`;
-    ctx.fillText(`Day ${S.day} · ${TIERS[S.tier].label}${S.practice ? ' · practice' : ''}`, 314, 28);
 
-    const tabY = 70, tabW = 148, tabH = 36;
+    const tabY = 84, tabW = 148, tabH = 50;
     TIERS.forEach((t, tier) => {
-      const x = 14 + tier * (tabW + 6), active = tier === S.tier;
+      const x = 12 + tier * (tabW + 8), active = tier === S.tier;
       ctx.fillStyle = active ? C.accent : C.card;
-      roundRect(x, tabY, tabW, tabH, 8); ctx.fill();
-      ctx.strokeStyle = C.accent; ctx.lineWidth = 2; roundRect(x, tabY, tabW, tabH, 8); ctx.stroke();
-      ctx.fillStyle = active ? C.inkWarm : C.text; ctx.font = `400 16px ${DISPLAY}`;
+      roundRect(x, tabY, tabW, tabH, 10); ctx.fill();
+      ctx.strokeStyle = active ? C.accent : C.ring; ctx.lineWidth = 2; roundRect(x, tabY, tabW, tabH, 10); ctx.stroke();
+      ctx.fillStyle = active ? C.inkWarm : C.text; ctx.font = `400 28px ${DISPLAY}`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(t.label, x + tabW / 2, tabY + tabH / 2 + 1);
+      ctx.fillText(t.label, x + tabW / 2 - 6, tabY + tabH / 2 + 1);
+      // A line met or beaten keeps its star on the tab too — the reward stays
+      // visible while the day is still being played out.
+      const rr = S.runs[tier];
+      if (rr.solved && rr.solvedMoves - (rr.par || S.puzzles[tier].par) <= 0) star(x + tabW - 22, tabY + tabH / 2 + 1, 10, false);
       hitBox(x, tabY, tabW, tabH, `card${tier}`);
     });
 
-    const btnY = 126, btnW = 106, btnH = 48, gap = 6;
-    modeSwitch(12, btnY, 120, btnH);
+    const btnY = 150, btnW = 148, btnH = 60, gap = 8;
+    modeSwitch(12, btnY, btnW, btnH);
     // Check is the play screen's one primary action; it stays warm and is
     // disabled only once the line is solved.
-    button(12 + 120 + gap, btnY, btnW, btnH, 'Check', 'check', 'primary', !locked());
-    button(12 + 120 + gap + (btnW + gap), btnY, btnW, btnH, 'Clear', 'clear', 'secondary', !locked());
-    button(12 + 120 + gap + (btnW + gap) * 2, btnY, btnW, btnH, 'Share', 'share', 'secondary');
+    button(12 + btnW + gap, btnY, btnW, btnH, 'Check', 'check', 'primary', !locked());
+    button(12 + (btnW + gap) * 2, btnY, btnW, btnH, 'Clear', 'clear', 'secondary', !locked());
 
     const coach = coachLines();
     if (coach) {
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillStyle = C.accent; ctx.font = `700 16px ${FONT}`;
-      ctx.fillText(coach[0], 240, 200);
-      if (coach[1]) { ctx.fillStyle = C.text; ctx.font = `400 14px ${FONT}`; ctx.fillText(coach[1], 240, 223); }
+      ctx.fillStyle = C.accent; ctx.font = `700 28px ${FONT}`;
+      ctx.fillText(coach[0], 240, 238);
+      if (coach[1]) { ctx.fillStyle = C.text; ctx.font = `400 ${SMALL}px ${FONT}`; ctx.fillText(coach[1], 240, 268); }
     }
 
     ctx.save();
@@ -1523,75 +1701,126 @@
     ctx.restore();
 
     // Neutral: the count of marks is not a verdict. Par has its colour up in the corner.
-    ctx.textAlign = 'center'; ctx.font = `400 13px ${FONT}`;
-    ctx.fillStyle = C.muted;
-    ctx.fillText(`${r.moves} ping${r.moves === 1 ? '' : 's'} · ${S.marks.size} of ${N - 1} lines marked`, 240, HUB_CY + HUB_R + 42);
+    // The toast carries the same news while it is up, so the two never share the band.
+    if (!S.toast) {
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = `400 ${SMALL}px ${FONT}`;
+      ctx.fillStyle = C.muted;
+      ctx.fillText(`${r.moves} ping${r.moves === 1 ? '' : 's'} · ${S.marks.size} of ${N - 1} lines marked`, 240, HUB_CY + HUB_R + 62);
+    }
 
     if (locked()) drawSuccess(p, r);
   }
 
-  // Success is a panel (brand-system §5) over the action row a solved line no
-  // longer needs: the Line tabs above it still switch lines, and the network
-  // the player just traced stays in full view below it, undimmed. It holds the
-  // result and one warm primary — "Next line", or "Share" once all three are
-  // done — with Replay as the secondary; the toast carries the full message.
-  // It starts below the tabs' hit boxes (60..116) and ends above the top
-  // station's cursor ring on the shortest frame (H 720: 246).
+  // Success is a panel over the space a solved line no longer needs: the Line
+  // tabs above it still switch lines, and the traced network stays in full view
+  // below it, undimmed, its four cords lit. A line met or beaten carries the
+  // star — here, on the tab above, and on the title cards of every later visit,
+  // because the solve itself is what is saved. Beating par is the louder case:
+  // the star glows, the verdict is gold, and the solve's wash ran longer.
   function drawSuccess(p, r) {
     const dayDone = solvedCount() === TIERS.length;
-    const px = 8, pw = W - 16, py = 122, ph = 118;
+    const px = 8, pw = W - 16, py = 146, ph = 132;
     panelFrame(px, py, pw, ph, 18);
     addHit(px, py, pw, ph, 'successnone');
     plaque(240, py, dayDone ? 'Day complete' : 'Line solved');
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = C.text; ctx.font = `400 20px ${DISPLAY}`;
-    ctx.fillText(`${parNote(r.solvedMoves, r.par)} · ${r.solvedMoves} ping${r.solvedMoves === 1 ? '' : 's'}`, 240, py + 36);
-    button(48, py + 56, 176, 52, dayDone ? 'Share' : 'Next line', dayDone ? 'share' : 'next', 'primary');
-    button(256, py + 56, 176, 52, 'Replay', 'replay', 'secondary');
+    const over = r.solvedMoves - r.par;
+    ctx.textBaseline = 'middle';
+    if (over <= 0) {
+      star(176, py + 58, 17, true);
+      ctx.textAlign = 'left';
+      ctx.fillStyle = over < 0 ? C.warn : C.good;
+      ctx.font = `400 30px ${DISPLAY}`;
+      ctx.fillText(over < 0 ? `${-over} under par!` : 'Par — a star!', 202, py + 58);
+    } else {
+      ctx.textAlign = 'center';
+      ctx.fillStyle = C.text; ctx.font = `400 30px ${DISPLAY}`;
+      ctx.fillText(`Solved, +${over} over par`, 240, py + 58);
+    }
+    button(48, py + 84, 190, 46, dayDone ? 'Share' : 'Next line', dayDone ? 'share' : 'next', 'primary');
+    button(258, py + 84, 174, 46, 'Replay', 'replay', 'secondary');
   }
 
   function drawHelp() {
     // The dim and its tap-to-close cover the whole canvas, letterbox included: a
     // dim that stopped at the logical frame left a seam down both of its sides.
+    // A green dim, not a black one: the overlay never becomes the near-black
+    // screen the field was rebuilt to avoid.
     const bx = -view.ox / view.scale, by = -view.oy / view.scale, bw = view.cssW / view.scale, bh = view.cssH / view.scale;
-    ctx.fillStyle = 'rgba(4,10,4,0.9)'; ctx.fillRect(bx, by, bw, bh);
+    ctx.fillStyle = 'rgba(8,26,16,0.86)'; ctx.fillRect(bx, by, bw, bh);
     addHit(bx, by, bw, bh, 'closehelp'); // a tap on the dim backdrop closes
-    const pw = W - 60, ph = 500, px = 30, py = Math.max(24, (H - ph) / 2);
+    const px = 26, pw = W - 52;
+    // The rules, said once and briefly — the full wording stays in the page's
+    // accessible label and the portal's How-to-play; this panel is the version
+    // a player mid-game will actually read at the 27-px floor.
+    ctx.font = `400 28px ${FONT}`;
+    const paras = [
+      'Five stations hide four lines — one wiring tree.',
+      'Ping two stations: you learn only the hops between them. 1 hop is a direct line, marked for you.',
+      'Mark mode: tap two stations to mark a line you deduced. Free.',
+      'Four marked? Check — a miss costs 2. Ping repeats are free.',
+      'Meet par — the solver’s own count — for a star. Three networks a day.',
+    ];
+    const rows = [];
+    for (const text of paras) {
+      for (const line of wrapLines(text, pw - 56)) rows.push({ line, gap: false });
+      rows.push({ line: '', gap: true });
+    }
+    rows.pop();
+    const lineH = 34, gapH = 14, headH = 58, btnH = 56;
+    const textH = rows.reduce((sum, row) => sum + (row.gap ? gapH : lineH), 0);
+    const ph = Math.min(H - 28, headH + 14 + textH + 14 + btnH + 18);
+    const py = Math.max(14, (H - ph) / 2);
     panelFrame(px, py, pw, ph, 18);
     addHit(px, py, pw, ph, 'helpnone'); // a tap inside the panel is not a close
     plaque(240, py, 'How to play');
-    const lines = [
-      'Five stations, A through E, are connected by a',
-      'hidden wiring tree — four lines, never shown.',
-      'Find all four.',
-      '',
-      'Ping: tap two stations. The network answers with',
-      'how many hops separate them along the hidden',
-      'wiring, never which stations the path runs through.',
-      '1 hop is a direct line, and it is marked for you.',
-      '',
-      'Mark: tap Mark, then two stations, to mark a line',
-      'you worked out without pinging it. Marks are free.',
-      'With four lines marked, press Check.',
-      '',
-      'Every new ping costs 1; asking again is free. A',
-      'wrong check costs 2. Finish within par for a star.',
-    ];
-    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-    ctx.fillStyle = C.text; ctx.font = `400 14px ${FONT}`;
-    lines.forEach((l, i) => ctx.fillText(l, px + 26, py + 62 + i * 24));
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = C.text; ctx.font = `400 28px ${FONT}`;
+    let ty = py + headH + 14;
+    for (const row of rows) {
+      if (!row.gap) ctx.fillText(row.line, px + 28, ty + lineH / 2);
+      ty += row.gap ? gapH : lineH;
+    }
     // A close control — its hit box padded past the drawn pill — for anyone who
     // does not reach for Esc or the backdrop.
-    button(px + pw - 20 - 96, py + ph - 66, 96, 46, 'Close', 'closehelp', 'secondary');
+    button(px + pw - 24 - 124, py + ph - 18 - btnH, 124, btnH, 'Close', 'closehelp', 'secondary');
   }
 
   function drawEffects() {
-    if (S.flash > 0) { ctx.fillStyle = `rgba(154,230,76,${S.flash * 0.3})`; ctx.fillRect(0, 0, W, H); }
+    if (S.flash > 0) {
+      if (S.spark !== null) {
+        // A connection made: a warm burst opening from the pair's midpoint while
+        // the flash decays — motion, so it only exists when motion is welcome.
+        const [a, b] = PAIRS[S.spark];
+        const pa = stationPoint(a), pb = stationPoint(b);
+        const m = cableMid(pa, pb);
+        const k = Math.min(1, Math.max(0, 1 - S.flash / 0.5));
+        const rr = 18 + k * 54;
+        const glow = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, rr);
+        glow.addColorStop(0, `rgba(255,214,130,${Math.min(0.55, S.flash * 1.1).toFixed(3)})`);
+        glow.addColorStop(1, 'rgba(255,214,130,0)');
+        ctx.fillStyle = glow;
+        ctx.beginPath(); ctx.arc(m.x, m.y, rr, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = `rgba(255,196,84,${Math.min(0.9, S.flash * 1.8).toFixed(3)})`;
+        ctx.lineWidth = 4 - k * 2.5;
+        ctx.beginPath(); ctx.arc(m.x, m.y, rr, 0, Math.PI * 2); ctx.stroke();
+      } else {
+        // The solve's own wash: warm, and at or under par it was set brighter.
+        ctx.fillStyle = `rgba(255,205,110,${(S.flash * 0.3).toFixed(3)})`;
+        ctx.fillRect(0, 0, W, H);
+      }
+    }
     if (S.toast) {
-      ctx.fillStyle = 'rgba(10,19,10,0.92)';
-      roundRect(40, H - 74, W - 80, 46, 12); ctx.fill();
-      ctx.fillStyle = C.text; ctx.font = `600 14px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      wrapText(S.toast.text, W / 2, H - 51, W - 110, 16);
+      ctx.font = `600 ${SMALL}px ${FONT}`;
+      const lines = wrapLines(S.toast.text, W - 96);
+      const th = lines.length * 34 + 22;
+      const ty = H - 14 - th;
+      ctx.fillStyle = 'rgba(16,36,22,0.94)';
+      roundRect(24, ty, W - 48, th, 14); ctx.fill();
+      ctx.strokeStyle = 'rgba(154,230,76,0.35)'; ctx.lineWidth = 2;
+      roundRect(24, ty, W - 48, th, 14); ctx.stroke();
+      ctx.fillStyle = C.text; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      lines.forEach((l, i) => ctx.fillText(l, W / 2, ty + 19 + i * 34));
     }
   }
 
@@ -1831,11 +2060,22 @@
     wasAnimating = live;
   }
 
-  // A canvas whose backing store the browser dropped comes back blank.
-  canvas.addEventListener('contextrestored', invalidate);
+  // A canvas whose backing store the browser dropped comes back blank, and so
+  // may the backdrop's own canvas: dropping its key paints it again (ARK-77).
+  canvas.addEventListener('contextrestored', () => {
+    invalidate();
+    backdropKey = '';
+  });
   installDisplayFont();
   resize();
-  if (PICTURE) posePicture(); else loadDay(dayFromDateParam(DATE_RAW) ?? dayNumber(new Date()));
+  if (PICTURE) posePicture(); else {
+    loadDay(dayFromDateParam(DATE_RAW) ?? dayNumber(new Date()));
+    // The first visit explains the game once, over the title. Every later visit
+    // goes straight to the networks — the store exists from the first ping on —
+    // and the rules stay one tap away on How to play (H). No new key: the save
+    // itself is the "has been here before" flag.
+    if (storage.get(STORE) === null) openHelp();
+  }
   requestAnimationFrame(frame);
 })();
 </script>
