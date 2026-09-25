@@ -500,14 +500,20 @@
   const W = 480;
   const LAYOUTS = {
     tall: {
-      H: 780, heading: true, iconY: 10, icon: 48, tabsY: 72, tabH: 60, infoY: 156, boardY: 176,
-      buttonH: 56, toastY: 726, footerY: 744, small: 15, tabText: 16,
-      title: { name: 92, nameSize: 42, day: 138, tagline: 176, cards: 230, cta: 320, sub: 352, howto: 388, share: 460, footer: 744 },
+      H: 780, heading: true, iconY: 10, icon: 56, tabsY: 72, tabH: 64, infoY: 156, boardY: 176,
+      buttonH: 64, toastY: 726, footerY: 744, small: 22, tabText: 22,
+      title: {
+        name: 81, nameSize: 42, day: 120, tagline: 174, cube: 240, cubeSize: 100,
+        cardH: 100, cards: 306, caption: 430, cta: 448, playH: 112, sub: 586, howto: 614, howtoH: 48, share: 674, shareH: 46, footer: 744,
+      },
     },
     compact: {
-      H: 640, heading: false, iconY: 6, icon: 60, tabsY: 6, tabH: 60, infoY: 86, boardY: 104,
-      buttonH: 62, toastY: 68, footerY: 0, small: 16, tabText: 15,
-      title: { name: 82, nameSize: 40, day: 120, tagline: 154, cards: 200, cta: 288, sub: 316, howto: 348, share: 426, footer: 618 },
+      H: 640, heading: false, iconY: 6, icon: 64, tabsY: 6, tabH: 64, infoY: 88, boardY: 104,
+      buttonH: 64, toastY: 68, footerY: 0, small: 26, tabText: 25,
+      title: {
+        name: 66, nameSize: 38, day: 98, tagline: 142, cube: 196, cubeSize: 86,
+        cardH: 84, cards: 250, caption: 352, cta: 366, playH: 92, sub: 480, howto: 508, howtoH: 44, share: 560, shareH: 50, footer: 626,
+      },
     },
   };
   let L = LAYOUTS.tall;
@@ -533,7 +539,7 @@
   const C = {
     bg: '#14111c', paper: '#efe6d3', paperAlt: '#e8dec9', grid: 'rgba(70, 48, 30, 0.10)', frame: '#2a2437',
     wall: '#5a4a3f', wallTop: '#6f5c4e', wallEdge: '#3b3029',
-    ink: '#d7263d', inkHi: '#ff6b6b', inkDeep: '#9e1a2c',
+    ink: '#d7263d', inkHi: '#ff6b6b', inkPress: '#ef5350', inkDeep: '#9e1a2c',
     cube: '#fbf8f1', cubeSide: '#e3d9c6', cubeEdge: '#a89b85',
     text: '#f3eee6', muted: '#b5ab9d', good: '#6ee7a8', warn: '#fbbf24', bad: '#ff8a80',
     button: '#2a2437', buttonHot: '#342c44', buttonDown: '#3b3250', line: 'rgba(214, 196, 170, 0.28)',
@@ -1107,6 +1113,10 @@
       S.printed.add(r.printed);
       stamp(r.printed, fresh);
       sfx.print();
+    } else {
+      // A little paper dust on every landing, print or not: the cube reads as
+      // a real weight settling on the sheet, not a token snapping to a cell.
+      spawnParts(cx(r.cube), cy(r.cube), 'rgba(214, 196, 170, 0.55)', 4, 70);
     }
     // The winning roll is saved once, by solvedNow, with its result: saving the
     // position first told another tab "every mark printed, unsolved".
@@ -1423,6 +1433,15 @@
     const r = seeded(4242, i);
     return { x: r() * W, y: r() * 780, s: 1 + r() * 2.2, p: r() * 6.28 };
   });
+  // The lamp-lit desk under everything (paintBackdrop): three gradients the size
+  // of the canvas, repainted every frame, took a phone's frame from 16.7 ms to
+  // 50 ms (ARK-63: bare /play/ at 390×844, DPR 3, software canvas; 67 → 200 ms
+  // with the CPU slowed 4×). They change only with the canvas's size and the
+  // screen, so they are painted into a canvas of their own, the size of this
+  // one, and copied 1:1, the way Echo Sounding keeps its sea (ARK-64).
+  const backdrop = document.createElement('canvas');
+  const bctx = backdrop.getContext('2d');
+  let backdropKey = '';
 
   function resize() {
     invalidate(); // a canvas given a new size is blank until it is drawn again
@@ -1437,6 +1456,9 @@
     view.oy = (ch - L.H * view.scale) / 2;
     canvas.width = Math.round(cw * dpr);
     canvas.height = Math.round(ch * dpr);
+    backdrop.width = canvas.width;
+    backdrop.height = canvas.height;
+    backdropKey = '';
   }
 
   const roundRect = (x, y, w, h, r) => {
@@ -1458,16 +1480,66 @@
     ctx.fillText(str, x, y, maxWidth);
   }
 
-  function drawBackground() {
-    const g = ctx.createLinearGradient(0, 0, 0, L.H);
-    g.addColorStop(0, '#1b1624');
-    g.addColorStop(1, '#0f0c15');
-    ctx.fillStyle = g;
-    ctx.fillRect(-view.ox / view.scale, -view.oy / view.scale, W + (2 * view.ox) / view.scale, L.H + (2 * view.oy) / view.scale);
+  /**
+   * The desk the paper sits on: a warm lamp glow over the board fading to the
+   * ink-dark edges, not a flat near-black field. The rect always covers the
+   * whole visible canvas, side bands included, so a game framed narrower or
+   * wider than 480 logical px never shows unlit background at its edges.
+   * Into the backdrop canvas only: drawBackdrop() copies it.
+   */
+  function paintBackdrop() {
+    bctx.setTransform(1, 0, 0, 1, 0, 0);
+    bctx.fillStyle = C.bg;
+    bctx.fillRect(0, 0, backdrop.width, backdrop.height);
+    const k = view.scale * view.dpr;
+    bctx.setTransform(k, 0, 0, k, view.ox * view.dpr, view.oy * view.dpr);
+    const rx = -view.ox / view.scale, ry = -view.oy / view.scale;
+    const rw = W + (2 * view.ox) / view.scale, rh = L.H + (2 * view.oy) / view.scale;
+    // The title screen has no board to centre the glow on, so the lamp
+    // follows the cube hero instead — the whole card stays lit, not just a
+    // ring around where a board would be.
+    const lampX = W / 2, lampY = S.mode === 'title' ? L.title.cube : L.boardY + BOARD_H * 0.28;
+    const reach = Math.max(rw, rh) * 1.15;
+    const g = bctx.createRadialGradient(lampX, lampY, reach * 0.04, lampX, lampY, reach);
+    g.addColorStop(0, '#4d3d51');
+    g.addColorStop(0.4, '#372b40');
+    g.addColorStop(0.72, '#2a2233');
+    g.addColorStop(1, '#221b29');
+    bctx.fillStyle = g;
+    bctx.fillRect(rx, ry, rw, rh);
+    // A soft light sweep from the upper left, the way a desk lamp rakes a page.
+    const sweep = bctx.createLinearGradient(rx, ry, rx + rw * 0.75, ry + rh * 0.6);
+    sweep.addColorStop(0, 'rgba(255, 214, 173, 0.10)');
+    sweep.addColorStop(0.5, 'rgba(255, 214, 173, 0.02)');
+    sweep.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    bctx.fillStyle = sweep;
+    bctx.fillRect(rx, ry, rw, rh);
+    // A vignette only at the far corners, so the lit share of the frame stays high.
+    // It starts at 0.7 × reach, at least 0.805 × L.H from the lamp (515 px in the
+    // compact shape, 628 in the tall one), and every speck lies nearer than that
+    // (at most about 508 and 594): under them here it covers exactly what it
+    // covered drawn over them.
+    const vign = bctx.createRadialGradient(lampX, lampY, reach * 0.7, lampX, lampY, reach);
+    vign.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    vign.addColorStop(1, 'rgba(6, 4, 10, 0.22)');
+    bctx.fillStyle = vign;
+    bctx.fillRect(rx, ry, rw, rh);
+  }
+
+  // resize() clears the key with the canvas, so the key is only the screen:
+  // the lamp stands over the title's cube or over the board.
+  function drawBackdrop() {
+    const key = S.mode === 'title' ? 'title' : 'board';
+    if (backdropKey !== key) { paintBackdrop(); backdropKey = key; }
+    ctx.drawImage(backdrop, 0, 0);
+  }
+
+  /** Ink specks drift in the glow, brighter near the lamp. */
+  function drawSpecks() {
     ctx.fillStyle = '#d7263d';
     for (const s of specks) {
       if (s.y > L.H) continue;
-      ctx.globalAlpha = 0.1 + 0.08 * (0.5 + 0.5 * wave(0.9, s.p));
+      ctx.globalAlpha = 0.16 + 0.1 * (0.5 + 0.5 * wave(0.9, s.p));
       ctx.beginPath();
       ctx.arc(s.x, s.y, s.s, 0, Math.PI * 2);
       ctx.fill();
@@ -1522,9 +1594,14 @@
       const k = 1 - squash * 0.25;
       if (dir % 2) ctx.scale(k, 1); else ctx.scale(1, k);
     }
-    // Shadow on the paper, lifted a little mid-roll.
-    ctx.fillStyle = 'rgba(40, 24, 16, 0.28)';
-    roundRect(-h + 2, -h + 4 + squash * 3, h * 2, h * 2, 9);
+    // A soft two-layer shadow on the paper, lifted a little mid-roll: the lamp
+    // in paintBackdrop sits up and to the left, so the cube's own shadow falls
+    // down and to the right, the same way the light hits its top face below.
+    ctx.fillStyle = 'rgba(40, 24, 16, 0.14)';
+    roundRect(-h + 7, -h + 9 + squash * 3, h * 2, h * 2, 10);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(40, 24, 16, 0.26)';
+    roundRect(-h + 3, -h + 5 + squash * 3, h * 2, h * 2, 9);
     ctx.fill();
     if (ring) {
       ctx.strokeStyle = C.ink;
@@ -1537,8 +1614,13 @@
     ctx.fillStyle = C.cubeEdge;
     roundRect(-h, -h, h * 2, h * 2, 8);
     ctx.fill();
-    // Sides: 0 up, 1 right, 2 down, 3 left, each a trapezoid from the outer edge to the top face.
+    // Sides: 0 up, 1 right, 2 down, 3 left, each a trapezoid from the outer edge
+    // to the top face. A lamp up and to the left (paintBackdrop) means the up
+    // and left sides catch it and the down and right sides fall into shadow —
+    // each face is its own gradient along that face's own line, not a flat tint.
     const outer = [[-h, -h], [h, -h], [h, h], [-h, h]], inner = [[-h + b, -h + b], [h - b, -h + b], [h - b, h - b], [-h + b, h - b]];
+    const SIDE_LIGHT = ['#fbf4e6', '#cfc2ab', '#a8987f', '#e3d7c1']; // up, right, down, left: lit to shadowed
+    const SIDE_SHADE = ['#e7dcc4', '#a89880', '#7d6d57', '#c4b69c'];
     for (let side = 0; side < 4; side++) {
       const o1 = outer[side], o2 = outer[(side + 1) % 4], i2 = inner[(side + 1) % 4], i1 = inner[side];
       ctx.beginPath();
@@ -1547,15 +1629,40 @@
       ctx.lineTo(i2[0], i2[1]);
       ctx.lineTo(i1[0], i1[1]);
       ctx.closePath();
-      ctx.fillStyle = ink === side ? C.ink : side === 2 || side === 1 ? C.cubeSide : '#efe7d8';
+      if (ink === side) {
+        const fg = ctx.createLinearGradient(o1[0], o1[1], i1[0], i1[1]);
+        fg.addColorStop(0, C.inkHi);
+        fg.addColorStop(1, C.inkDeep);
+        ctx.fillStyle = fg;
+      } else {
+        const fg = ctx.createLinearGradient(o1[0], o1[1], i1[0], i1[1]);
+        fg.addColorStop(0, SIDE_LIGHT[side]);
+        fg.addColorStop(1, SIDE_SHADE[side]);
+        ctx.fillStyle = fg;
+      }
       ctx.fill();
     }
-    ctx.fillStyle = ink === TOP ? C.ink : C.cube;
+    const topG = ctx.createRadialGradient(-h * 0.28, -h * 0.32, h * 0.1, 0, 0, h * 1.05);
+    if (ink === TOP) {
+      topG.addColorStop(0, C.inkHi);
+      topG.addColorStop(1, C.ink);
+    } else {
+      topG.addColorStop(0, '#ffffff');
+      topG.addColorStop(0.55, C.cube);
+      topG.addColorStop(1, C.cubeSide);
+    }
+    ctx.fillStyle = topG;
     roundRect(-h + b, -h + b, (h - b) * 2, (h - b) * 2, 5);
     ctx.fill();
     ctx.strokeStyle = 'rgba(90, 70, 50, 0.35)';
     ctx.lineWidth = 1.2;
     ctx.stroke();
+    // A small specular streak toward the lamp: the one cue that reads "lit
+    // material", not a flat painted square, at a glance and at any size.
+    ctx.fillStyle = ink === TOP ? 'rgba(255, 255, 255, 0.35)' : 'rgba(255, 255, 255, 0.55)';
+    ctx.beginPath();
+    ctx.ellipse(-h * 0.32, -h * 0.36, h * 0.34, h * 0.14, -0.7, 0, Math.PI * 2);
+    ctx.fill();
     if (ink === TOP) {
       // The inked top reads as ink, not as a red button: a lighter seal ring inside it.
       ctx.strokeStyle = 'rgba(251, 248, 241, 0.5)';
@@ -1670,7 +1777,7 @@
     ctx.globalAlpha = 1;
     for (const f of S.floats) {
       ctx.globalAlpha = 1 - f.t;
-      label(f.text, f.x, f.y - (calm() ? 0 : f.t * 30), 17, f.color, 'center', '800');
+      label(f.text, f.x, f.y - (calm() ? 0 : f.t * 30), 20, f.color, 'center', '800');
     }
     ctx.globalAlpha = 1;
   }
@@ -1691,22 +1798,28 @@
   function buttons() {
     if (S.mode === 'title') {
       const T = L.title;
-      const list = icons(false).concat(dayArrows(), row(TIERS.map((t, i) => [`card${i}`, t.label]), T.cards, 60).map((b) => ({ ...b, card: true })));
-      list.push({ id: 'help', label: 'How to play', x: 80, y: T.howto, w: W - 160, h: L.buttonH });
-      if (onward()) list.push(...row([['share', archive() ? `Share Day ${S.day}` : 'Share', true], ['onward', `Play ${ONWARD.title}`]], T.share, L.buttonH, 20, W - 20));
-      else if (solvedCount()) list.push({ id: 'share', label: archive() ? `Share Day ${S.day}` : 'Share today’s result', x: 80, y: T.share, w: W - 160, h: L.buttonH, primary: true });
+      const allDone = solvedCount() === TIERS.length;
+      const playLabel = allDone ? 'Look again' : solvedCount() ? 'Continue' : 'Play';
+      const list = icons(false).concat(
+        dayArrows(),
+        row(TIERS.map((t, i) => [`card${i}`, t.label]), T.cards, T.cardH).map((b) => ({ ...b, card: true })),
+        [{ id: 'play', label: playLabel, x: 20, y: T.cta, w: W - 40, h: T.playH, primary: true }],
+      );
+      list.push({ id: 'help', label: 'How to play', x: 40, y: T.howto, w: W - 80, h: T.howtoH });
+      if (onward()) list.push(...row([['share', archive() ? `Share Day ${S.day}` : 'Share', true], ['onward', `Play ${ONWARD.title}`]], T.share, T.shareH, 20, W - 20));
+      else if (solvedCount()) list.push({ id: 'share', label: archive() ? `Share Day ${S.day}` : 'Share today’s result', x: 40, y: T.share, w: W - 80, h: T.shareH, primary: true });
       return list;
     }
     const y = L.boardY + BOARD_H + (L.heading ? 18 : 12), h = L.buttonH;
     const key = (k) => (touch() ? '' : `  ${k}`);
     if (locked()) {
       const allDone = solvedCount() === TIERS.length;
-      return icons(true).concat(row([
+      return icons(true).concat(solvedGrid([
         ['next', allDone ? 'Done' : 'Next', true],
         ['share', 'Share', true],
         ['best', S.demo ? 'Playing' : 'Par line'],
         ['restart', 'Replay'],
-      ], y, h));
+      ]));
     }
     return icons(true).concat(row([
       ['undo', `Undo${key('U')}`],
@@ -1715,8 +1828,31 @@
     ], y, h));
   }
 
+  /**
+   * Where the solved celebration sits: a card over the lower part of the
+   * still-visible board, tall enough that its 2x2 button grid clears 44 CSS px
+   * even at the shallow scale a landscape phone gives this frame — the ~80
+   * logical px left below the board at that scale never could.
+   */
+  function solvedOverlayRect() {
+    const top = L.boardY + BOARD_H * 0.4;
+    const bottom = L.H - (L.heading ? 16 : 6);
+    return { x: BOARD_X - 8, y: top, w: BOARD_W + 16, h: bottom - top };
+  }
+
+  function solvedGrid(items) {
+    const rect = solvedOverlayRect();
+    const pad = 16, gap = 10, top = rect.y + 90;
+    const colW = (rect.w - pad * 2 - gap) / 2;
+    const rowH = (rect.y + rect.h - top - pad - gap) / 2;
+    return items.map(([id, text, primary], i) => {
+      const col = i % 2, rowAt = (i / 2) | 0;
+      return { id, label: text, x: rect.x + pad + col * (colW + gap), y: top + rowAt * (rowH + gap), w: colW, h: rowH, primary };
+    });
+  }
+
   // Either side of the day line on the title screen, each only where there is a day to go to.
-  const ARROW = 56;
+  const ARROW = 64;
   function dayArrows() {
     const y = L.title.day - ARROW / 2, list = [];
     if (S.day > 1) list.push({ id: 'prevday', icon: 'prev', x: 14, y, w: ARROW, h: ARROW });
@@ -1779,7 +1915,7 @@
     if (b.card) { drawTierCard(b, Number(b.id.slice(4)), S.hover === b.id); return; }
     const down = S.press && S.press.id === b.id;
     const hot = S.hover === b.id;
-    ctx.fillStyle = b.primary ? (down ? C.ink : C.inkHi) : down ? C.buttonDown : hot ? C.buttonHot : C.button;
+    ctx.fillStyle = b.primary ? (down ? C.inkPress : C.inkHi) : down ? C.buttonDown : hot ? C.buttonHot : C.button;
     roundRect(b.x, b.y + (down ? 2 : 0), b.w, b.h, 12);
     ctx.fill();
     if (!b.primary) {
@@ -1787,7 +1923,7 @@
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
-    label(b.label, b.x + b.w / 2, b.y + b.h / 2 + (down ? 2 : 0), 17, b.primary ? '#1c0407' : C.text, 'center', '700', b.w - 20);
+    label(b.label, b.x + b.w / 2, b.y + b.h / 2 + (down ? 2 : 0), 24, b.primary ? '#000000' : C.text, 'center', '700', b.w - 20);
   }
 
   /** "★ 5 rolls" at par, "7 rolls, +2" above it: one notation everywhere. */
@@ -1835,8 +1971,8 @@
 
   function drawHud() {
     if (L.heading) {
-      label('Ink Side Down', 12, 24, 21, C.text, 'left', '800');
-      if (!PICTURE) label(`Day ${S.day}${archive() ? ' · archive' : ''}`, 12, 48, 16, C.inkHi, 'left', '700');
+      label('Ink Side Down', 12, 24, 22, C.text, 'left', '800');
+      if (!PICTURE) label(`Day ${S.day}${archive() ? ' · archive' : ''}`, 12, 48, 20, C.inkHi, 'left', '700');
     }
     for (const t of tabs()) drawTierCard(t, t.tier, t.tier === S.tier);
     const p = puzzle(), r = run();
@@ -1846,15 +1982,15 @@
     if (S.toast && toastOverInfo()) {
       // the toast is drawn here instead, for its three seconds
     } else if (S.newDay && !L.heading) {
-      label(touch() ? 'New puzzles are out: tap home' : 'New puzzles are out: press Esc', BOARD_X, y, 17, C.inkHi, 'left', '800');
+      label(touch() ? 'New puzzles are out: tap home' : 'New puzzles are out: press Esc', BOARD_X, y, 24, C.inkHi, 'left', '800');
     } else if (S.demo) {
-      label('Par line', BOARD_X, y, 18, C.text, 'left', '800');
-      drawDemoStrip(BOARD_X + 84, y);
-      label(`par ${p.par}`, BOARD_X + BOARD_W, y, 18, C.muted, 'right', '800');
+      label('Par line', BOARD_X, y, 24, C.text, 'left', '800');
+      drawDemoStrip(BOARD_X + 100, y);
+      label(`par ${p.par}`, BOARD_X + BOARD_W, y, 24, C.muted, 'right', '800');
     } else if (locked()) {
       const over = r.solvedMoves - p.par;
-      label(`${day}Solved in ${r.solvedMoves}`, BOARD_X, y, 19, C.text, 'left', '800');
-      label(over <= 0 ? '★ par' : `par ${p.par}, +${over}`, BOARD_X + BOARD_W, y, 19, C.inkHi, 'right', '800');
+      label(`${day}Solved in ${r.solvedMoves}`, BOARD_X, y, 24, C.text, 'left', '800');
+      label(over <= 0 ? '★ par' : `par ${p.par}, +${over}`, BOARD_X + BOARD_W, y, 24, C.inkHi, 'right', '800');
     } else {
       const moves = S.practice ? S.practiceMoves : r.moves;
       const over = moves - p.par;
@@ -1862,9 +1998,9 @@
       // Before the first roll, the line says what the red side is: the cube is the same shape as a plain block.
       const first = !history().length && !S.practice && !r.moves;
       const left = S.practice ? `Practice · ${moves} · ${printed}` : first ? `${day}Red side = ink` : `${day}Rolls ${moves} · ${printed}`;
-      label(left, BOARD_X, y, 18, first ? C.inkHi : C.text, 'left', '800', BOARD_W * 0.6);
+      label(left, BOARD_X, y, 24, first ? C.inkHi : C.text, 'left', '800', BOARD_W * 0.6);
       const color = moves <= p.par ? C.good : over <= 2 ? C.warn : C.bad;
-      label(`par ${p.par} (fewest)`, BOARD_X + BOARD_W, y, 16, color, 'right', '700');
+      label(`par ${p.par} (fewest)`, BOARD_X + BOARD_W, y, 24, color, 'right', '700');
     }
   }
 
@@ -1903,17 +2039,36 @@
     ctx.lineWidth = 1.5;
     roundRect(BOARD_X - 8, top, BOARD_W + 16, h, 16);
     ctx.stroke();
-    RULES.forEach(([str, color], i) => label(str, W / 2, top + 48 + i * 34, 17, color, 'center', '600', BOARD_W - 12));
+    RULES.forEach(([str, color], i) => label(str, W / 2, top + 38 + i * 37, 26, color, 'center', '600', BOARD_W - 12));
   }
 
   function drawFooter(y) {
     if (S.toast || !y) return;
-    if (S.newDay) { label(touch() ? 'New puzzles are out: tap the home button' : 'New puzzles are out: press Esc', W / 2, y, 15, C.inkHi, 'center', '700'); return; }
-    if (touch()) { label('Swipe, or tap toward a square', W / 2, y, 15, C.muted, 'center', '500'); return; }
+    if (S.newDay) { label(touch() ? 'New puzzles are out: tap the home button' : 'New puzzles are out: press Esc', W / 2, y, 22, C.inkHi, 'center', '700'); return; }
+    if (touch()) { label('Swipe, or tap toward a square', W / 2, y, 22, C.muted, 'center', '500'); return; }
     const hint = S.mode === 'title'
       ? S.today > 1 ? 'Arrows or WASD · U undo · R restart · < > other days' : 'Arrow keys or WASD · U undo · R restart · L reads the board'
       : 'Arrows or WASD · 1 2 3 switch · Esc home · M sound';
-    label(hint, W / 2, y, 15, C.muted, 'center', '500');
+    label(hint, W / 2, y, 22, C.muted, 'center', '500');
+  }
+
+  /**
+   * The win, as a card over the lower board: every solve gets it, at or over
+   * par alike — only the headline and its color change. The upper board stays
+   * visible above the card, marks and all.
+   */
+  function drawSolvedOverlay() {
+    const p = puzzle(), r = run(), rect = solvedOverlayRect();
+    ctx.fillStyle = 'rgba(17, 13, 21, 0.93)';
+    roundRect(rect.x, rect.y, rect.w, rect.h, 18);
+    ctx.fill();
+    ctx.strokeStyle = C.inkHi;
+    ctx.lineWidth = 2;
+    roundRect(rect.x, rect.y, rect.w, rect.h, 18);
+    ctx.stroke();
+    const over = r.solvedMoves - p.par, cx0 = rect.x + rect.w / 2;
+    label(over <= 0 ? 'Solved — a star!' : 'Solved!', cx0, rect.y + 32, 26, C.text, 'center', '900');
+    label(resultText(r.solvedMoves, p.par), cx0, rect.y + 64, 24, C.inkHi, 'center', '700');
   }
 
   function drawPlay() {
@@ -1925,8 +2080,9 @@
     drawParts();
     ctx.restore();
     if (S.help) drawHelp();
+    else if (locked()) drawSolvedOverlay();
     for (const b of buttons()) drawButton(b);
-    drawFooter(L.footerY);
+    if (!locked()) drawFooter(L.footerY);
   }
 
   function untilMidnight() {
@@ -1936,25 +2092,30 @@
     return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m`;
   }
 
+  /** The central object itself, resting above the fold: a gentle bob while the board is awake. */
+  function drawTitleCube(y, size) {
+    drawCube(W / 2, y + wave(1.1) * 6, size, 1);
+  }
+
   function drawTitle() {
     const T = L.title;
     label('INK SIDE DOWN', W / 2, T.name, T.nameSize, C.text, 'center', '900');
     const past = archive();
-    label(titleDay(S.day, past ? dayDate(S.day) : '', past, PICTURE), W / 2, T.day, 17, C.inkHi, 'center', '700', W - 2 * (14 + ARROW + 6));
-    label('Roll the inked cube so it prints only on the marks.', W / 2, T.tagline, 15, C.muted, 'center', '500', W - 40);
+    label(titleDay(S.day, past ? dayDate(S.day) : '', past, PICTURE), W / 2, T.day, L.tabText, C.inkHi, 'center', '700', W - 2 * (14 + ARROW + 6));
+    label('Roll the inked cube so it prints only on the marks.', W / 2, T.tagline, L.small, C.muted, 'center', '600', W - 40);
+    drawTitleCube(T.cube, T.cubeSize);
 
     const allDone = solvedCount() === TIERS.length;
-    ctx.globalAlpha = allDone ? 1 : 0.8 + 0.2 * wave(3);
-    const go = touch() ? 'Tap' : 'Tap or press Space';
-    const done = past ? `Day ${S.day} is done` : `Next puzzles in ${untilMidnight()}`;
-    label(allDone ? done : `${go} to ${solvedCount() ? 'continue' : 'play'}`, W / 2, T.cta, 21, allDone ? C.text : C.inkHi, 'center', '800');
-    ctx.globalAlpha = 1;
+    if (allDone) {
+      const done = past ? `Day ${S.day} is done` : `Next puzzles in ${untilMidnight()}`;
+      label(done, W / 2, T.caption, L.small, C.text, 'center', '800');
+    }
     // Finished for today is the moment an earlier day is worth offering.
     const again = allDone ? (!past && S.day > 1 ? '‹ plays earlier days' : 'Tap a puzzle to see it again') : '';
     const sub = past
       ? again || 'Earlier days do not count toward the streak'
       : [again, S.bestStreak ? `Streak ${liveStreak()} · best ${S.bestStreak}` : ''].filter(Boolean).join('  ·  ');
-    if (sub) label(sub, W / 2, T.sub, 15, C.muted, 'center', '600');
+    if (sub) label(sub, W / 2, T.sub, L.small, C.muted, 'center', '600');
     for (const b of buttons()) drawButton(b);
     drawFooter(T.footer);
     if (S.help) drawHelp(T.day + ARROW / 2 + 8, T.footer - 24);
@@ -1968,25 +2129,24 @@
     if (!S.toast) return;
     const a = Math.min(1, S.toast.t * 6, (3 - S.toast.t) * 3);
     ctx.globalAlpha = Math.max(0, a);
-    ctx.font = `700 15px ${FONT}`;
+    ctx.font = `700 24px ${FONT}`;
     const w = Math.min(W - 16, ctx.measureText(S.toast.text).width + 32);
-    const y = S.mode === 'title' ? L.title.footer - 18 : L.toastY;
-    const h = toastOverInfo() ? 28 : 36; // compact: clear of the board frame
+    const y = S.mode === 'title' ? L.title.footer - 28 : L.toastY;
+    const h = toastOverInfo() ? 38 : 46; // compact: clear of the board frame
     ctx.fillStyle = '#3a2f46';
     roundRect((W - w) / 2, y, w, h, h / 2);
     ctx.fill();
-    label(S.toast.text, W / 2, y + h / 2, 15, C.text, 'center', '700');
+    label(S.toast.text, W / 2, y + h / 2, 24, C.text, 'center', '700');
     ctx.globalAlpha = 1;
   }
 
   function render() {
     if (ONWARD) onwardLink.hidden = !onward();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = C.bg;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    drawBackdrop();
     const k = view.scale * view.dpr;
     ctx.setTransform(k, 0, 0, k, view.ox * view.dpr, view.oy * view.dpr);
-    drawBackground();
+    drawSpecks();
     if (S.mode === 'title') drawTitle();
     else drawPlay();
     drawToast();
@@ -2006,6 +2166,7 @@
 
   function press(id) {
     if (id === 'share') share();
+    else if (id === 'play') startPlay();
     else if (id === 'mute') toggleMute();
     else if (id === 'home') goTitle();
     else if (id === 'next') nextPuzzle();
@@ -2218,8 +2379,12 @@
   });
 
   window.addEventListener('resize', resize);
-  // A canvas whose backing store the browser dropped comes back blank.
-  canvas.addEventListener('contextrestored', invalidate);
+  // A canvas whose backing store the browser dropped comes back blank. The
+  // backdrop's is dropped along with it, so the next draw paints it again.
+  canvas.addEventListener('contextrestored', () => {
+    invalidate();
+    backdropKey = '';
+  });
   // The hints drawn on the canvas follow the pointer (tap or click, the keys on the
   // buttons): a device that changes it — a tablet mode, a mouse plugged in —
   // redraws a still screen. Old Safari has no addEventListener on a media query.
