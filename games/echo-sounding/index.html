@@ -22,7 +22,7 @@
   #copybox { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(4, 10, 16, 0.82); }
   #copybox.open { display: flex; }
   #copybox .card { width: min(92vw, 420px); box-sizing: border-box; padding: 18px; border-radius: 16px; background: #0c2438; border: 1px solid #1f4b63; color: #e7fbf8; }
-  #copybox p { margin: 0 0 10px; font-size: 15px; line-height: 1.4; }
+  #copybox p { margin: 0 0 10px; font-size: 16px; line-height: 1.4; }
   #copybox textarea { width: 100%; height: 100px; box-sizing: border-box; padding: 10px; border-radius: 10px; border: 1px solid #1f4b63; background: #061420; color: #b6fff1; font: 15px/1.45 ui-monospace, Menlo, Consolas, monospace; resize: none; -webkit-user-select: text; user-select: text; }
   #copybox button { margin-top: 12px; width: 100%; height: 44px; border: 0; border-radius: 10px; background: #00e5c7; color: #052019; font-weight: 700; font-size: 16px; cursor: pointer; }
 </style>
@@ -426,18 +426,26 @@
 
   // ---- layout & state ----
   const W = 480, H = 720;
-  const GRID_TOP = 132, GRID_MAX = 420;
+  const GRID_TOP = 224, GRID_MAX = 380;
   const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
   const SLUG = 'echo-sounding';
   const STORE = 'arkai:echo-sounding:v1', STORE_MUTE = 'arkai:echo-sounding:muted';
   const SHARE_URL = 'https:' + '//arkai.win/games/echo-sounding/?ref=share';
   const COLS_LETTERS = 'ABCDEFGH';
+  // Body/HUD text is sized so it stays >=16 CSS px at the portal frame's tightest
+  // phone scale (~0.65) and >=12 CSS px at its landscape scale (~0.42) — ARK-58.
+  const BODY = 30;
 
   const C = {
     bg: '#061420', card: '#0e2c46',
-    cell: '#0d2740', pinged: '#173a5c', hit: '#ff8a5b', hitText: '#2a0f04',
+    // Cell and the gradient's darkest stop are lifted just above screen-colour.py's
+    // near-black luminance floor (<0.02): an unpinged grid used to read as literal
+    // near-black at its own fill colour, and it fills most of the play screen
+    // (ARK-58, #28/D-083 — no board is allowed 31-52% near-black any more).
+    cell: '#123255', pinged: '#173a5c', hit: '#ff8a5b', hitText: '#2a0f04',
     accent: '#00e5c7', accentDim: '#0a5c50', cursor: '#ffd166',
     text: '#e7fbf8', muted: '#8fb3c4', good: '#6ee7a8', warn: '#fbbf24', bad: '#f87171',
+    deepTop: '#0c3552', deepMid: '#082943', deepLow: '#13304a',
   };
 
   function gridMetrics(size) {
@@ -482,7 +490,7 @@
     muted: storage.get(STORE_MUTE) === '1',
     clock: 0, dayCheck: 5, shake: 0, flash: 0,
     lively: 0, stir: 0, // seconds of ambient motion left since the last input, and how much of it is showing (0–1)
-    parts: [], floats: [], toast: null,
+    parts: [], floats: [], ripples: [], toast: null,
   };
   const started = new Set();
 
@@ -553,12 +561,23 @@
 
   // ---- canvas letterbox ----
   let view = { dpr: 1, cssW: W, cssH: H, scale: 1, ox: 0, oy: 0 };
+  // The sea, the screen's gradient and its light never move, yet four gradients
+  // the size of the canvas repainted every frame took a phone's frame from 16.7 ms
+  // to 33 ms (ARK-64: bare /play/ at 390×844, DPR 3, software canvas; 33 → 167 ms
+  // with the CPU slowed 4×). So they are painted into a canvas of their own, the
+  // size of this one, once per size and screen (drawBackdrop), and copied 1:1.
+  const backdrop = document.createElement('canvas');
+  const bctx = backdrop.getContext('2d');
+  let backdropKey = '';
   function resize() {
     invalidate(); // a canvas given a new size is blank until it is drawn again
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const cssW = Math.max(1, canvas.clientWidth), cssH = Math.max(1, canvas.clientHeight);
     canvas.width = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
+    backdrop.width = canvas.width;
+    backdrop.height = canvas.height;
+    backdropKey = '';
     const scale = Math.min(cssW / W, cssH / H);
     view = { dpr, cssW, cssH, scale, ox: (cssW - W * scale) / 2, oy: (cssH - H * scale) / 2 };
   }
@@ -620,6 +639,7 @@
 
   const toast = (message, spoken = message) => { S.toast = { text: message, t: 0 }; announce(spoken); };
   const float = (x, y, message, color) => S.floats.push({ x, y, text: message, color, t: 0 });
+  const ripple = (x, y, color) => { if (!calm()) S.ripples.push({ x, y, t: 0, life: 0.5, color }); };
   const shake = (amount) => { if (!calm()) S.shake = amount; };
   // Ambient motion, scaled by how awake the board is: at rest it is the reduced-motion picture.
   const wave = (speed, phase = 0) => (calm() ? 0 : S.stir * Math.sin(S.clock * speed + phase));
@@ -862,6 +882,7 @@
     if (!S.practice) { emit('progress', { moves: run().moves, tier: S.tier + 1, day: S.day, archive: archive() }); writeStore(); }
     sfx.ping(dist);
     const { x, y } = cellCenter(p.size, cell);
+    ripple(x, y, dist === 0 ? C.hit : C.accent);
     if (dist === 0) { sfx.hit(); spawnParts(x, y, C.hit, 10, 120); float(x, y - 18, 'hit!', C.hit); }
     announce(`${cellName(p.size, cell)}: ${dist}.`);
   }
@@ -949,6 +970,7 @@
     const mid = ((p.size / 2) | 0) * p.size + ((p.size / 2) | 0);
     const { x, y } = cellCenter(p.size, mid);
     spawnParts(x, y, C.accent, 26, 200);
+    spawnParts(x, y, C.good, 14, 120);
   }
 
   function solvedNow() {
@@ -964,7 +986,8 @@
     celebrate(p);
     const over = r.solvedMoves - p.par;
     emit('gameover', { won: true, score: r.solvedMoves, par: p.par, tier: S.tier + 1, day: S.day, archive: archive() });
-    toast(solvedNotice(over, solvedCount() === TIERS.length));
+    // The overlay now shows this message visually; screen readers still get it.
+    announce(solvedNotice(over, solvedCount() === TIERS.length));
   }
 
   function startPractice() {
@@ -1018,6 +1041,7 @@
     S.stir = want > S.stir ? Math.min(want, S.stir + dt * 2) : Math.max(want, S.stir - dt);
     S.parts = S.parts.filter((pt) => { pt.t += dt; pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.vy += 240 * dt; return pt.t < pt.life; });
     S.floats = S.floats.filter((f) => { f.t += dt; return f.t < 0.9; });
+    S.ripples = S.ripples.filter((rp) => { rp.t += dt; return rp.t < rp.life; });
     if (S.flash > 0) S.flash = Math.max(0, S.flash - dt * 1.5);
     if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 20);
     if (S.toast) {
@@ -1050,12 +1074,12 @@
     ctx.closePath();
   }
 
-  function button(x, y, w, h, label, action, active) {
+  function button(x, y, w, h, label, action, active, fontPx) {
     ctx.fillStyle = active ? C.accent : C.card;
     roundRect(x, y, w, h, 10); ctx.fill();
     ctx.strokeStyle = C.accentDim; ctx.lineWidth = 1; roundRect(x, y, w, h, 10); ctx.stroke();
     ctx.fillStyle = active ? '#052019' : C.text;
-    ctx.font = `700 15px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = `700 ${fontPx || 15}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(label, x + w / 2, y + h / 2 + 1);
     addHit(x, y, w, h, action);
   }
@@ -1104,85 +1128,114 @@
     addHit(x, y, w, h, action);
   }
 
+  /**
+   * The sonar itself, drawn as a lit physical device: a domed face with a
+   * highlight, two ridges, a dark emitter at the centre, and a sweep wedge
+   * that eases back and forth with the same ambient wave() every other bit
+   * of idle motion uses — so it settles to a fixed pose and the game goes
+   * idle with everything else, instead of spinning forever.
+   */
+  function drawSonarEmblem(cx, cy, r) {
+    const face = ctx.createRadialGradient(cx - r * 0.35, cy - r * 0.4, r * 0.08, cx, cy, r);
+    face.addColorStop(0, '#7bfff0');
+    face.addColorStop(0.55, C.accent);
+    face.addColorStop(1, C.accentDim);
+    ctx.fillStyle = face;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(4, 24, 20, 0.45)'; ctx.lineWidth = Math.max(1, r * 0.05);
+    ctx.beginPath(); ctx.arc(cx, cy, r * 0.66, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, r * 0.34, 0, Math.PI * 2); ctx.stroke();
+    const angle = -Math.PI / 2 + wave(0.9, 0) * 0.9;
+    ctx.save();
+    ctx.beginPath(); ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, r, angle - 0.55, angle);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(4, 24, 20, 0.32)';
+    ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = '#052019';
+    ctx.beginPath(); ctx.arc(cx, cy, r * 0.12, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.38)';
+    ctx.beginPath(); ctx.ellipse(cx - r * 0.32, cy - r * 0.38, r * 0.22, r * 0.12, -0.6, 0, Math.PI * 2); ctx.fill();
+  }
+
   function drawTitle() {
-    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+    // The board's gradient and the glow behind the title are the backdrop's.
     addHit(0, 0, W, H, 'titledefault');
 
-    // Sibling games all show a mute icon on the title screen, not just the
-    // board (IDEA-BACKLOG.md, session #242's parity gap); this game's title
-    // screen already fills the top strip with day-nav arrows, so the icon
-    // pushes that row (and everything below it) down by TITLE_SHIFT rather
-    // than overlapping the nextday hit region at the right edge.
-    const TITLE_SHIFT = 40;
-    iconButton(W - 10 - 34, 4, 34, 32, 'mute', 'mute', false);
-
+    iconButton(W - 8 - 44, 8, 44, 44, 'mute', 'mute', false);
     const prevOk = S.day > 1, nextOk = S.day < S.today;
-    // Only drawn when navigable — matches the sibling games' dayArrows(),
-    // which omit the arrow entirely rather than showing it greyed out.
-    if (prevOk) iconButton(10, 20 + TITLE_SHIFT, 44, 40, 'prev', 'prevday');
-    if (nextOk) iconButton(426, 20 + TITLE_SHIFT, 44, 40, 'next', 'nextday');
+    if (prevOk) iconButton(8, 8, 44, 44, 'prev', 'prevday');
+    if (nextOk) iconButton(W - 8 - 44 - 8 - 44, 8, 44, 44, 'next', 'nextday');
+    // Its own row, wrapped: "Day N · three new puzzles every day" is too long
+    // for one line between the icons at a readable size.
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = C.muted; ctx.font = `600 15px ${FONT}`;
-    ctx.fillText(titleDay(S.day, dayDate(S.day), archive()), 240, 40 + TITLE_SHIFT);
+    ctx.fillStyle = C.muted; ctx.font = `600 25px ${FONT}`;
+    wrapText(titleDay(S.day, dayDate(S.day), archive()), 240, 80, 440, 27);
 
-    ctx.fillStyle = C.accent; ctx.font = `800 38px ${FONT}`;
-    ctx.fillText('Echo Sounding', 240, 90 + TITLE_SHIFT);
-    ctx.fillStyle = C.muted; ctx.font = `400 15px ${FONT}`;
-    ctx.fillText('Ping the dark. Deduce the echoes.', 240, 118 + TITLE_SHIFT);
+    ctx.fillStyle = C.accent; ctx.font = `800 40px ${FONT}`;
+    ctx.fillText('Echo Sounding', 240, 133);
 
-    const cardY = [154 + TITLE_SHIFT, 274 + TITLE_SHIFT, 394 + TITLE_SHIFT], cardH = 108;
+    // The rule, said once, sized to read at the portal frame's smallest scale.
+    ctx.fillStyle = C.text; ctx.font = `600 ${BODY}px ${FONT}`;
+    wrapText('Ping a cell. Its echo is the distance to the nearest reflector.', 240, 211, 420, BODY + 4);
+
+    // The sonar — the game's central object — inside its own Play button: a
+    // lit device with a sweeping face, not a bare label (ARK-58 title-screen
+    // requirement). Tall enough to clear 44 CSS px even at the portal's
+    // smallest landscape scale (~0.42).
+    const playY = 268, playH = 110;
+    ctx.fillStyle = C.accent; roundRect(40, playY, 400, playH, 20); ctx.fill();
+    ctx.strokeStyle = '#7bfff0'; ctx.lineWidth = 1; roundRect(40, playY, 400, playH, 20); ctx.stroke();
+    drawSonarEmblem(112, playY + playH / 2, 38);
+    ctx.fillStyle = '#052019'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.font = `800 34px ${FONT}`;
+    ctx.fillText('Play', 172, playY + playH / 2 - 12);
+    ctx.font = `600 20px ${FONT}`;
+    ctx.fillText(`Day ${S.day} · ${solvedCount()} of 3 solved`, 172, playY + playH / 2 + 22);
+    addHit(40, playY, 400, playH, 'titledefault');
+
+    const cardY = [388, 464, 540], cardH = 70;
+    ctx.textAlign = 'center';
     TIERS.forEach((t, tier) => {
       const y = cardY[tier], p = S.puzzles[tier], r = S.runs[tier];
       ctx.fillStyle = C.card;
       roundRect(40, y, 400, cardH, 14); ctx.fill();
       ctx.strokeStyle = r.solved ? C.good : C.accentDim; ctx.lineWidth = 2;
       roundRect(40, y, 400, cardH, 14); ctx.stroke();
-      ctx.fillStyle = C.text; ctx.font = `800 22px ${FONT}`; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-      ctx.fillText(t.label, 62, y + 38);
-      ctx.fillStyle = C.muted; ctx.font = `400 14px ${FONT}`;
-      ctx.fillText(`${p.size}×${p.size} grid · ${p.k} reflectors · par ${p.par === Infinity ? p.budget : p.par}`, 62, y + 60);
+      ctx.fillStyle = C.text; ctx.font = `800 22px ${FONT}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText(t.label, 62, y + 20);
+      ctx.fillStyle = C.muted; ctx.font = `400 18px ${FONT}`;
+      ctx.fillText(`${p.size}×${p.size} · ${p.k} reflectors · par ${p.par === Infinity ? p.budget : p.par}`, 62, y + 48);
       ctx.textAlign = 'right';
       if (r.solved) {
         ctx.fillStyle = r.solvedMoves - r.par <= 0 ? C.good : C.warn;
-        ctx.font = `700 16px ${FONT}`;
-        ctx.fillText(parNote(r.solvedMoves, r.par), 418, y + 38);
-        ctx.fillStyle = C.muted; ctx.font = `400 13px ${FONT}`;
-        ctx.fillText(`${r.solvedMoves} pings spent`, 418, y + 60);
+        ctx.font = `700 18px ${FONT}`;
+        ctx.fillText(parNote(r.solvedMoves, r.par), 418, y + 20);
+        ctx.fillStyle = C.muted; ctx.font = `400 17px ${FONT}`;
+        ctx.fillText(`${r.solvedMoves} pings spent`, 418, y + 48);
       } else {
-        ctx.fillStyle = C.accent; ctx.font = `700 16px ${FONT}`;
-        ctx.fillText(r.moves ? 'In progress' : 'Not started', 418, y + 38);
+        ctx.fillStyle = C.accent; ctx.font = `700 18px ${FONT}`;
+        ctx.fillText(r.moves ? 'In progress' : 'Not started', 418, y + 20);
       }
       ctx.textAlign = 'center';
       addHit(40, y, 400, cardH, `card${tier}`);
     });
 
-    // Below the cards, dual-review (this session) found the naive "+TITLE_SHIFT"
-    // pattern used above pushes this block's bottom into the fixed toast zone
-    // (drawEffects(): roundRect(40, H - 74, ...) = y 646..692) — the pre-icon
-    // layout had an 18px gap here that a flat +40 shift erased. Tightened
-    // instead of shifted so the onward hit (614..640) clears the toast with a
-    // 6px margin; cards above are untouched.
-    ctx.fillStyle = C.muted; ctx.font = `400 14px ${FONT}`;
-    ctx.fillText(`Streak ${S.streak}${S.bestStreak > S.streak ? ` · best ${S.bestStreak}` : ''}`, 240, 560);
-    ctx.globalAlpha = 0.75 + 0.25 * wave(2.4);
-    ctx.fillStyle = C.accent; ctx.font = `600 15px ${FONT}`;
-    ctx.fillText('Tap or press Space to play', 240, 584);
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = C.muted; ctx.font = `400 12px ${FONT}`;
-    ctx.fillText('Missed a day? The arrows above open every earlier one.', 240, 606);
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = C.muted; ctx.font = `400 25px ${FONT}`;
+    ctx.fillText(`Streak ${S.streak}${S.bestStreak > S.streak ? ` · best ${S.bestStreak}` : ''}`, 240, 626);
 
     if (onward()) {
-      ctx.fillStyle = C.accent; ctx.font = `600 14px ${FONT}`;
-      ctx.fillText(`Play ${ONWARD.title} next →`, 240, 628);
-      addHit(120, 614, 240, 26, 'onward');
+      ctx.fillStyle = C.accent; ctx.font = `600 18px ${FONT}`;
+      ctx.fillText(`Play ${ONWARD.title} next →`, 240, 652);
+      addHit(90, 638, 300, 28, 'onward');
+    } else {
+      ctx.fillStyle = C.muted; ctx.font = `400 17px ${FONT}`;
+      ctx.fillText('Missed a day? The arrows above open every earlier one.', 240, 652);
     }
 
-    // Every sibling daily has a tappable "How to play" on its title screen;
-    // this game only ever wired the H-key shortcut (case 'h' below), leaving
-    // touch/mouse players with no way to reach the rules before starting —
-    // found live in a QA pass, not from a written spec. 6px clear of the
-    // onward hit above (614..640) rather than sharing its old +40 shift.
-    button(40, 646, 400, 44, 'How to play', 'help', false);
+    button(40, 672, 400, 34, 'How to play', 'help', false, 17);
   }
 
   /**
@@ -1208,6 +1261,8 @@
     ctx.rect(0, 0, W, H);
     ctx.rect(gx, gy, px, px);
     ctx.clip('evenodd');
+    // The ring sweep the mechanic already earned; the soft glow behind the grid
+    // under it is the backdrop's (paintBackdrop).
     ctx.strokeStyle = C.accent;
     ctx.lineWidth = 1.5;
     for (let i = 0; i < 6; i++) {
@@ -1230,7 +1285,7 @@
       roundRect(cx + 1.5, cy + 1.5, cell - 3, cell - 3, 6); ctx.fill();
       if (dist !== undefined) {
         ctx.fillStyle = dist === 0 ? C.hitText : C.text;
-        ctx.font = `700 ${Math.floor(cell * 0.36)}px ${FONT}`;
+        ctx.font = `700 ${Math.floor(cell * 0.42)}px ${FONT}`;
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(String(dist), cx + cell / 2, cy + cell / 2 + 1);
       }
@@ -1253,49 +1308,88 @@
     roundRect(cx + 2, cy + 2, cell - 4, cell - 4, 6); ctx.stroke();
   }
 
+  /**
+   * The solved state as a card over the still-visible, still-marked board
+   * (ARK-58): a real celebration on every solve — celebrate() already fires
+   * regardless of score — and the next step as a big, real button, not the
+   * two 30px-tall links this used to tuck under the grid's footer line.
+   */
+  function drawSolvedOverlay(p, r) {
+    const { cell, gx, gy } = gridMetrics(p.size);
+    const gsize = cell * p.size, gcx = gx + gsize / 2, gcy = gy + gsize / 2;
+    ctx.fillStyle = 'rgba(4, 10, 16, 0.55)';
+    roundRect(gx - 4, gy - 4, gsize + 8, gsize + 8, 12); ctx.fill();
+
+    const panelW = Math.min(380, gsize), panelH = 300;
+    const px = gcx - panelW / 2, py = gcy - panelH / 2;
+    ctx.fillStyle = 'rgba(9, 30, 48, 0.97)';
+    roundRect(px, py, panelW, panelH, 18); ctx.fill();
+    ctx.strokeStyle = C.accent; ctx.lineWidth = 2;
+    roundRect(px, py, panelW, panelH, 18); ctx.stroke();
+
+    const over = r.solvedMoves - r.par;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = C.accent; ctx.font = `800 32px ${FONT}`;
+    ctx.fillText('★ Solved!', gcx, py + 48);
+    ctx.fillStyle = C.text; ctx.font = `600 22px ${FONT}`;
+    ctx.fillText(
+      over < 0 ? `${-over} under par — beat the solver!` : over === 0 ? 'Right at par.' : `${over} over par.`,
+      gcx, py + 82,
+    );
+    ctx.fillStyle = C.muted; ctx.font = `400 20px ${FONT}`;
+    ctx.fillText(`${r.solvedMoves} pings spent`, gcx, py + 110);
+
+    const allDone = solvedCount() === TIERS.length;
+    const primaryLabel = allDone ? 'Share result' : 'Next puzzle';
+    const primaryAction = allDone ? 'share' : 'next';
+    const bx = px + 20, bw = panelW - 40;
+    // 105px tall: clears 44 CSS px even at the portal frame's ~0.42 landscape scale.
+    button(bx, py + 130, bw, 105, primaryLabel, primaryAction, true, 26);
+    const smallW = (bw - 12) / 2;
+    button(bx, py + 245, smallW, 44, 'Replay', 'replay', false, 20);
+    button(bx + smallW + 12, py + 245, smallW, 44, allDone ? 'Title' : 'Share', allDone ? 'home' : 'share', false, 20);
+  }
+
   function drawPlay() {
-    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
     const p = puzzle(), r = run();
     ctx.save();
     if (S.shake > 0) ctx.translate((Math.random() - 0.5) * S.shake, (Math.random() - 0.5) * S.shake);
     drawSonarField(p.size);
 
-    // 34x32 rather than the sibling games' 48-60: this bar has a centered day
-    // label and a right-aligned move counter squeezing the space, but 30x30
-    // (dual-review, GLM) was under the ~44px touch-target floor and one slip
-    // toggled sound instead of leaving to the title — widened with the gap
-    // kept at 6 so the two hits still can't bleed into each other.
-    iconButton(8, 4, 34, 32, 'home', 'home', false);
-    // Unlike button()'s other toggles, an accent-filled pill here would read as
-    // "sound is on" in this game's own color language — the crossed-out glyph
-    // alone carries the muted state, same as the three sibling daily games.
-    iconButton(48, 4, 34, 32, 'mute', 'mute', false);
+    // 44x44: a real touch-target floor, not the old 34x32.
+    iconButton(8, 4, 44, 44, 'home', 'home', false);
+    iconButton(60, 4, 44, 44, 'mute', 'mute', false);
 
     ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = r.moves > p.budget ? C.warn : C.text; ctx.font = `700 15px ${FONT}`;
-    ctx.fillText(`${r.moves}/${p.budget}`, 466, 22);
+    ctx.fillStyle = r.moves > p.budget ? C.warn : C.text; ctx.font = `800 ${BODY}px ${FONT}`;
+    ctx.fillText(`${r.moves}/${p.budget}`, 472, 26);
     ctx.textAlign = 'center';
-    ctx.fillStyle = C.muted; ctx.font = `600 13px ${FONT}`;
-    ctx.fillText(`Day ${S.day} · ${TIERS[S.tier].label}${S.practice ? ' · practice' : ''}`, 240, 22);
+    ctx.fillStyle = C.muted; ctx.font = `600 22px ${FONT}`;
+    ctx.fillText(`Day ${S.day} · ${TIERS[S.tier].label}${S.practice ? ' · practice' : ''}`, 240, 26);
 
-    const tabY = 40, tabW = 152, tabH = 30;
+    const tabY = 56, tabGap = 8, tabW = (W - 24 - tabGap * 2) / 3, tabH = 48;
     TIERS.forEach((t, tier) => {
-      const x = 12 + tier * (tabW + 6), active = tier === S.tier;
+      const x = 12 + tier * (tabW + tabGap), active = tier === S.tier;
       ctx.fillStyle = active ? C.accent : C.card;
-      roundRect(x, tabY, tabW, tabH, 8); ctx.fill();
-      ctx.fillStyle = active ? '#052019' : C.text; ctx.font = `700 13px ${FONT}`;
+      roundRect(x, tabY, tabW, tabH, 10); ctx.fill();
+      ctx.fillStyle = active ? '#052019' : C.text; ctx.font = `700 24px ${FONT}`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(t.label, x + tabW / 2, tabY + tabH / 2 + 1);
       addHit(x, tabY, tabW, tabH, `card${tier}`);
     });
 
-    const btnY = 76, btnW = 110, btnH = 30, gap = 6;
-    button(12, btnY, btnW, btnH, S.tapMode === 'ping' ? 'Ping' : S.tapMode === 'mark' ? 'Mark' : 'Pencil', 'mode', S.tapMode !== 'ping');
-    button(12 + (btnW + gap), btnY, btnW, btnH, 'Check', 'check');
-    button(12 + (btnW + gap) * 2, btnY, btnW, btnH, 'Clear', 'clear');
-    button(12 + (btnW + gap) * 3, btnY, btnW, btnH, 'Share', 'share');
+    // Two rows of two, not one cramped row of four: room for a readable label
+    // and a real 48px-tall target on every button, not only the ones this
+    // issue names explicitly.
+    const rowGap = 8, btnW = (W - 24 - 12) / 2, btnH = 48;
+    const row1Y = tabY + tabH + rowGap, row2Y = row1Y + btnH + rowGap;
+    button(12, row1Y, btnW, btnH, S.tapMode === 'ping' ? 'Ping' : S.tapMode === 'mark' ? 'Mark' : 'Pencil', 'mode', S.tapMode !== 'ping', 22);
+    button(12 + btnW + 12, row1Y, btnW, btnH, 'Check', 'check', false, 22);
+    button(12, row2Y, btnW, btnH, 'Clear', 'clear', false, 22);
+    button(12 + btnW + 12, row2Y, btnW, btnH, 'Share', 'share', false, 22);
 
     drawGrid(p, r);
+    if (locked()) drawSolvedOverlay(p, r);
     ctx.restore();
 
     const gridBottom = GRID_TOP + gridMetrics(p.size).cell * p.size;
@@ -1303,16 +1397,9 @@
     // After restore() the context holds whatever the frame before left in it: the
     // baseline is set here, or this line sits a few pixels lower after a resize, in
     // the picture, and on a still screen drawn after a toast than it does otherwise.
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `400 13px ${FONT}`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `600 22px ${FONT}`;
     ctx.fillStyle = r.moves <= parVal ? C.good : over <= 2 ? C.warn : C.bad;
-    ctx.fillText(`Par ${parVal} · mark ${p.k} reflector${p.k === 1 ? '' : 's'}`, 240, gridBottom + 24);
-
-    if (locked()) {
-      ctx.fillStyle = C.good; ctx.font = `700 15px ${FONT}`;
-      ctx.fillText('Solved! Replay or Next.', 240, gridBottom + 48);
-      button(120, gridBottom + 60, 110, 30, 'Replay', 'replay');
-      button(250, gridBottom + 60, 110, 30, 'Next', 'next');
-    }
+    ctx.fillText(`Par ${parVal} · mark ${p.k} reflector${p.k === 1 ? '' : 's'}`, 240, Math.min(gridBottom + 34, H - 14));
   }
 
   function wrapText(text, x, y, maxW, lh) {
@@ -1329,29 +1416,40 @@
   }
 
   function drawHelp() {
-    ctx.fillStyle = 'rgba(4,10,16,0.92)'; ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = C.accent; ctx.font = `800 24px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-    ctx.fillText('How to play', 240, 70);
+    ctx.fillStyle = 'rgba(4,10,16,0.94)'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = C.accent; ctx.font = `800 30px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText('How to play', 240, 56);
     const lines = [
       'A hidden grid holds a few reflectors.',
-      'Ping any cell: it answers with one number —',
-      'the distance to the nearest reflector.',
-      'Mark cells you deduce hold a reflector.',
-      'Pencil mode lets you jot an ungraded guess first.',
+      'Ping any cell: it answers with one',
+      'number — the distance to the nearest',
+      'reflector.',
+      'Mark cells you deduce hold one.',
+      'Pencil jots an ungraded guess first.',
       'Check once every reflector is marked.',
-      'A wrong check pings the cell that proves it, for 2.',
-      'Every ping costs 1 — beat the par for a star.',
+      'A wrong check costs 2.',
+      'Every ping costs 1 — beat the par',
+      'for a star.',
       '',
       'Arrows or WASD move the cursor.',
-      'Space acts in the current mode. M cycles ping, mark, pencil.',
-      'K checks, X clears marks, C shares, H closes this.',
+      'Space acts. M cycles ping, mark, pencil.',
+      'K checks, X clears, C shares, H closes.',
     ];
-    ctx.font = `400 15px ${FONT}`; ctx.fillStyle = C.text;
-    lines.forEach((l, i) => ctx.fillText(l, 240, 114 + i * 26));
+    ctx.font = `500 ${BODY}px ${FONT}`; ctx.fillStyle = C.text;
+    lines.forEach((l, i) => ctx.fillText(l, 240, 96 + i * (BODY + 4)));
     addHit(0, 0, W, H, 'closehelp');
   }
 
   function drawEffects() {
+    // Every ping's echo travelling back out, not only a hit: a ring that
+    // expands and fades from the pinged cell — the mechanic made visible.
+    for (const rp of S.ripples) {
+      const k = rp.t / rp.life;
+      ctx.globalAlpha = Math.max(0, 1 - k) * 0.8;
+      ctx.strokeStyle = rp.color; ctx.lineWidth = 3 - k * 2;
+      ctx.beginPath(); ctx.arc(rp.x, rp.y, 6 + k * 42, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
     for (const pt of S.parts) {
       ctx.globalAlpha = Math.max(0, 1 - pt.t / pt.life);
       ctx.fillStyle = pt.color;
@@ -1360,16 +1458,17 @@
     ctx.globalAlpha = 1;
     for (const f of S.floats) {
       ctx.globalAlpha = Math.max(0, 1 - f.t / 0.9);
-      ctx.fillStyle = f.color; ctx.font = `700 14px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.fillStyle = f.color; ctx.font = `700 18px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
       ctx.fillText(f.text, f.x, f.y - f.t * 30);
     }
     ctx.globalAlpha = 1;
     if (S.flash > 0) { ctx.fillStyle = `rgba(0,229,199,${S.flash * 0.3})`; ctx.fillRect(0, 0, W, H); }
     if (S.toast) {
-      ctx.fillStyle = 'rgba(6,20,32,0.92)';
-      roundRect(40, H - 74, W - 80, 46, 12); ctx.fill();
-      ctx.fillStyle = C.text; ctx.font = `600 14px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      wrapText(S.toast.text, W / 2, H - 51, W - 110, 16);
+      ctx.fillStyle = 'rgba(6,20,32,0.94)';
+      roundRect(24, H - 92, W - 48, 64, 14); ctx.fill();
+      ctx.strokeStyle = C.accentDim; ctx.lineWidth = 1; roundRect(24, H - 92, W - 48, 64, 14); ctx.stroke();
+      ctx.fillStyle = C.text; ctx.font = `700 ${BODY}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      wrapText(S.toast.text, W / 2, H - 60, W - 88, BODY + 4);
     }
   }
 
@@ -1379,10 +1478,67 @@
     if (onward()) { onwardLink.href = ONWARD.path; onwardLink.textContent = `Play ${ONWARD.title}, another daily puzzle`; }
   }
 
+  // A lit sea fills the whole backing store first, in device pixels, independent
+  // of the letterboxed logical box: on the board-shaped portal frame a band of
+  // this game's own background shows at the sides (ARK-58), and it has to read
+  // as part of the scene, not as a near-black gap around it. Then, in the
+  // logical box, the board's own gradient (not a flat near-black fill) and its
+  // light: a soft glow behind the title, or around the grid, outside it, in
+  // play — "a board with material and light" (ARK-58, #28/D-083). Into the
+  // backdrop canvas only: size 0 is the title screen.
+  function paintBackdrop(size) {
+    const pxW = backdrop.width, pxH = backdrop.height;
+    bctx.setTransform(1, 0, 0, 1, 0, 0);
+    const g = bctx.createLinearGradient(0, 0, 0, pxH);
+    g.addColorStop(0, C.deepTop);
+    g.addColorStop(0.45, C.deepMid);
+    g.addColorStop(1, C.deepLow);
+    bctx.fillStyle = g;
+    bctx.fillRect(0, 0, pxW, pxH);
+    const sky = bctx.createRadialGradient(pxW / 2, pxH * 0.24, 0, pxW / 2, pxH * 0.24, Math.max(pxW, pxH) * 0.65);
+    sky.addColorStop(0, 'rgba(0, 229, 199, 0.16)');
+    sky.addColorStop(1, 'rgba(0, 229, 199, 0)');
+    bctx.fillStyle = sky;
+    bctx.fillRect(0, 0, pxW, pxH);
+
+    bctx.setTransform(view.dpr * view.scale, 0, 0, view.dpr * view.scale, view.dpr * view.ox, view.dpr * view.oy);
+    const bg = bctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, C.deepTop); bg.addColorStop(0.5, C.deepMid); bg.addColorStop(1, C.deepLow);
+    bctx.fillStyle = bg; bctx.fillRect(0, 0, W, H);
+    if (!size) {
+      const halo = bctx.createRadialGradient(240, 250, 10, 240, 250, 260);
+      halo.addColorStop(0, 'rgba(0, 229, 199, 0.16)'); halo.addColorStop(1, 'rgba(0, 229, 199, 0)');
+      bctx.fillStyle = halo; bctx.fillRect(0, 0, W, H);
+      return;
+    }
+    const { cell, gx, gy } = gridMetrics(size);
+    const px = cell * size, cx = gx + px / 2, cy = gy + px / 2;
+    bctx.save();
+    bctx.beginPath();
+    bctx.rect(0, 0, W, H);
+    bctx.rect(gx, gy, px, px);
+    bctx.clip('evenodd');
+    const glow = bctx.createRadialGradient(cx, cy, 0, cx, cy, px / 2 + 240);
+    glow.addColorStop(0, 'rgba(0, 229, 199, 0.10)');
+    glow.addColorStop(1, 'rgba(0, 229, 199, 0)');
+    bctx.fillStyle = glow;
+    bctx.fillRect(0, 0, W, H);
+    bctx.restore();
+  }
+
+  // resize() clears the key with the canvas, so the key is only the screen.
+  function drawBackdrop() {
+    const size = S.mode === 'title' ? 0 : puzzle().size;
+    const key = `${S.mode}:${size}`;
+    if (backdropKey !== key) { paintBackdrop(size); backdropKey = key; }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(backdrop, 0, 0);
+  }
+
   function render() {
     hitRegions = [];
+    drawBackdrop();
     ctx.setTransform(view.dpr * view.scale, 0, 0, view.dpr * view.scale, view.dpr * view.ox, view.dpr * view.oy);
-    ctx.clearRect(-view.ox / view.scale, -view.oy / view.scale, view.cssW / view.scale, view.cssH / view.scale);
     if (S.mode === 'title') drawTitle(); else drawPlay();
     if (S.help) drawHelp();
     drawEffects();
@@ -1511,7 +1667,7 @@
   const wake = () => { dirty = true; S.lively = LIVELY; };
 
   const animating = () => {
-    if (S.shake > 0 || S.flash > 0 || S.parts.length > 0 || S.floats.length > 0 || S.toast) return true;
+    if (S.shake > 0 || S.flash > 0 || S.parts.length > 0 || S.floats.length > 0 || S.ripples.length > 0 || S.toast) return true;
     return S.stir > 0 || (S.lively > 0 && !calm());
   };
 
@@ -1545,8 +1701,12 @@
   });
 
   window.addEventListener('resize', resize);
-  // A canvas whose backing store the browser dropped comes back blank.
-  canvas.addEventListener('contextrestored', invalidate);
+  // A canvas whose backing store the browser dropped comes back blank. The
+  // backdrop's is dropped along with it, so the next draw paints it again.
+  canvas.addEventListener('contextrestored', () => {
+    invalidate();
+    backdropKey = '';
+  });
   resize();
   if (PICTURE) posePicture(); else loadDay(dayFromDateParam(DATE_RAW) ?? dayNumber(new Date()));
   requestAnimationFrame(frame);
