@@ -1070,7 +1070,9 @@
     if (S.practice) {
       celebrate();
       const over = r.moves - p.par;
-      toast(`Practice solved in ${r.moves}. ${over <= 0 ? 'Par!' : `${over} over par.`}`);
+      // One line, always: a wrapped toast climbs the board's lowest station
+      // (ARK-94). Practice has no panel, so the toast itself carries the count.
+      toast(`Practice solved in ${r.moves}${over < 0 ? `, ${-over} under.` : over === 0 ? ' — par!' : `, +${over}.`}`);
       return;
     }
     r.solved = true; r.solvedMoves = r.moves; r.par = p.par;
@@ -1080,8 +1082,13 @@
     // wash over the lit board, the star on the panel below, and the chord.
     celebrate(over <= 0 ? 0.9 : 0.5);
     emit('gameover', { won: true, score: r.solvedMoves, par: p.par, tier: S.tier + 1, day: S.day, archive: archive() });
+    // The panel above already says the verdict and the star, so the toast is only
+    // the nudge onwards — and only ever one line: the old verdict toast wrapped to
+    // three lines, started at y≈582 and stood over station D for its whole 3 s at
+    // 390×844 (ARK-94). The full verdict still reaches screen readers spoken.
+    const nudge = solvedCount() === TIERS.length ? 'All three lines solved.' : 'The next line is ready.';
     const verdict = over < 0 ? `${-over} under par: a very clean trace.` : over === 0 ? 'Par! A star.' : `Solved, ${over} over par.`;
-    toast(`${verdict} ${solvedCount() === TIERS.length ? 'All three done.' : 'The next line is ready when you are.'}`);
+    toast(nudge, `${verdict} ${nudge}`);
   }
 
   function doCheck() {
@@ -1167,7 +1174,10 @@
     if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 20);
     if (S.toast) {
       S.toast.t += dt;
-      if (S.toast.t >= (S.toast.duration ?? 2.6)) S.toast = null;
+      // A toast sits still from the frame it lands to the frame it leaves, so
+      // it animates nothing while it is up — ending one is what draws again
+      // (ARK-94: repainting it for its whole 3.2 s was the ×4 frame cost).
+      if (S.toast.t >= (S.toast.duration ?? 2.6)) { S.toast = null; invalidate(); }
     }
   }
 
@@ -1720,25 +1730,29 @@
   // the star glows, the verdict is gold, and the solve's wash ran longer.
   function drawSuccess(p, r) {
     const dayDone = solvedCount() === TIERS.length;
-    const px = 8, pw = W - 16, py = 146, ph = 132;
+    // Below the Line tabs with the plaque clear of their bottom edge (ARK-94:
+    // the plaque's warm pill sat 9 px over the tabs), and short enough to stop
+    // above the board's topmost cursor ring on the shortest frame (H 720: the
+    // ring tops out at ≈289, the panel bottom is 284).
+    const px = 8, pw = W - 16, py = 158, ph = 126;
     panelFrame(px, py, pw, ph, 18);
     addHit(px, py, pw, ph, 'successnone');
     plaque(240, py, dayDone ? 'Day complete' : 'Line solved');
     const over = r.solvedMoves - r.par;
     ctx.textBaseline = 'middle';
     if (over <= 0) {
-      star(176, py + 58, 17, true);
+      star(176, py + 56, 17, true);
       ctx.textAlign = 'left';
       ctx.fillStyle = over < 0 ? C.warn : C.good;
       ctx.font = `400 30px ${DISPLAY}`;
-      ctx.fillText(over < 0 ? `${-over} under par!` : 'Par — a star!', 202, py + 58);
+      ctx.fillText(over < 0 ? `${-over} under par!` : 'Par — a star!', 202, py + 56);
     } else {
       ctx.textAlign = 'center';
       ctx.fillStyle = C.text; ctx.font = `400 30px ${DISPLAY}`;
-      ctx.fillText(`Solved, +${over} over par`, 240, py + 58);
+      ctx.fillText(`Solved, +${over} over par`, 240, py + 56);
     }
-    button(48, py + 84, 190, 46, dayDone ? 'Share' : 'Next line', dayDone ? 'share' : 'next', 'primary');
-    button(258, py + 84, 174, 46, 'Replay', 'replay', 'secondary');
+    button(48, py + 78, 190, 44, dayDone ? 'Share' : 'Next line', dayDone ? 'share' : 'next', 'primary');
+    button(258, py + 78, 174, 44, 'Replay', 'replay', 'secondary');
   }
 
   function drawHelp() {
@@ -1757,8 +1771,8 @@
     const paras = [
       'Five stations hide four lines — one wiring tree.',
       'Ping two stations: you learn only the hops between them. 1 hop is a direct line, marked for you.',
-      'Mark mode: tap two stations to mark a line you deduced. Free.',
-      'Four marked? Check — a miss costs 2. Ping repeats are free.',
+      'Mark mode: tap two stations to mark a deduced line. Free.',
+      'Four marked? Check. A miss costs 2, ping repeats are free.',
       'Meet par — the solver’s own count — for a star. Three networks a day.',
     ];
     const rows = [];
@@ -1769,8 +1783,15 @@
     rows.pop();
     const lineH = 34, gapH = 14, headH = 58, btnH = 56;
     const textH = rows.reduce((sum, row) => sum + (row.gap ? gapH : lineH), 0);
-    const ph = Math.min(H - 28, headH + 14 + textH + 14 + btnH + 18);
-    const py = Math.max(14, (H - ph) / 2);
+    // The plaque rides the panel's top edge, so the panel keeps its half-plaque
+    // (21 px) of headroom inside the frame: at 390×844 in the portal page (H 720)
+    // the tallest help text filled H-28 and the plaque crossed the frame's top
+    // edge (ARK-94). The bottom margin is what it was: py + ph lands at H - 14.
+    // The five paragraphs wrap to 13 lines at this width (372 px) — textH 498 is
+    // what fits above Close at H 720 (text ends at 608, Close starts at 632), so
+    // new wording has to keep to that many lines.
+    const ph = Math.min(H - 52, headH + 14 + textH + 14 + btnH + 18);
+    const py = Math.max(38, (H - ph) / 2);
     panelFrame(px, py, pw, ph, 18);
     addHit(px, py, pw, ph, 'helpnone'); // a tap inside the panel is not a close
     plaque(240, py, 'How to play');
@@ -1810,7 +1831,10 @@
         ctx.fillRect(0, 0, W, H);
       }
     }
-    if (S.toast) {
+    // Not over an open help panel: the toast sat on the panel's Close button
+    // until it expired (ARK-94). The announcement has already been spoken, and
+    // the panel outranks whatever the toast had to say.
+    if (S.toast && !S.help) {
       ctx.font = `600 ${SMALL}px ${FONT}`;
       const lines = wrapLines(S.toast.text, W - 96);
       const th = lines.length * 34 + 22;
@@ -2013,19 +2037,22 @@
   // changed, the rule the other dailies follow: every listener and timer that can
   // change the picture calls invalidate() before anything else can return, and the
   // loop owns what no event announces — a running animation (the flash of a solve,
-  // the shake of a wrong check, the toast) plus one frame after it ends. A missed
-  // invalidate is a frozen game.
+  // the shake of a wrong check) plus one frame after it ends, and the frame a
+  // still toast expires on (update() invalidates there). A missed invalidate is a
+  // frozen game.
   //
   // Trunk Line has no ambient motion: the old clock field was advanced but read by
   // nothing, and is gone. Every write of state now lives in update(dt), which runs
   // every frame and stands still while the tab is hidden or the picture is posed.
   let dirty = true, wasAnimating = false;
   const invalidate = () => { dirty = true; };
-  // Only what moves on screen: the flash, the shake, the toast while it is up.
-  // A photograph holds still.
+  // Only what moves on screen: the flash and the shake. A toast never moves — it
+  // is drawn on the frame it lands and again on the frame update() drops it; the
+  // repaints while it sat still were the whole of the ×4 frame cost measured at
+  // acceptance (ARK-94). A photograph holds still.
   const animating = () => {
     if (PICTURE) return false;
-    return S.flash > 0 || S.shake > 0 || !!S.toast;
+    return S.flash > 0 || S.shake > 0;
   };
 
   let lastT = 0;
