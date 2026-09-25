@@ -49,6 +49,14 @@
   })();
   const MOTION = REDUCED_MOTION ? 0 : 1;
 
+  // A touch-first device (a phone: no hover, a coarse pointer) has no keyboard,
+  // so a hint that names keys is noise there. Such hints step aside for what a
+  // finger can actually do — or say nothing. A computer keeps the key wording,
+  // touch laptops included: they do have hover, so they fall to the else side.
+  const TOUCH_FIRST = (() => {
+    try { return window.matchMedia('(hover: none) and (pointer: coarse)').matches; } catch { return false; }
+  })();
+
   const storage = {
     get(key) { if (PICTURE) return null; try { return localStorage.getItem(key); } catch { return null; } },
     set(key, value) { if (PICTURE) return false; try { localStorage.setItem(key, value); return true; } catch { return false; } },
@@ -63,6 +71,7 @@
     muted: storage.get(STORE_MUTE) === '1',
     acc: 0, clock: 0, shake: 0, overT: 0, flash: 0, bite: 0,
     parts: [], floats: [],
+    bodyVer: 0,               // bumped whenever the body's cells change (still-body cache)
   };
 
   // ---- portal events (same-origin parent only) ----
@@ -159,6 +168,7 @@
     S.grew = false;
     S.eaten = 0; S.score = 0; S.newBest = false;
     S.acc = 0; S.shake = 0; S.overT = 0; S.flash = 0; S.bite = 0;
+    S.bodyVer++;
     S.parts = []; S.floats = [];
     S.gold = null; S.goldT = 0;
     S.food = freeCell(null);
@@ -210,10 +220,13 @@
       S.best = S.score;
       S.newBest = true;
       storage.set(STORE_BEST, String(S.best));
-      // A new best gets its own small fireworks, not just a colour change on a number.
+      // A new best gets its own small fireworks, not just a colour change on a
+      // number. They burst above the panel and rain onto it, and `draw` puts
+      // them on top of the panel — the old spawn point was inside it, under
+      // the title, where the confetti could not be seen.
       if (!REDUCED_MOTION) {
-        spawnParts(GO_PANEL.x + GO_PANEL.w * 0.3, GO_PANEL.y + 70, '#fbbf24', 16);
-        spawnParts(GO_PANEL.x + GO_PANEL.w * 0.7, GO_PANEL.y + 70, '#4ade80', 16);
+        spawnParts(GO_PANEL.x + GO_PANEL.w * 0.22, GO_PANEL.y - 30, '#fbbf24', 20);
+        spawnParts(GO_PANEL.x + GO_PANEL.w * 0.78, GO_PANEL.y - 30, '#4ade80', 20);
       }
     }
     tone(300, 0.14, 'sawtooth', 0.05);
@@ -251,6 +264,7 @@
     if (hitsSelf) return gameOver();
 
     S.cells.unshift(next);
+    S.bodyVer++;
     if (eatsFood) {
       S.grew = true;
       S.prevTail = null;
@@ -431,63 +445,145 @@
     ctx.drawImage(oc, x - fx / unit, y - fy / unit, oc.width / unit, oc.height / unit);
   }
 
-  function drawFood(f, t) {
-    const pulse = 1 + Math.sin(t * 6) * 0.06;
-    const x = cellX(f.x), y = cellY(f.y), r = CELL * 0.32 * pulse;
+  // A 1:1 copy of a cached canvas with none of drawImage's resampling: the
+  // transform is set to whole device pixels for the copy itself, then put
+  // back. `getTransform` says where the game's transform puts the sprite's
+  // corner right now (the death shake moves it), and the sprite was painted
+  // with that position's fractional part baked in — so the copy lands on the
+  // very pixels that painting the picture directly would have lit.
+  function blitSprite(oc, x0, y0) {
+    const m = ctx.getTransform();
     ctx.save();
-    ctx.shadowColor = 'rgba(251, 146, 60, 0.65)';
-    ctx.shadowBlur = 12;
-    const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.35, r * 0.15, x, y, r);
+    ctx.setTransform(1, 0, 0, 1, Math.floor(m.a * x0 + m.e), Math.floor(m.d * y0 + m.f));
+    ctx.drawImage(oc, 0, 0);
+    ctx.restore();
+  }
+
+  // The fruit and the gold star are a blurred glow plus a radial gradient
+  // each — the dearest dots on the board — and they were repainted every
+  // frame for pictures that only breathe ±6–10%. Like the board, each is
+  // painted once per canvas size and sub-pixel position into a canvas of its
+  // own and copied every frame: the copy lands 1:1 on whole device pixels, so
+  // it is exactly the picture that was painted directly. On the frames it
+  // breathes the finished sprite is scaled by a few percent instead, which
+  // reads the same as painting it again that much bigger.
+  function drawCachedSprite(cache, cx, cy, box, r, paint, pulse, variant) {
+    const unit = view.scale * view.dpr;
+    if (!(unit > 0)) return;
+    const x0 = cx - box, y0 = cy - box;
+    const px = view.dpr * view.ox + unit * x0, py = view.dpr * view.oy + unit * y0;
+    const fx = px - Math.floor(px), fy = py - Math.floor(py);
+    const key = `${unit}:${fx}:${fy}:${box.toFixed(2)}:${variant}`;
+    if (cache.key !== key) {
+      const oc = cache.canvas || document.createElement('canvas');
+      oc.width = oc.height = Math.ceil(box * 2 * unit) + 1;
+      const c = oc.getContext('2d');
+      // the game transform's own translation, less the whole pixels the copy
+      // will land on — the fraction stays in the painting
+      c.setTransform(unit, 0, 0, unit, view.dpr * view.ox - Math.floor(px), view.dpr * view.oy - Math.floor(py));
+      paint(c, cx, cy, r, variant);
+      cache.canvas = oc;
+      cache.key = key;
+    }
+    if (pulse === 1) {
+      blitSprite(cache.canvas, x0, y0);
+    } else {
+      const s = box * 2 * pulse;
+      ctx.drawImage(cache.canvas, cx - s / 2, cy - s / 2, s, s);
+    }
+  }
+
+  const foodCache = { canvas: null, key: '' };
+
+  function paintFood(c, x, y, r, cap) {
+    c.save();
+    c.shadowColor = 'rgba(251, 146, 60, 0.65)';
+    c.shadowBlur = 12;
+    const g = c.createRadialGradient(x - r * 0.35, y - r * 0.35, r * 0.15, x, y, r);
     g.addColorStop(0, '#fed7aa');
     g.addColorStop(0.5, '#fb923c');
     g.addColorStop(1, '#c2410c');
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-    // A small stem: an ordinary bite is still a fruit, not just a dot.
-    ctx.strokeStyle = '#4ade80';
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.moveTo(x, y - r * 0.9);
-    ctx.lineTo(x + r * 0.35, y - r * 1.35);
-    ctx.stroke();
+    c.fillStyle = g;
+    c.beginPath();
+    c.arc(x, y, r, 0, Math.PI * 2);
+    c.fill();
+    c.restore();
+    // A small stem: an ordinary bite is still a fruit, not just a dot. The end
+    // caps are whatever the caller names: on the title the stem is drawn after
+    // the body painter, which leaves `lineCap` round behind, while during play
+    // the frame's own save/restore has already put the default butt caps back
+    // — both are the picture as it was, so both are kept.
+    c.lineCap = cap;
+    c.strokeStyle = '#4ade80';
+    c.lineWidth = 2.5;
+    c.beginPath();
+    c.moveTo(x, y - r * 0.9);
+    c.lineTo(x + r * 0.35, y - r * 1.35);
+    c.stroke();
     // specular glint
-    ctx.fillStyle = 'rgba(255,255,255,0.75)';
-    ctx.beginPath();
-    ctx.arc(x - r * 0.32, y - r * 0.35, r * 0.22, 0, Math.PI * 2);
-    ctx.fill();
+    c.fillStyle = 'rgba(255,255,255,0.75)';
+    c.beginPath();
+    c.arc(x - r * 0.32, y - r * 0.35, r * 0.22, 0, Math.PI * 2);
+    c.fill();
+  }
+
+  function drawFood(f, t, cap) {
+    const pulse = 1 + Math.sin(t * 6) * 0.06 * MOTION;
+    const x = cellX(f.x), y = cellY(f.y);
+    // the glow (blur 12 in device px) reaches further the smaller the scale
+    const box = CELL * 0.32 + 12 / (view.scale * view.dpr) * 2.5 + 3;
+    drawCachedSprite(foodCache, x, y, box, CELL * 0.32, paintFood, pulse, cap || 'butt');
+  }
+
+  const goldCache = { canvas: null, key: '' };
+
+  function paintGoldStar(c, x, y, r) {
+    c.save();
+    c.shadowColor = 'rgba(251, 191, 36, 0.85)';
+    c.shadowBlur = 18;
+    c.translate(x, y);
+    const g = c.createRadialGradient(-r * 0.3, -r * 0.3, r * 0.1, 0, 0, r);
+    g.addColorStop(0, '#fef3c7');
+    g.addColorStop(0.5, '#fbbf24');
+    g.addColorStop(1, '#b45309');
+    c.fillStyle = g;
+    c.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = (Math.PI / 5) * i - Math.PI / 2;
+      const rr = i % 2 === 0 ? r : r * 0.45;
+      c.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+    }
+    c.closePath();
+    c.fill();
+    c.restore();
   }
 
   function drawGold(f, t) {
     const left = S.goldT / GOLD_LIFE;
-    const pulse = 1 + Math.sin(t * 12) * 0.1;
-    const x = cellX(f.x), y = cellY(f.y), r = CELL * 0.34 * pulse;
-    ctx.save();
-    ctx.shadowColor = 'rgba(251, 191, 36, 0.85)';
-    ctx.shadowBlur = 18;
-    ctx.translate(x, y);
-    const g = ctx.createRadialGradient(-r * 0.3, -r * 0.3, r * 0.1, 0, 0, r);
-    g.addColorStop(0, '#fef3c7');
-    g.addColorStop(0.5, '#fbbf24');
-    g.addColorStop(1, '#b45309');
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    for (let i = 0; i < 10; i++) {
-      const a = (Math.PI / 5) * i - Math.PI / 2;
-      const rr = i % 2 === 0 ? r : r * 0.45;
-      ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
-    }
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
+    const pulse = 1 + Math.sin(t * 12) * 0.1 * MOTION;
+    const x = cellX(f.x), y = cellY(f.y);
+    const box = CELL * 0.34 + 18 / (view.scale * view.dpr) * 2.5 + 3;
+    drawCachedSprite(goldCache, x, y, box, CELL * 0.34, paintGoldStar, pulse);
     // The ring is the clock: gold that vanishes without warning reads as a bug.
     ctx.strokeStyle = 'rgba(251, 191, 36, 0.85)';
     ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.arc(x, y, CELL * 0.48, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * left);
     ctx.stroke();
+  }
+
+  // A small flat star, the same proportions as the gold food's (full and half
+  // radii alternating), for the still version of the new-best fireworks.
+  function drawStar(x, y, r, color) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = (Math.PI / 5) * i - Math.PI / 2;
+      const rr = i % 2 === 0 ? r : r * 0.45;
+      ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+    }
+    ctx.closePath();
+    ctx.fill();
   }
 
   function snakePoints(t) {
@@ -517,6 +613,81 @@
 
   const LIGHT_DIR = { x: -0.55, y: -0.83 };
 
+  // The one radial gradient the head needs, rebuilt only when its size or its
+  // colour set changes (see `drawHead`).
+  const headGrad = { rx: -1, dead: false, grad: null };
+
+  // One body segment: a gradient stroke across the segment (the light side
+  // picked once for the whole snake), tapered by the segment's place from
+  // head to tail. Shared by the live drawing and the still-body cache below.
+  function paintSeg(c, pts, i, n, dead) {
+    const p0 = pts[i], p1 = pts[Math.min(i + 1, n - 1)];
+    const dx = p1.x - p0.x, dy = p1.y - p0.y;
+    const len = Math.hypot(dx, dy) || 1;
+    let nx = -dy / len, ny = dx / len;
+    if (nx * LIGHT_DIR.x + ny * LIGHT_DIR.y < 0) { nx = -nx; ny = -ny; }
+    const w = (segWidth(i, n) + segWidth(Math.min(i + 1, n - 1), n)) / 2;
+    const hw = w * 0.6;
+    const grad = c.createLinearGradient(p0.x + nx * hw, p0.y + ny * hw, p0.x - nx * hw, p0.y - ny * hw);
+    if (dead) {
+      grad.addColorStop(0, '#fca5a5');
+      grad.addColorStop(0.45, '#ef4444');
+      grad.addColorStop(1, '#7f1d1d');
+    } else {
+      grad.addColorStop(0, '#bbf7d0');
+      grad.addColorStop(0.45, '#4ade80');
+      grad.addColorStop(1, '#14532d');
+    }
+    c.strokeStyle = grad;
+    c.lineWidth = w;
+    c.beginPath();
+    c.moveTo(p0.x, p0.y);
+    c.lineTo(p1.x, p1.y);
+    c.stroke();
+  }
+
+  // Between two steps only the neck and the tail actually move — the head
+  // slides out of the cell it left, the tail out of the one it freed — while
+  // every still segment's endpoints are cell centres. On a long snake those
+  // still segments are seventy-plus gradient strokes, by far the dearest
+  // thing left in the frame (ARK-62's board cache left exactly this behind),
+  // so they are rasterized once per step into a canvas of their own and
+  // copied — the board's trick again: the copy lands 1:1 on whole device
+  // pixels, the fraction of a pixel going into the painting, so it is the
+  // picture that was painted directly. Neck and tail keep drawing live, in
+  // the order segments were always stroked in, so the overlaps at the joints
+  // (each round cap on the segment before it) are the same pixels as before.
+  const bodyCache = { canvas: null, key: '' };
+  function drawStillBody(pts, dead) {
+    const n = pts.length;
+    const unit = view.scale * view.dpr;
+    if (!(unit > 0)) return;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let i = 1; i <= n - 2; i++) {
+      x0 = Math.min(x0, pts[i].x); x1 = Math.max(x1, pts[i].x);
+      y0 = Math.min(y0, pts[i].y); y1 = Math.max(y1, pts[i].y);
+    }
+    const m = CELL;                       // half the widest stroke, cap included
+    x0 -= m; y0 -= m; x1 += m; y1 += m;
+    const px = view.dpr * view.ox + unit * x0, py = view.dpr * view.oy + unit * y0;
+    const fx = px - Math.floor(px), fy = py - Math.floor(py);
+    const key = `${unit}:${fx}:${fy}:${S.bodyVer}:${n}:${dead}`;
+    if (bodyCache.key !== key) {
+      const oc = bodyCache.canvas || document.createElement('canvas');
+      oc.width = Math.ceil((x1 - x0) * unit + 1);
+      oc.height = Math.ceil((y1 - y0) * unit + 1);
+      const c = oc.getContext('2d');
+      // the game transform's own translation, less the whole pixels the copy
+      // lands on — the fraction stays in the painting (see `blitSprite`)
+      c.setTransform(unit, 0, 0, unit, view.dpr * view.ox - Math.floor(px), view.dpr * view.oy - Math.floor(py));
+      c.lineJoin = 'round'; c.lineCap = 'round';
+      for (let i = 1; i <= n - 3; i++) paintSeg(c, pts, i, n, dead);
+      bodyCache.canvas = oc;
+      bodyCache.key = key;
+    }
+    blitSprite(bodyCache.canvas, x0, y0);
+  }
+
   // Shared renderer for both the live snake and the idle one shown on the
   // title screen: a light source picked once so every segment shades the same
   // way, per-segment tapering for a body with volume, and a head with eyes
@@ -534,30 +705,12 @@
     ctx.lineWidth = CELL * 1.0;
     ctx.stroke();
 
-    for (let i = 0; i < Math.max(1, n - 1); i++) {
-      const p0 = pts[i], p1 = pts[Math.min(i + 1, n - 1)];
-      const dx = p1.x - p0.x, dy = p1.y - p0.y;
-      const len = Math.hypot(dx, dy) || 1;
-      let nx = -dy / len, ny = dx / len;
-      if (nx * LIGHT_DIR.x + ny * LIGHT_DIR.y < 0) { nx = -nx; ny = -ny; }
-      const w = (segWidth(i, n) + segWidth(Math.min(i + 1, n - 1), n)) / 2;
-      const hw = w * 0.6;
-      const grad = ctx.createLinearGradient(p0.x + nx * hw, p0.y + ny * hw, p0.x - nx * hw, p0.y - ny * hw);
-      if (dead) {
-        grad.addColorStop(0, '#fca5a5');
-        grad.addColorStop(0.45, '#ef4444');
-        grad.addColorStop(1, '#7f1d1d');
-      } else {
-        grad.addColorStop(0, '#bbf7d0');
-        grad.addColorStop(0.45, '#4ade80');
-        grad.addColorStop(1, '#14532d');
-      }
-      ctx.strokeStyle = grad;
-      ctx.lineWidth = w;
-      ctx.beginPath();
-      ctx.moveTo(p0.x, p0.y);
-      ctx.lineTo(p1.x, p1.y);
-      ctx.stroke();
+    if (n >= 4) {
+      paintSeg(ctx, pts, 0, n, dead);        // the neck, sliding
+      drawStillBody(pts, dead);              // everything that stands still
+      paintSeg(ctx, pts, n - 2, n, dead);    // the tail, sliding
+    } else {
+      for (let i = 0; i < Math.max(1, n - 1); i++) paintSeg(ctx, pts, i, n, dead);
     }
 
     drawHead(pts[0], dir, dead, biteK);
@@ -568,13 +721,29 @@
     const squash = 1 + biteK * 0.24 * MOTION;
     const rx = CELL * 0.58 * squash, ry = CELL * 0.52 / squash;
 
+    // The snout reaches a couple of logical pixels past the field edge when it
+    // arrives at a wall cell, so a wall death drew it lying across the border.
+    // Pulled back here — drawing only, a wall still kills exactly as before —
+    // so a head at a wall lies pressed against it, inside the field.
+    let hx = head.x, hy = head.y;
+    if (dir.x > 0) hx = Math.min(hx, BOARD_X + BOARD_W - rx - 1);
+    else if (dir.x < 0) hx = Math.max(hx, BOARD_X + rx + 1);
+    if (dir.y > 0) hy = Math.min(hy, BOARD_Y + BOARD_H - ry - 1);
+    else if (dir.y < 0) hy = Math.max(hy, BOARD_Y + ry + 1);
+
     ctx.save();
-    ctx.translate(head.x, head.y);
+    ctx.translate(hx, hy);
     ctx.rotate(ang);
-    const g = ctx.createRadialGradient(-rx * 0.15, -ry * 0.4, 2, 0, 0, rx * 1.3);
-    if (dead) { g.addColorStop(0, '#fecaca'); g.addColorStop(0.55, '#ef4444'); g.addColorStop(1, '#7f1d1d'); }
-    else { g.addColorStop(0, '#e4f9d0'); g.addColorStop(0.55, '#4ade80'); g.addColorStop(1, '#15803d'); }
-    ctx.fillStyle = g;
+    // The head's shading gradient is the same picture every frame (it moves
+    // with the translate above, and only the bite squash changes its size), so
+    // it is built once per size instead of once per frame.
+    if (headGrad.rx !== rx || headGrad.dead !== dead) {
+      const g = ctx.createRadialGradient(-rx * 0.15, -ry * 0.4, 2, 0, 0, rx * 1.3);
+      if (dead) { g.addColorStop(0, '#fecaca'); g.addColorStop(0.55, '#ef4444'); g.addColorStop(1, '#7f1d1d'); }
+      else { g.addColorStop(0, '#e4f9d0'); g.addColorStop(0.55, '#4ade80'); g.addColorStop(1, '#15803d'); }
+      headGrad.rx = rx; headGrad.dead = dead; headGrad.grad = g;
+    }
+    ctx.fillStyle = headGrad.grad;
     ctx.beginPath();
     ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
     ctx.fill();
@@ -590,8 +759,8 @@
     const side = { x: -dir.y, y: dir.x };
     const eo = CELL * 0.2, ef = CELL * 0.17;
     for (const sign of [1, -1]) {
-      const ex = head.x + side.x * eo * sign + dir.x * ef;
-      const ey = head.y + side.y * eo * sign + dir.y * ef;
+      const ex = hx + side.x * eo * sign + dir.x * ef;
+      const ey = hy + side.y * eo * sign + dir.y * ef;
       ctx.fillStyle = '#04120c';
       ctx.beginPath();
       ctx.arc(ex, ey, CELL * 0.115, 0, Math.PI * 2);
@@ -639,8 +808,10 @@
     const pts = TITLE_SNAKE_CELLS.map((c) => ({ x: cellX(c.x), y: cellY(c.y) }));
     paintSnakeBody(pts, { x: 1, y: 0 }, false, 0);
     // A food dot ahead of the head explains "eat" without another line of copy.
-    // A fixed time, not S.clock: the title stays a still picture, not a pulsing one.
-    drawFood({ x: 18, y: 5 }, 0);
+    // A fixed time, not S.clock: the title stays a still picture, not a pulsing
+    // one. The round caps are the ones it always had: this call comes after the
+    // body painter, which leaves `lineCap` round behind (see `paintFood`).
+    drawFood({ x: 18, y: 5 }, 0, 'round');
   }
 
   function drawHud() {
@@ -673,12 +844,17 @@
     ctx.fillText(String(S.best), W - 22, 74);
     ctx.globalAlpha = 1;
 
-    // The key hints are instructions, and the picture carries none.
-    if (PICTURE) return;
+    // The key hints are instructions, and the picture carries none. There is no
+    // honest key hint for a finger: pause on touch is leaving the page, and the
+    // sound toggle is a key, so a touch-first device gets silence here instead
+    // of keyboard wording.
+    if (PICTURE || TOUCH_FIRST) return;
+    // One line under the board, clear of the frame: the frame's stroke and its
+    // glow end below y≈694, and at 24 px this line's caps start at ~697.
     ctx.textAlign = 'center';
-    ctx.font = `600 30px ${FONT}`;
+    ctx.font = `600 24px ${FONT}`;
     ctx.fillStyle = 'rgba(167, 243, 208, 0.75)';
-    ctx.fillText(S.muted ? 'P pause · M sound off' : 'P pause · M sound on', W / 2, H - 14);
+    ctx.fillText(S.muted ? 'P pause · M sound off' : 'P pause · M sound on', W / 2, H - 6);
   }
 
   function drawPanel(x, y, w, h, r, accent) {
@@ -737,7 +913,7 @@
 
     ctx.font = `600 30px ${FONT}`;
     ctx.fillStyle = 'rgba(209, 250, 229, 0.72)';
-    ctx.fillText('Arrows, WASD, or swipe to steer.', W / 2, p.y + 176);
+    ctx.fillText(TOUCH_FIRST ? 'Swipe to steer.' : 'Arrows, WASD, or swipe to steer.', W / 2, p.y + 176);
 
     const btnCy = p.y + 266;
     drawButton(W / 2, btnCy, BTN_W, BTN_H, 'PLAY');
@@ -760,7 +936,7 @@
     ctx.fillText('PAUSED', W / 2, y + 84);
     ctx.font = `600 30px ${FONT}`;
     ctx.fillStyle = '#ecfdf5';
-    ctx.fillText('Tap or press P to continue', W / 2, y + 134);
+    ctx.fillText(TOUCH_FIRST ? 'Tap to continue' : 'Tap or press P to continue', W / 2, y + 134);
   }
 
   const GO_PANEL = { x: BOARD_X + 20, y: 168, w: BOARD_W - 40, h: 400 };
@@ -782,6 +958,13 @@
     ctx.font = `700 34px ${FONT}`;
     ctx.fillStyle = S.newBest ? '#fbbf24' : 'rgba(209, 250, 229, 0.85)';
     ctx.fillText(S.newBest ? 'New personal best!' : `Best ${S.best}`, W / 2, p.y + 168);
+    if (S.newBest && REDUCED_MOTION) {
+      // The still celebration: the same pair of bursts as the fireworks, held
+      // beside the line as stars instead of flying — a player who asked for
+      // less motion still sees the best marked, it just doesn't move.
+      drawStar(W / 2 - 186, p.y + 158, 12, '#fbbf24');
+      drawStar(W / 2 + 186, p.y + 158, 12, '#4ade80');
+    }
 
     const ready = S.overT > 0.7;
     const btnCy = p.y + 268;
@@ -792,7 +975,17 @@
 
     ctx.font = `600 30px ${FONT}`;
     ctx.fillStyle = 'rgba(209, 250, 229, 0.65)';
-    ctx.fillText(ready ? 'Tap or press Space' : ' ', W / 2, p.y + p.h - 22);
+    ctx.fillText(ready ? (TOUCH_FIRST ? 'Tap to play again' : 'Tap or press Space') : ' ', W / 2, p.y + p.h - 22);
+  }
+
+  function drawParts() {
+    for (const p of S.parts) {
+      const k = 1 - p.t / p.life;
+      ctx.globalAlpha = k;
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x - 2.5, p.y - 2.5, 5, 5);
+    }
+    ctx.globalAlpha = 1;
   }
 
   function draw() {
@@ -814,13 +1007,10 @@
     if (S.gold && S.mode !== 'title') drawGold(S.gold, S.clock);
     if (S.mode !== 'title') drawSnake(t);
 
-    for (const p of S.parts) {
-      const k = 1 - p.t / p.life;
-      ctx.globalAlpha = k;
-      ctx.fillStyle = p.color;
-      ctx.fillRect(p.x - 2.5, p.y - 2.5, 5, 5);
-    }
-    ctx.globalAlpha = 1;
+    // On every screen but game over the particles belong to the field, under
+    // the HUD; on game over they are the celebration and belong on top of the
+    // panel, where they can actually be seen.
+    if (S.mode !== 'gameover') drawParts();
     for (const f of S.floats) {
       ctx.globalAlpha = Math.max(0, 1 - f.t / 0.9);
       ctx.fillStyle = f.color;
@@ -843,6 +1033,7 @@
       drawPausedScreen();
     } else if (S.mode === 'gameover') {
       drawGameOverScreen();
+      drawParts();
     }
 
     ctx.restore();
