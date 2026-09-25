@@ -827,27 +827,41 @@
     ctx.fillStyle = '#ecfdf5';
     ctx.fillText(String(S.score), 22, 74);
 
+    // On a touch-first device the corner controls (`HUD_BTNS` below) hold the
+    // top-right of the HUD during play, so the three stats close ranks to the
+    // left — in every mode, so the row doesn't jump when a run starts or
+    // pauses. LENGTH sits midway between the end of SCORE and the start of
+    // BEST (both labels ~24 px away): at 186 it read "SCORE LENGTH" as one
+    // phrase, 12 px from SCORE and 36 from BEST. A computer keeps today's
+    // exact positions.
+    const lenCx = TOUCH_FIRST ? 198 : W / 2;
+    const bestRight = TOUCH_FIRST ? 352 : W - 22;
+
     ctx.textAlign = 'center';
     ctx.font = `700 30px ${FONT}`;
     ctx.fillStyle = '#6ee7b7';
-    ctx.fillText('LENGTH', W / 2, 28);
+    ctx.fillText('LENGTH', lenCx, 28);
     ctx.font = `800 40px ${FONT}`;
     ctx.fillStyle = '#ecfdf5';
-    ctx.fillText(String(S.cells.length), W / 2, 74);
+    ctx.fillText(String(S.cells.length), lenCx, 74);
 
     ctx.textAlign = 'right';
     ctx.font = `700 30px ${FONT}`;
     ctx.fillStyle = '#6ee7b7';
-    ctx.fillText('BEST', W - 22, 28);
+    ctx.fillText('BEST', bestRight, 28);
     ctx.font = `800 40px ${FONT}`;
     ctx.fillStyle = S.newBest ? '#fbbf24' : '#ecfdf5';
-    ctx.fillText(String(S.best), W - 22, 74);
+    ctx.fillText(String(S.best), bestRight, 74);
     ctx.globalAlpha = 1;
 
-    // The key hints are instructions, and the picture carries none. There is no
-    // honest key hint for a finger: pause on touch is leaving the page, and the
-    // sound toggle is a key, so a touch-first device gets silence here instead
-    // of keyboard wording.
+    // The finger's controls, during play only: every other screen is a
+    // full-panel screen whose whole face is already the primary action.
+    if (TOUCH_FIRST && S.mode === 'playing') drawTouchControls();
+
+    // The key hints are instructions, and the picture carries none. A finger
+    // has no P and no M to be told about — its pause and its sound toggle are
+    // the corner controls above — so a touch-first device gets silence here
+    // instead of keyboard wording.
     if (PICTURE || TOUCH_FIRST) return;
     // One line under the board, clear of the frame: the frame's stroke and its
     // glow end below y≈694, and at 24 px this line's caps start at ~697.
@@ -888,6 +902,62 @@
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(label, cx, cy + 2);
+  }
+
+  // The controls a finger can use (ARK-87: on a touch-first device there was
+  // no way to pause at all — the only pause was leaving the page, and sound
+  // was the M key a phone doesn't have). This is function, not a restyle
+  // (D-087): the style world of owner directive #39 redraws these. Today they
+  // borrow the paused panel's materials and the HUD's own greens — no new
+  // colours, nothing else moves but the stats closing ranks (see `drawHud`).
+  // The hit boxes are generous on purpose: 78 logical px is 50.6 CSS px in a
+  // 390-wide phone frame (46.2 in a 360-wide one, 34.8 in a 844×390 one held
+  // sideways) with the visible 48-px icon well inside. A tap on them is
+  // settled in `pointerdown` before any swipe is born, so it never turns the
+  // snake either.
+  const HUD_BTNS = TOUCH_FIRST ? {
+    sound: { x: 356, y: 3, w: 78, h: 78 },
+    pause: { x: 440, y: 3, w: 78, h: 78 },
+  } : null;
+
+  function drawTouchControls() {
+    for (const [kind, b] of [['sound', HUD_BTNS.sound], ['pause', HUD_BTNS.pause]]) {
+      const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+      drawPanel(cx - 24, cy - 24, 48, 48, 12);
+      if (kind === 'pause') {
+        ctx.fillStyle = '#a7f3d0';
+        roundRect(cx - 12, cy - 13, 9, 26, 3);
+        ctx.fill();
+        roundRect(cx + 3, cy - 13, 9, 26, 3);
+        ctx.fill();
+      } else {
+        // A speaker in the hint green, a wave when sound is on, the game-over
+        // red crossing it out when it is off — colours this screen already
+        // speaks, so the state reads at a glance.
+        ctx.fillStyle = '#a7f3d0';
+        roundRect(cx - 16, cy - 5, 7, 10, 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(cx - 9, cy - 5);
+        ctx.lineTo(cx - 2, cy - 13);
+        ctx.lineTo(cx - 2, cy + 13);
+        ctx.lineTo(cx - 9, cy + 5);
+        ctx.closePath();
+        ctx.fill();
+        ctx.lineCap = 'round';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        if (S.muted) {
+          ctx.strokeStyle = '#f87171';
+          ctx.moveTo(cx + 3, cy - 10);
+          ctx.lineTo(cx + 16, cy + 10);
+        } else {
+          ctx.strokeStyle = '#a7f3d0';
+          ctx.arc(cx + 1, cy, 10, -0.85, 0.85);
+        }
+        ctx.stroke();
+      }
+    }
   }
 
   const TITLE_PANEL = { x: BOARD_X + 10, y: 296, w: BOARD_W - 20, h: 380 };
@@ -1056,6 +1126,15 @@
     if (S.mode === 'gameover' && S.overT > 0.7) return start();
   }
 
+  // The M key and the sound button in the corner do the same thing: flip the
+  // flag, keep it under the one storage key it has always had, and answer an
+  // unmute with a tone so the change is heard, not just seen.
+  function toggleMute() {
+    S.muted = !S.muted;
+    storage.set(STORE_MUTE, S.muted ? '1' : '0');
+    if (!S.muted) { ensureAudio(); tone(660, 0.08, 'triangle', 0.05); }
+  }
+
   window.addEventListener('keydown', (e) => {
     const dir = KEY_DIRS[e.code];
     if (dir) {
@@ -1078,11 +1157,7 @@
       else if (S.mode === 'paused') S.mode = 'playing';
       return;
     }
-    if (e.code === 'KeyM') {
-      S.muted = !S.muted;
-      storage.set(STORE_MUTE, S.muted ? '1' : '0');
-      if (!S.muted) { ensureAudio(); tone(660, 0.08, 'triangle', 0.05); }
-    }
+    if (e.code === 'KeyM') toggleMute();
   });
 
   let swipe = null;
@@ -1090,6 +1165,19 @@
 
   canvas.addEventListener('pointerdown', (e) => {
     canvas.focus();
+    // The corner controls are settled before anything else, so their tap is
+    // only theirs: no swipe anchor is kept, no turn is queued, and a finger
+    // pausing mid-run never steers the snake it meant to stop. The hit boxes
+    // live in the game's logical pixels; the canvas fills the frame and
+    // `view` holds the letterbox, so this is the whole transform.
+    if (TOUCH_FIRST && S.mode === 'playing') {
+      const r = canvas.getBoundingClientRect();
+      const px = (e.clientX - r.left - view.ox) / view.scale;
+      const py = (e.clientY - r.top - view.oy) / view.scale;
+      const hit = (b) => px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h;
+      if (hit(HUD_BTNS.pause)) { S.mode = 'paused'; return; }
+      if (hit(HUD_BTNS.sound)) { toggleMute(); return; }
+    }
     swipe = { x: e.clientX, y: e.clientY, turned: false };
     if (S.mode !== 'playing') primary();
   });
