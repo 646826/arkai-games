@@ -426,15 +426,26 @@
 
   // ---- layout & state ----
   const W = 480, H = 720;
-  const GRID_TOP = 224, GRID_MAX = 380;
+  // The grid is the game: 420 logical px, the size it always had before ARK-58
+  // trimmed it to fit a card that no longer covers the board (ARK-84).
+  const GRID_TOP = 224, GRID_MAX = 420;
   const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
   const SLUG = 'echo-sounding';
   const STORE = 'arkai:echo-sounding:v1', STORE_MUTE = 'arkai:echo-sounding:muted';
   const SHARE_URL = 'https:' + '//arkai.win/games/echo-sounding/?ref=share';
   const COLS_LETTERS = 'ABCDEFGH';
   // Body/HUD text is sized so it stays >=16 CSS px at the portal frame's tightest
-  // phone scale (~0.65) and >=12 CSS px at its landscape scale (~0.42) — ARK-58.
+  // phone scale (~0.65) and >=12 CSS px at its landscape scale (~0.45) — ARK-58.
   const BODY = 30;
+  // The smallest text the game draws anywhere (ARK-84): 28 logical px stays
+  // ≥16 CSS px at the portrait scale and ≥12 px at the landscape one. Nothing
+  // smaller — the title's detail lines had slipped to 11.
+  const DETAIL = 28;
+  // How long the found reflectors breathe after a solve before holding their
+  // lit, still picture (ARK-84).
+  const WIN_HOLD = 2.4;
+
+  const spent = (n) => `${n} ${n === 1 ? 'ping' : 'pings'} spent`;
 
   const C = {
     bg: '#061420', card: '#0e2c46',
@@ -490,6 +501,7 @@
     muted: storage.get(STORE_MUTE) === '1',
     clock: 0, dayCheck: 5, shake: 0, flash: 0,
     lively: 0, stir: 0, // seconds of ambient motion left since the last input, and how much of it is showing (0–1)
+    win: null, // the solve celebration: { t } — 0 at the burst, WIN_HOLD once the lit reflectors hold still
     parts: [], floats: [], ripples: [], toast: null,
   };
   const started = new Set();
@@ -643,11 +655,11 @@
   const shake = (amount) => { if (!calm()) S.shake = amount; };
   // Ambient motion, scaled by how awake the board is: at rest it is the reduced-motion picture.
   const wave = (speed, phase = 0) => (calm() ? 0 : S.stir * Math.sin(S.clock * speed + phase));
-  function spawnParts(x, y, color, count, speed = 160) {
+  function spawnParts(x, y, color, count, speed = 160, size = 3) {
     if (calm()) return;
     for (let i = 0; i < count; i++) {
       const a = Math.random() * Math.PI * 2, s = speed * (0.3 + Math.random() * 0.7);
-      S.parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.5 + Math.random() * 0.4, t: 0, color });
+      S.parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.5 + Math.random() * 0.4, t: 0, color, size });
     }
   }
 
@@ -715,6 +727,7 @@
           emit('closed', { day: S.day, tier: tier + 1 });
           if (tier === S.tier) {
             S.marks = new Set(r.marks);
+            S.win = { t: WIN_HOLD }; // the board is locked now: its reflectors show lit, settled
             toast(`${TIERS[tier].label} was solved in another tab, in ${entry.s}.`);
           }
         }
@@ -732,6 +745,9 @@
     S.practiceRun = null;
     S.help = false;
     S.parts = []; S.floats = []; S.flash = 0; S.shake = 0;
+    // A solved tier keeps its reflectors lit, settled: the celebration is over,
+    // the light stays (ARK-84).
+    S.win = run().solved && !S.practice ? { t: WIN_HOLD } : null;
     S.marks = new Set(run().marks);
     S.tent = new Set(); // pencilled guesses are scratch work: gone the moment a puzzle leaves screen
     S.cursor = 0;
@@ -918,6 +934,7 @@
 
   const TAP_MODES = ['ping', 'mark', 'pencil'];
   function toggleTapMode() {
+    if (S.mode !== 'play' || locked()) return; // a solved board has no mode left to change
     S.tapMode = TAP_MODES[(TAP_MODES.indexOf(S.tapMode) + 1) % TAP_MODES.length];
     sfx.mode();
     announce(S.tapMode === 'ping' ? 'Ping mode.' : S.tapMode === 'mark' ? 'Mark mode.' : 'Pencil mode: guesses here are not graded.');
@@ -964,13 +981,23 @@
     sfx.fail(); shake(5);
   }
 
+  /**
+   * A celebration a player can see on the board itself (ARK-84): every found
+   * reflector lights up and throws a burst and a ring at phone scale — from
+   * the reflectors, not from a card, and on every solve, not only at par.
+   * Reduced motion skips straight to the still, lit picture.
+   */
   function celebrate(p) {
     sfx.win();
-    if (!calm()) S.flash = 0.5;
-    const mid = ((p.size / 2) | 0) * p.size + ((p.size / 2) | 0);
-    const { x, y } = cellCenter(p.size, mid);
-    spawnParts(x, y, C.accent, 26, 200);
-    spawnParts(x, y, C.good, 14, 120);
+    S.win = { t: calm() ? WIN_HOLD : 0 };
+    if (calm()) return;
+    S.flash = 0.5;
+    for (const mark of S.marks) {
+      const { x, y } = cellCenter(p.size, mark);
+      spawnParts(x, y, C.good, 12, 240, 6.5);
+      spawnParts(x, y, C.accent, 8, 150, 4);
+      S.ripples.push({ x, y, t: 0, life: 0.8, color: C.good });
+    }
   }
 
   function solvedNow() {
@@ -996,6 +1023,7 @@
     S.practiceRun = { inputs: '', pings: [], probed: new Set(), marks: new Set(), moves: 0, solved: false, solvedMoves: 0, par: puzzle().par };
     S.marks = new Set();
     S.tent = new Set();
+    S.win = null; // practice starts from a blank, unlit board
     S.mode = 'play';
     sfx.click();
     emit('practice', { tier: S.tier + 1, day: S.day, archive: archive() });
@@ -1044,6 +1072,7 @@
     S.ripples = S.ripples.filter((rp) => { rp.t += dt; return rp.t < rp.life; });
     if (S.flash > 0) S.flash = Math.max(0, S.flash - dt * 1.5);
     if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 20);
+    if (S.win && S.win.t < WIN_HOLD) S.win.t = Math.min(S.win.t + dt, WIN_HOLD);
     if (S.toast) {
       S.toast.t += dt;
       if (S.toast.t >= 2.6) S.toast = null;
@@ -1163,79 +1192,92 @@
     // The board's gradient and the glow behind the title are the backdrop's.
     addHit(0, 0, W, H, 'titledefault');
 
-    iconButton(W - 8 - 44, 8, 44, 44, 'mute', 'mute', false);
+    iconButton(W - 8 - 48, 8, 48, 48, 'mute', 'mute', false);
     const prevOk = S.day > 1, nextOk = S.day < S.today;
-    if (prevOk) iconButton(8, 8, 44, 44, 'prev', 'prevday');
-    if (nextOk) iconButton(W - 8 - 44 - 8 - 44, 8, 44, 44, 'next', 'nextday');
-    // Its own row, wrapped: "Day N · three new puzzles every day" is too long
-    // for one line between the icons at a readable size.
+    if (prevOk) iconButton(8, 8, 48, 48, 'prev', 'prevday');
+    if (nextOk) iconButton(64, 8, 48, 48, 'next', 'nextday');
+    // The streak lives up with the day arrows instead of in a row of its own:
+    // the bottom of this screen needs every pixel for the How to play target.
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = C.muted; ctx.font = `600 25px ${FONT}`;
-    wrapText(titleDay(S.day, dayDate(S.day), archive()), 240, 80, 440, 27);
+    ctx.fillStyle = C.text; ctx.font = `600 ${DETAIL}px ${FONT}`;
+    ctx.fillText(`Streak ${S.streak}${S.bestStreak > S.streak ? ` · best ${S.bestStreak}` : ''}`, 240, 32);
+
+    // Its own row, wrapped: "Day N · three new puzzles every day" is too long
+    // for one line at a readable size — and 415 keeps the break at "puzzles /
+    // every day" instead of stranding the lone word "day" (ARK-84 visual check).
+    ctx.fillStyle = C.muted; ctx.font = `600 ${DETAIL}px ${FONT}`;
+    wrapText(titleDay(S.day, dayDate(S.day), archive()), 240, 88, 415, 34);
 
     ctx.fillStyle = C.accent; ctx.font = `800 40px ${FONT}`;
-    ctx.fillText('Echo Sounding', 240, 133);
+    ctx.fillText('Echo Sounding', 240, 136);
 
     // The rule, said once, sized to read at the portal frame's smallest scale.
     ctx.fillStyle = C.text; ctx.font = `600 ${BODY}px ${FONT}`;
-    wrapText('Ping a cell. Its echo is the distance to the nearest reflector.', 240, 211, 420, BODY + 4);
+    wrapText('Ping a cell. Its echo is the distance to the nearest reflector.', 240, 206, 420, 34);
 
     // The sonar — the game's central object — inside its own Play button: a
     // lit device with a sweeping face, not a bare label (ARK-58 title-screen
-    // requirement). Tall enough to clear 44 CSS px even at the portal's
-    // smallest landscape scale (~0.42).
-    const playY = 268, playH = 110;
+    // requirement). 105px tall: clears 44 CSS px even at the portal's
+    // smallest landscape scale (~0.45).
+    const playY = 258, playH = 105;
     ctx.fillStyle = C.accent; roundRect(40, playY, 400, playH, 20); ctx.fill();
     ctx.strokeStyle = '#7bfff0'; ctx.lineWidth = 1; roundRect(40, playY, 400, playH, 20); ctx.stroke();
     drawSonarEmblem(112, playY + playH / 2, 38);
     ctx.fillStyle = '#052019'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
     ctx.font = `800 34px ${FONT}`;
-    ctx.fillText('Play', 172, playY + playH / 2 - 12);
-    ctx.font = `600 20px ${FONT}`;
-    ctx.fillText(`Day ${S.day} · ${solvedCount()} of 3 solved`, 172, playY + playH / 2 + 22);
+    ctx.fillText('Play', 172, playY + 36);
+    ctx.font = `600 ${DETAIL}px ${FONT}`;
+    ctx.fillText(`${solvedCount()} of 3 solved`, 172, playY + 72);
     addHit(40, playY, 400, playH, 'titledefault');
 
-    const cardY = [388, 464, 540], cardH = 70;
-    ctx.textAlign = 'center';
+    // Every line on a card at DETAIL: the old 17-18px detail text was 11 CSS px
+    // on a phone (ARK-84). Left column the board, right column the outcome.
+    const cardY = [374, 458, 542], cardH = 76;
     TIERS.forEach((t, tier) => {
       const y = cardY[tier], p = S.puzzles[tier], r = S.runs[tier];
       ctx.fillStyle = C.card;
       roundRect(40, y, 400, cardH, 14); ctx.fill();
       ctx.strokeStyle = r.solved ? C.good : C.accentDim; ctx.lineWidth = 2;
       roundRect(40, y, 400, cardH, 14); ctx.stroke();
-      ctx.fillStyle = C.text; ctx.font = `800 22px ${FONT}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      ctx.fillText(t.label, 62, y + 20);
-      ctx.fillStyle = C.muted; ctx.font = `400 18px ${FONT}`;
-      ctx.fillText(`${p.size}×${p.size} · ${p.k} reflectors · par ${p.par === Infinity ? p.budget : p.par}`, 62, y + 48);
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = C.text; ctx.font = `800 ${DETAIL}px ${FONT}`; ctx.textAlign = 'left';
+      ctx.fillText(t.label, 60, y + 24);
+      ctx.font = `600 ${DETAIL}px ${FONT}`; ctx.textAlign = 'right';
+      if (r.solved) {
+        ctx.fillStyle = C.muted;
+        ctx.fillText(spent(r.solvedMoves), 420, y + 24);
+      } else {
+        ctx.fillStyle = r.moves ? C.accent : C.muted;
+        ctx.fillText(r.moves ? 'In progress' : 'Not started', 420, y + 24);
+      }
+      ctx.fillStyle = C.muted; ctx.font = `400 ${DETAIL}px ${FONT}`; ctx.textAlign = 'left';
+      ctx.fillText(`${p.size}×${p.size} · par ${p.par === Infinity ? p.budget : p.par}`, 60, y + 54);
       ctx.textAlign = 'right';
       if (r.solved) {
+        // ★ stays what the tier cards and How to play promise it for: par.
         ctx.fillStyle = r.solvedMoves - r.par <= 0 ? C.good : C.warn;
-        ctx.font = `700 18px ${FONT}`;
-        ctx.fillText(parNote(r.solvedMoves, r.par), 418, y + 20);
-        ctx.fillStyle = C.muted; ctx.font = `400 17px ${FONT}`;
-        ctx.fillText(`${r.solvedMoves} pings spent`, 418, y + 48);
+        ctx.font = `700 ${DETAIL}px ${FONT}`;
+        ctx.fillText(parNote(r.solvedMoves, r.par), 420, y + 54);
       } else {
-        ctx.fillStyle = C.accent; ctx.font = `700 18px ${FONT}`;
-        ctx.fillText(r.moves ? 'In progress' : 'Not started', 418, y + 20);
+        ctx.font = `400 ${DETAIL}px ${FONT}`;
+        ctx.fillText(`${p.k} reflectors`, 420, y + 54);
       }
       ctx.textAlign = 'center';
       addHit(40, y, 400, cardH, `card${tier}`);
     });
 
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = C.muted; ctx.font = `400 25px ${FONT}`;
-    ctx.fillText(`Streak ${S.streak}${S.bestStreak > S.streak ? ` · best ${S.bestStreak}` : ''}`, 240, 626);
-
     if (onward()) {
-      ctx.fillStyle = C.accent; ctx.font = `600 18px ${FONT}`;
-      ctx.fillText(`Play ${ONWARD.title} next →`, 240, 652);
-      addHit(90, 638, 300, 28, 'onward');
+      ctx.fillStyle = C.accent; ctx.font = `600 ${DETAIL}px ${FONT}`;
+      ctx.fillText(`Play ${ONWARD.title} next →`, 240, 636);
+      addHit(60, 616, 360, 32, 'onward');
     } else {
-      ctx.fillStyle = C.muted; ctx.font = `400 17px ${FONT}`;
-      ctx.fillText('Missed a day? The arrows above open every earlier one.', 240, 652);
+      ctx.fillStyle = C.muted; ctx.font = `400 ${DETAIL}px ${FONT}`;
+      ctx.fillText('Missed a day? The arrows go back.', 240, 636);
     }
 
-    button(40, 672, 400, 34, 'How to play', 'help', false, 17);
+    // 68px tall: a real ≥44 CSS px target at the portal frame's portrait scale —
+    // this button had shrunk to 22 CSS px (ARK-84).
+    button(40, 650, 400, 68, 'How to play', 'help', false, DETAIL);
   }
 
   /**
@@ -1309,45 +1351,52 @@
   }
 
   /**
-   * The solved state as a card over the still-visible, still-marked board
-   * (ARK-58): a real celebration on every solve — celebrate() already fires
-   * regardless of score — and the next step as a big, real button, not the
-   * two 30px-tall links this used to tuck under the grid's footer line.
+   * The found reflectors, lit on the board itself (ARK-84): a soft green halo
+   * and ring per mark, breathing in from the solve and then holding still —
+   * the celebration ends, the light stays. Flat fills only, so the still-layer
+   * budget keeps its no-per-frame-gradient rule.
    */
-  function drawSolvedOverlay(p, r) {
-    const { cell, gx, gy } = gridMetrics(p.size);
-    const gsize = cell * p.size, gcx = gx + gsize / 2, gcy = gy + gsize / 2;
-    ctx.fillStyle = 'rgba(4, 10, 16, 0.55)';
-    roundRect(gx - 4, gy - 4, gsize + 8, gsize + 8, 12); ctx.fill();
+  function drawWinLights(p) {
+    const { cell } = gridMetrics(p.size);
+    const k = Math.min(1, S.win.t / WIN_HOLD);
+    const breathe = (1 - k) * Math.sin(S.win.t * 10);
+    for (const mark of S.marks) {
+      const { x, y } = cellCenter(p.size, mark);
+      ctx.fillStyle = `rgba(110, 231, 168, ${0.13 + 0.1 * breathe})`;
+      ctx.beginPath(); ctx.arc(x, y, cell * (0.5 + 0.04 * breathe), 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = C.good; ctx.lineWidth = 3.5;
+      ctx.beginPath(); ctx.arc(x, y, cell * 0.3, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
 
-    const panelW = Math.min(380, gsize), panelH = 300;
-    const px = gcx - panelW / 2, py = gcy - panelH / 2;
+  /**
+   * The solved state in the tool area (ARK-84): the tabs and Ping/Mark/Check/
+   * Clear/Share have nothing left to do once the puzzle is solved, so they
+   * step aside for the result — and the board, its pings, marks and lit
+   * reflectors stay whole and readable below it, not hidden behind a card the
+   * size of the grid. Every button clears 44 CSS px at the portal frame's
+   * smallest landscape scale; the primary is the accent-filled one.
+   */
+  function drawSolvedCard(r) {
+    const panelY = 50, panelH = 172;
     ctx.fillStyle = 'rgba(9, 30, 48, 0.97)';
-    roundRect(px, py, panelW, panelH, 18); ctx.fill();
+    roundRect(8, panelY, W - 16, panelH, 14); ctx.fill();
     ctx.strokeStyle = C.accent; ctx.lineWidth = 2;
-    roundRect(px, py, panelW, panelH, 18); ctx.stroke();
+    roundRect(8, panelY, W - 16, panelH, 14); ctx.stroke();
 
-    const over = r.solvedMoves - r.par;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-    ctx.fillStyle = C.accent; ctx.font = `800 32px ${FONT}`;
-    ctx.fillText('★ Solved!', gcx, py + 48);
-    ctx.fillStyle = C.text; ctx.font = `600 22px ${FONT}`;
-    ctx.fillText(
-      over < 0 ? `${-over} under par — beat the solver!` : over === 0 ? 'Right at par.' : `${over} over par.`,
-      gcx, py + 82,
-    );
-    ctx.fillStyle = C.muted; ctx.font = `400 20px ${FONT}`;
-    ctx.fillText(`${r.solvedMoves} pings spent`, gcx, py + 110);
+    // No star on the solve itself: ★ stays the par mark the tier cards and
+    // How to play promise it for (ARK-84). parNote carries it when earned.
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = C.accent; ctx.font = `800 30px ${FONT}`;
+    ctx.fillText('Solved!', W / 2, panelY + 19);
+    ctx.fillStyle = C.text; ctx.font = `600 ${DETAIL}px ${FONT}`;
+    ctx.fillText(`${parNote(r.solvedMoves, r.par)} · ${spent(r.solvedMoves)}`, W / 2, panelY + 49);
 
     const allDone = solvedCount() === TIERS.length;
-    const primaryLabel = allDone ? 'Share result' : 'Next puzzle';
-    const primaryAction = allDone ? 'share' : 'next';
-    const bx = px + 20, bw = panelW - 40;
-    // 105px tall: clears 44 CSS px even at the portal frame's ~0.42 landscape scale.
-    button(bx, py + 130, bw, 105, primaryLabel, primaryAction, true, 26);
-    const smallW = (bw - 12) / 2;
-    button(bx, py + 245, smallW, 44, 'Replay', 'replay', false, 20);
-    button(bx + smallW + 12, py + 245, smallW, 44, allDone ? 'Title' : 'Share', allDone ? 'home' : 'share', false, 20);
+    const btnY = panelY + 62, btnH = panelH - 66;
+    button(12, btnY, 200, btnH, allDone ? 'Share result' : 'Next puzzle', allDone ? 'share' : 'next', true, DETAIL);
+    button(220, btnY, 120, btnH, 'Replay', 'replay', false, DETAIL);
+    button(348, btnY, 120, btnH, allDone ? 'Title' : 'Share', allDone ? 'home' : 'share', false, DETAIL);
   }
 
   function drawPlay() {
@@ -1356,40 +1405,53 @@
     if (S.shake > 0) ctx.translate((Math.random() - 0.5) * S.shake, (Math.random() - 0.5) * S.shake);
     drawSonarField(p.size);
 
-    // 44x44: a real touch-target floor, not the old 34x32.
-    iconButton(8, 4, 44, 44, 'home', 'home', false);
-    iconButton(60, 4, 44, 44, 'mute', 'mute', false);
+    // 48×48, as tall as this bar gets while the header line between the icons
+    // holds the text floor (ARK-84).
+    iconButton(8, 2, 48, 48, 'home', 'home', false);
+    iconButton(64, 2, 48, 48, 'mute', 'mute', false);
 
     ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = r.moves > p.budget ? C.warn : C.text; ctx.font = `800 ${BODY}px ${FONT}`;
-    ctx.fillText(`${r.moves}/${p.budget}`, 472, 26);
+    if (S.practice) {
+      // Practice has no budget to watch: the slot says what kind of run this is.
+      ctx.fillStyle = C.muted; ctx.font = `600 ${DETAIL}px ${FONT}`;
+      ctx.fillText('practice', 472, 26);
+    } else {
+      ctx.fillStyle = r.moves > p.budget ? C.warn : C.text; ctx.font = `800 ${BODY}px ${FONT}`;
+      ctx.fillText(`${r.moves}/${p.budget}`, 472, 26);
+    }
     ctx.textAlign = 'center';
-    ctx.fillStyle = C.muted; ctx.font = `600 22px ${FONT}`;
-    ctx.fillText(`Day ${S.day} · ${TIERS[S.tier].label}${S.practice ? ' · practice' : ''}`, 240, 26);
+    ctx.fillStyle = C.muted; ctx.font = `600 ${DETAIL}px ${FONT}`;
+    ctx.fillText(`Day ${S.day} · ${TIERS[S.tier].label}`, 240, 26);
 
-    const tabY = 56, tabGap = 8, tabW = (W - 24 - tabGap * 2) / 3, tabH = 48;
-    TIERS.forEach((t, tier) => {
-      const x = 12 + tier * (tabW + tabGap), active = tier === S.tier;
-      ctx.fillStyle = active ? C.accent : C.card;
-      roundRect(x, tabY, tabW, tabH, 10); ctx.fill();
-      ctx.fillStyle = active ? '#052019' : C.text; ctx.font = `700 24px ${FONT}`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(t.label, x + tabW / 2, tabY + tabH / 2 + 1);
-      addHit(x, tabY, tabW, tabH, `card${tier}`);
-    });
+    if (locked()) {
+      // The solved card takes the tool area: the tabs and Ping/Mark/Check/
+      // Clear/Share have nothing left to do, and no stale mode stays lit.
+      drawSolvedCard(r);
+    } else {
+      const tabY = 56, tabGap = 8, tabW = (W - 24 - tabGap * 2) / 3, tabH = 48;
+      TIERS.forEach((t, tier) => {
+        const x = 12 + tier * (tabW + tabGap), active = tier === S.tier;
+        ctx.fillStyle = active ? C.accent : C.card;
+        roundRect(x, tabY, tabW, tabH, 10); ctx.fill();
+        ctx.fillStyle = active ? '#052019' : C.text; ctx.font = `700 ${DETAIL}px ${FONT}`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(t.label, x + tabW / 2, tabY + tabH / 2 + 1);
+        addHit(x, tabY, tabW, tabH, `card${tier}`);
+      });
 
-    // Two rows of two, not one cramped row of four: room for a readable label
-    // and a real 48px-tall target on every button, not only the ones this
-    // issue names explicitly.
-    const rowGap = 8, btnW = (W - 24 - 12) / 2, btnH = 48;
-    const row1Y = tabY + tabH + rowGap, row2Y = row1Y + btnH + rowGap;
-    button(12, row1Y, btnW, btnH, S.tapMode === 'ping' ? 'Ping' : S.tapMode === 'mark' ? 'Mark' : 'Pencil', 'mode', S.tapMode !== 'ping', 22);
-    button(12 + btnW + 12, row1Y, btnW, btnH, 'Check', 'check', false, 22);
-    button(12, row2Y, btnW, btnH, 'Clear', 'clear', false, 22);
-    button(12 + btnW + 12, row2Y, btnW, btnH, 'Share', 'share', false, 22);
+      // Two rows of two, not one cramped row of four: room for a readable label
+      // and a real 48px-tall target on every button — as tall as the column
+      // above the grid gets while the grid keeps its 420px (ARK-84).
+      const rowGap = 8, btnW = (W - 24 - 12) / 2, btnH = 48;
+      const row1Y = tabY + tabH + rowGap, row2Y = row1Y + btnH + rowGap;
+      button(12, row1Y, btnW, btnH, S.tapMode === 'ping' ? 'Ping' : S.tapMode === 'mark' ? 'Mark' : 'Pencil', 'mode', S.tapMode !== 'ping', DETAIL);
+      button(12 + btnW + 12, row1Y, btnW, btnH, 'Check', 'check', false, DETAIL);
+      button(12, row2Y, btnW, btnH, 'Clear', 'clear', false, DETAIL);
+      button(12 + btnW + 12, row2Y, btnW, btnH, 'Share', 'share', false, DETAIL);
+    }
 
     drawGrid(p, r);
-    if (locked()) drawSolvedOverlay(p, r);
+    if (S.win) drawWinLights(p);
     ctx.restore();
 
     const gridBottom = GRID_TOP + gridMetrics(p.size).cell * p.size;
@@ -1397,7 +1459,7 @@
     // After restore() the context holds whatever the frame before left in it: the
     // baseline is set here, or this line sits a few pixels lower after a resize, in
     // the picture, and on a still screen drawn after a toast than it does otherwise.
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `600 22px ${FONT}`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `600 ${DETAIL}px ${FONT}`;
     ctx.fillStyle = r.moves <= parVal ? C.good : over <= 2 ? C.warn : C.bad;
     ctx.fillText(`Par ${parVal} · mark ${p.k} reflector${p.k === 1 ? '' : 's'}`, 240, Math.min(gridBottom + 34, H - 14));
   }
@@ -1416,7 +1478,9 @@
   }
 
   function drawHelp() {
-    ctx.fillStyle = 'rgba(4,10,16,0.94)'; ctx.fillRect(0, 0, W, H);
+    // Dense enough to hold the rules on its own: the title behind it showed
+    // through the old 0.94 scrim (ARK-84 visual check).
+    ctx.fillStyle = 'rgba(4,10,16,0.97)'; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = C.accent; ctx.font = `800 30px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
     ctx.fillText('How to play', 240, 56);
     const lines = [
@@ -1427,7 +1491,10 @@
       'Mark cells you deduce hold one.',
       'Pencil jots an ungraded guess first.',
       'Check once every reflector is marked.',
-      'A wrong check costs 2.',
+      // What a wrong check does, not just its price: it fires the ping that
+      // disproves the marks (ARK-84 — the rule's meaning had gone missing).
+      'A wrong check pings the cell',
+      'that proves it, for 2.',
       'Every ping costs 1 — beat the par',
       'for a star.',
       '',
@@ -1453,12 +1520,12 @@
     for (const pt of S.parts) {
       ctx.globalAlpha = Math.max(0, 1 - pt.t / pt.life);
       ctx.fillStyle = pt.color;
-      ctx.beginPath(); ctx.arc(pt.x, pt.y, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, pt.size, 0, Math.PI * 2); ctx.fill();
     }
     ctx.globalAlpha = 1;
     for (const f of S.floats) {
       ctx.globalAlpha = Math.max(0, 1 - f.t / 0.9);
-      ctx.fillStyle = f.color; ctx.font = `700 18px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.fillStyle = f.color; ctx.font = `700 ${DETAIL}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
       ctx.fillText(f.text, f.x, f.y - f.t * 30);
     }
     ctx.globalAlpha = 1;
@@ -1668,6 +1735,7 @@
 
   const animating = () => {
     if (S.shake > 0 || S.flash > 0 || S.parts.length > 0 || S.floats.length > 0 || S.ripples.length > 0 || S.toast) return true;
+    if (S.win && S.win.t < WIN_HOLD) return true; // the found reflectors settle into their lit, still picture
     return S.stir > 0 || (S.lively > 0 && !calm());
   };
 
@@ -1696,6 +1764,10 @@
   // A hidden tab should not keep drawing; a tab shown again is drawn again.
   document.addEventListener('visibilitychange', () => {
     invalidate();
+    // iOS Safari can drop a background tab's canvas backing store with no
+    // event at all: coming back visible repaints the still layers rather than
+    // trusting a copy the browser may have thrown away (ARK-84).
+    if (!document.hidden) backdropKey = '';
     running = !document.hidden;
     if (document.hidden && audio) audio.suspend().catch(() => {});
   });

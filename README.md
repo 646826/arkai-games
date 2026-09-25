@@ -4,12 +4,12 @@ Every game from [arkai.win](https://arkai.win) — each one a **single self-cont
 file** you can open from your desktop with no build step, no server, no package
 manager and no network connection.
 
-There are 13 of them. Together they are 897 KB.
+There are 13 of them. Together they are 901 KB.
 
 | Game | Kind | Controls | Size | Play |
 | --- | --- | --- | ---: | --- |
 | **Bearing** | Puzzle, Daily | Keyboard, touch & mouse | 75 KB | [play](https://arkai.win/games/bearing/) |
-| **Echo Sounding** | Puzzle, Daily | Keyboard, touch & mouse | 78 KB | [play](https://arkai.win/games/echo-sounding/) |
+| **Echo Sounding** | Puzzle, Daily | Keyboard, touch & mouse | 82 KB | [play](https://arkai.win/games/echo-sounding/) |
 | **Trunk Line** | Puzzle, Daily | Keyboard, touch & mouse | 102 KB | [play](https://arkai.win/games/trunk-line/) |
 | **Blind Corners** | Puzzle, Daily | Keyboard, touch & mouse | 108 KB | [play](https://arkai.win/games/blind-corners/) |
 | **Ink Side Down** | Puzzle, Daily | Keyboard, touch & mouse | 107 KB | [play](https://arkai.win/games/ink-side-down/) |
