@@ -16,14 +16,14 @@
   /* The same actions as the canvas buttons, for screen readers and the Tab key.
      Hidden until one of them has focus, then shown as a bar. */
   #controls:focus-within { position: fixed; left: 8px; right: 8px; bottom: 8px; width: auto; height: auto; clip: auto; white-space: normal; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border-radius: 12px; background: #162036; border: 1px solid #35456b; }
-  #controls button, #controls a { min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center; text-decoration: none; padding: 0 12px; border-radius: 10px; border: 1px solid #35456b; background: #1f2a44; color: #eef3fb; font: 600 15px system-ui, sans-serif; }
+  #controls button, #controls a { min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center; text-decoration: none; padding: 0 12px; border-radius: 10px; border: 1px solid #35456b; background: #1f2a44; color: #eef3fb; font: 600 16px system-ui, sans-serif; }
   #controls a[hidden] { display: none; }
   #controls button:focus, #controls a:focus { outline: 2px solid #3dd6d0; }
   #copybox { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(6, 10, 20, 0.82); }
   #copybox.open { display: flex; }
   #copybox .card { width: min(92vw, 420px); box-sizing: border-box; padding: 18px; border-radius: 16px; background: #162036; border: 1px solid #35456b; color: #eef3fb; }
-  #copybox p { margin: 0 0 10px; font-size: 15px; line-height: 1.4; }
-  #copybox textarea { width: 100%; height: 100px; box-sizing: border-box; padding: 10px; border-radius: 10px; border: 1px solid #35456b; background: #0d1321; color: #d6fffb; font: 15px/1.45 ui-monospace, Menlo, Consolas, monospace; resize: none; -webkit-user-select: text; user-select: text; }
+  #copybox p { margin: 0 0 10px; font-size: 16px; line-height: 1.4; }
+  #copybox textarea { width: 100%; height: 100px; box-sizing: border-box; padding: 10px; border-radius: 10px; border: 1px solid #35456b; background: #0d1321; color: #d6fffb; font: 16px/1.45 ui-monospace, Menlo, Consolas, monospace; resize: none; -webkit-user-select: text; user-select: text; }
   #copybox button { margin-top: 12px; width: 100%; height: 44px; border: 0; border-radius: 10px; background: #3dd6d0; color: #04201f; font-weight: 700; font-size: 16px; cursor: pointer; }
 </style>
 </head>
@@ -565,16 +565,21 @@
   // compact shape drops the heading (the page around the frame already shows it)
   // and is itself 3:4.
   const W = 480;
+  // Text and targets are sized for the frame each shape lands in (ARK-88,
+  // D-083): the compact canvas scales by ~0.73 on a 390×844 phone and ~0.50 on
+  // 844×390, so 24 logical px is ~17.5 CSS px portrait and ~12 landscape, and
+  // a 62 logical px target is ~45 CSS px portrait; the tall canvas scales by
+  // ~0.81 on a bare phone page, where 24 is ~19.5 CSS px and 56 is ~45.4.
   const LAYOUTS = {
     tall: {
-      H: 780, heading: true, iconY: 10, icon: 48, tabsY: 72, tabH: 60, infoY: 156, boardY: 176,
-      buttonH: 56, toastY: 726, footerY: 744, small: 15, tabText: 16,
-      title: { name: 92, nameSize: 42, day: 138, tagline: 176, cards: 230, cta: 320, sub: 352, howto: 388, share: 460, footer: 744 },
+      H: 780, heading: true, iconY: 10, icon: 56, tabsY: 76, tabH: 64, infoY: 160, boardY: 180,
+      buttonH: 60, toastY: 722, footerY: 748, small: 24, tabText: 24,
+      title: { name: 96, nameSize: 44, day: 146, tagline: 190, tagline2: 218, cards: 246, cta: 346, sub: 378, howto: 410, share: 486, footer: 744 },
     },
     compact: {
-      H: 640, heading: false, iconY: 6, icon: 60, tabsY: 6, tabH: 60, infoY: 86, boardY: 104,
-      buttonH: 62, toastY: 68, footerY: 0, small: 16, tabText: 15,
-      title: { name: 82, nameSize: 40, day: 120, tagline: 154, cards: 200, cta: 288, sub: 316, howto: 348, share: 426, footer: 618 },
+      H: 640, heading: false, iconY: 6, icon: 64, tabsY: 6, tabH: 64, infoY: 92, boardY: 112,
+      buttonH: 62, toastY: 70, footerY: 0, small: 24, tabText: 24,
+      title: { name: 74, nameSize: 40, day: 114, tagline: 150, tagline2: 178, cards: 202, cta: 300, sub: 330, howto: 362, share: 440, footer: 590 },
     },
   };
   let L = LAYOUTS.tall;
@@ -1730,14 +1735,14 @@
         if (!ok) ctx.setLineDash([6, 5]);
         ctx.stroke();
         ctx.setLineDash([]);
-        label(String(k + 1), x, y + 1, Math.min(24, px * 0.36), '#0a0f1c', 'center', '800');
+        label(String(k + 1), x, y + 1, Math.min(26, px * 0.4), '#0a0f1c', 'center', '800');
       }
       if (ranks && ranks.has(port)) {
         ctx.fillStyle = C.mirrorLit;
         ctx.beginPath();
-        ctx.arc(x + half - 4, y - half + 4, 11, 0, Math.PI * 2);
+        ctx.arc(x + half - 6, y - half + 6, 16, 0, Math.PI * 2);
         ctx.fill();
-        label(String(ranks.get(port)), x + half - 4, y - half + 5, 13, '#1a1300', 'center', '800');
+        label(String(ranks.get(port)), x + half - 6, y - half + 7, 24, '#1a1300', 'center', '800');
       }
     }
     if (S.shot) {
@@ -1775,7 +1780,7 @@
     ctx.globalAlpha = 1;
     for (const f of S.floats) {
       ctx.globalAlpha = 1 - f.t;
-      label(f.text, f.x, f.y - (calm() ? 0 : f.t * 30), 17, f.color, 'center', '800');
+      label(f.text, f.x, f.y - (calm() ? 0 : f.t * 30), 24, f.color, 'center', '800');
     }
     ctx.globalAlpha = 1;
   }
@@ -1796,13 +1801,13 @@
   function buttons() {
     if (S.mode === 'title') {
       const T = L.title;
-      const list = icons(false).concat(dayArrows(), row(TIERS.map((t, i) => [`card${i}`, t.label]), T.cards, 60).map((b) => ({ ...b, card: true })));
+      const list = icons(false).concat(dayArrows(), row(TIERS.map((t, i) => [`card${i}`, t.label]), T.cards, L.tabH).map((b) => ({ ...b, card: true })));
       list.push({ id: 'help', label: 'How to play', x: 80, y: T.howto, w: W - 160, h: L.buttonH });
       if (onward()) list.push(...row([['share', archive() ? `Share Day ${S.day}` : 'Share', true], ['onward', `Play ${ONWARD.title}`]], T.share, L.buttonH, 20, W - 20));
       else if (solvedCount()) list.push({ id: 'share', label: archive() ? `Share Day ${S.day}` : 'Share today’s result', x: 80, y: T.share, w: W - 160, h: L.buttonH, primary: true });
       return list;
     }
-    const y = L.boardY + BOARD + (L.heading ? 18 : 12), h = L.buttonH;
+    const y = L.boardY + BOARD + (L.heading ? 18 : 10), h = L.buttonH;
     const key = (k) => (touch() ? '' : `  ${k}`);
     if (locked()) {
       const allDone = solvedCount() === TIERS.length;
@@ -1820,7 +1825,7 @@
   }
 
   // Either side of the day line on the title screen, each only where there is a day to go to.
-  const ARROW = 56;
+  const ARROW = 62;
   function dayArrows() {
     const y = L.title.day - ARROW / 2, list = [];
     if (S.day > 1) list.push({ id: 'prevday', icon: 'prev', x: 14, y, w: ARROW, h: ARROW });
@@ -1891,7 +1896,7 @@
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
-    label(b.label, b.x + b.w / 2, b.y + b.h / 2 + (down ? 2 : 0), 17, b.primary ? '#04201f' : C.text, 'center', '700', b.w - 20);
+    label(b.label, b.x + b.w / 2, b.y + b.h / 2 + (down ? 2 : 0), 24, b.primary ? '#04201f' : C.text, 'center', '700', b.w - 16);
   }
 
 
@@ -1906,13 +1911,13 @@
     const px = L.tabText;
     label(`${t.name} · ${t.label}`, b.x + b.w / 2, b.y + b.h * 0.32, px + 1, active || r.solved ? C.text : C.muted, 'center', '700', b.w - 8);
     // An unsolved card says what the box is, not its par: par costs a search, and a card is drawn before anyone asks.
-    label(r.solved ? resultText(r.solvedMoves, parOf(tier)) : `${t.size}×${t.size} · ${t.mirrors} mirrors`, b.x + b.w / 2, b.y + b.h * 0.7, px, r.solved ? C.inkHi : C.muted, 'center', '600', b.w - 8);
+    label(r.solved ? resultText(r.solvedMoves, parOf(tier)) : `${t.size}×${t.size} · ${t.mirrors} mirrors`, b.x + b.w / 2, b.y + b.h * 0.72, px, r.solved ? C.inkHi : C.muted, 'center', '600', b.w - 6);
   }
 
   function drawHud() {
     if (L.heading) {
-      label('Blind Corners', 12, 24, 21, C.text, 'left', '800');
-      if (!PICTURE) label(`Day ${S.day}${archive() ? ' · archive' : ''}`, 12, 48, 16, C.inkHi, 'left', '700');
+      label('Blind Corners', 12, 28, 26, C.text, 'left', '800');
+      if (!PICTURE) label(`Day ${S.day}${archive() ? ' · archive' : ''}`, 12, 56, 22, C.inkHi, 'left', '700');
     }
     for (const t of tabs()) drawTierCard(t, t.tier, t.tier === S.tier);
     const p = puzzle(), r = run();
@@ -1922,18 +1927,18 @@
     if (S.toast && toastOverInfo()) {
       // the toast is drawn here instead, for its three seconds
     } else if (S.newDay && !L.heading) {
-      label(touch() ? 'New puzzles are out: tap home' : 'New puzzles are out: press Esc', BOARD_X, y, 17, C.inkHi, 'left', '800');
+      label(touch() ? 'New puzzles are out: tap home' : 'New puzzles are out: press Esc', BOARD_X, y, 24, C.inkHi, 'left', '800', 300);
     } else if (locked()) {
-      label(`${day}Solved in ${r.solvedMoves}`, BOARD_X, y, 19, C.text, 'left', '800');
-      label(parNote(r.solvedMoves, parOf(S.tier)), x1, y, 19, C.inkHi, 'right', '800');
+      label(`${day}Solved in ${r.solvedMoves}`, BOARD_X, y, 24, C.text, 'left', '800', 260);
+      label(parNote(r.solvedMoves, parOf(S.tier)), x1, y, 24, C.inkHi, 'right', '800', 190);
     } else {
       const over = r.moves - p.par;
       // Before the first beam, the line says what to do: the box itself is the first screen.
       const first = !S.beams.length && !r.moves;
       const left = first ? (touch() ? 'Tap an arrow: fire a beam in' : 'Click an arrow: fire a beam in') : `${day}Spent ${r.moves} · ${markCount()}/${p.mirrors} mirrors`;
-      label(left, BOARD_X, y, 18, first ? C.inkHi : C.text, 'left', '800', BOARD * 0.62);
+      label(left, BOARD_X, y, 24, first ? C.inkHi : C.text, 'left', '800', BOARD * 0.62);
       const color = r.moves <= p.par ? C.good : over <= 2 ? C.warn : C.bad;
-      label(`par ${p.par} (solver)`, x1, y, 16, color, 'right', '700');
+      label(`par ${p.par} (solver)`, x1, y, 24, color, 'right', '700', 168);
     }
   }
 
@@ -1975,20 +1980,28 @@
     ctx.lineWidth = 1.5;
     roundRect(BOARD_X - 8, top, BOARD + 16, h, 16);
     ctx.stroke();
-    RULES.forEach(([str, color], i) => label(str, W / 2, top + 48 + i * 34, 17, color, 'center', '600', BOARD - 12));
+    const lh = Math.min(34, (h - 60) / (RULES.length - 1));
+    RULES.forEach(([str, color], i) => label(str, W / 2, top + 44 + i * lh, 24, color, 'center', '600', BOARD - 4));
   }
+
+  // The keyboard hints at a size a phone can read run to two lines (ARK-88):
+  // each hint is split where its " · " separators break it.
+  const FOOT_HINTS = {
+    titleDays: ['Space plays · 1 2 3 pick a puzzle', '< > other days'],
+    titleFirst: ['Space plays · 1 2 3 pick a puzzle', 'L reads the box'],
+    touch: ['Tap an arrow to fire ·', 'tap a square to mark'],
+    keys: ['Arrows move · Space fires or marks', 'K check · Esc home'],
+    mouse: ['Click an arrow to fire', 'a square to mark · or arrow keys'],
+  };
 
   function drawFooter(y) {
     if (S.toast || !y) return;
-    if (S.newDay) { label(touch() ? 'New puzzles are out: tap the home button' : 'New puzzles are out: press Esc', W / 2, y, 15, C.inkHi, 'center', '700'); return; }
-    if (touch()) { label('Tap an arrow to fire · tap a square to mark', W / 2, y, 15, C.muted, 'center', '500'); return; }
-    const hint = S.mode === 'title'
-      ? S.today > 1 ? 'Space plays · 1 2 3 pick a puzzle · < > other days' : 'Space plays · 1 2 3 pick a puzzle · L reads the box'
-      // The keyboard cursor is drawn only once a key has moved it; to a player on the mouse,
-      // "Arrows move" would promise a cursor that is not on the screen.
-      : S.keys ? 'Arrows move · Space fires or marks · K check · Esc home'
-        : 'Click an arrow to fire · a square to mark · or arrow keys';
-    label(hint, W / 2, y, 15, C.muted, 'center', '500');
+    if (S.newDay) { label(touch() ? 'New puzzles are out: tap the home button' : 'New puzzles are out: press Esc', W / 2, y, 24, C.inkHi, 'center', '700'); return; }
+    if (touch()) { FOOT_HINTS.touch.forEach((line, i) => label(line, W / 2, y + (i - 0.5) * 28, 24, C.muted, 'center', '500')); return; }
+    // The keyboard cursor is drawn only once a key has moved it; to a player on the mouse,
+    // "Arrows move" would promise a cursor that is not on the screen.
+    const lines = S.mode === 'title' ? (S.today > 1 ? FOOT_HINTS.titleDays : FOOT_HINTS.titleFirst) : S.keys ? FOOT_HINTS.keys : FOOT_HINTS.mouse;
+    lines.forEach((line, i) => label(line, W / 2, y + (i - (lines.length - 1) / 2) * 28, 24, C.muted, 'center', '500'));
   }
 
   function drawPlay() {
@@ -2022,21 +2035,22 @@
     const T = L.title;
     label('BLIND CORNERS', W / 2, T.name, T.nameSize, C.text, 'center', '900');
     const past = archive();
-    label(titleDay(S.day, past ? dayDate(S.day) : '', past, PICTURE), W / 2, T.day, 17, C.inkHi, 'center', '700', W - 2 * (14 + ARROW + 6));
-    label('Mirrors hide in the box. Find them by firing beams.', W / 2, T.tagline, 15, C.muted, 'center', '500', W - 40);
+    label(titleDay(S.day, past ? dayDate(S.day) : '', past, PICTURE), W / 2, T.day, 24, C.inkHi, 'center', '700', W - 2 * (14 + ARROW + 6));
+    label('Mirrors hide in the box.', W / 2, T.tagline, 24, C.muted, 'center', '500', W - 40);
+    label('Find them by firing beams.', W / 2, T.tagline2, 24, C.muted, 'center', '500', W - 40);
 
     const allDone = solvedCount() === TIERS.length;
     ctx.globalAlpha = allDone ? 1 : 0.8 + 0.2 * wave(3);
     const go = touch() ? 'Tap' : 'Tap or press Space';
     const done = past ? `Day ${S.day} is done` : `Next puzzles in ${untilMidnight()}`;
-    label(allDone ? done : `${go} to ${solvedCount() || S.runs.some((r) => r.moves) ? 'continue' : 'play'}`, W / 2, T.cta, 21, allDone ? C.text : C.inkHi, 'center', '800');
+    label(allDone ? done : `${go} to ${solvedCount() || S.runs.some((r) => r.moves) ? 'continue' : 'play'}`, W / 2, T.cta, 26, allDone ? C.text : C.inkHi, 'center', '800');
     ctx.globalAlpha = 1;
     // Finished for today is the moment an earlier day is worth offering.
     const again = allDone ? (!past && S.day > 1 ? '‹ plays earlier days' : 'Tap a puzzle to see it again') : '';
     const sub = past
       ? again || 'Earlier days do not count toward the streak'
       : [again, S.bestStreak ? `Streak ${liveStreak()} · best ${S.bestStreak}` : ''].filter(Boolean).join('  ·  ');
-    if (sub) label(sub, W / 2, T.sub, 15, C.muted, 'center', '600');
+    if (sub) label(sub, W / 2, T.sub, 24, C.muted, 'center', '600', W - 24);
     for (const b of buttons()) drawButton(b);
     drawFooter(T.footer);
     if (S.help) drawHelp(T.day + ARROW / 2 + 8, T.footer - 24);
@@ -2050,14 +2064,14 @@
     if (!S.toast) return;
     const a = Math.min(1, S.toast.t * 6, (3 - S.toast.t) * 3);
     ctx.globalAlpha = Math.max(0, a);
-    ctx.font = `700 15px ${FONT}`;
-    const w = Math.min(W - 16, ctx.measureText(S.toast.text).width + 32);
+    ctx.font = `700 24px ${FONT}`;
+    const w = Math.min(W - 12, ctx.measureText(S.toast.text).width + 36);
     const y = S.mode === 'title' ? L.title.footer - 18 : L.toastY;
-    const h = toastOverInfo() ? 28 : 36; // compact: clear of the board frame
+    const h = toastOverInfo() ? 36 : 44; // compact: clear of the board frame
     ctx.fillStyle = '#26345a';
     roundRect((W - w) / 2, y, w, h, h / 2);
     ctx.fill();
-    label(S.toast.text, W / 2, y + h / 2, 15, C.text, 'center', '700');
+    label(S.toast.text, W / 2, y + h / 2, 24, C.text, 'center', '700', w - 16);
     ctx.globalAlpha = 1;
   }
 

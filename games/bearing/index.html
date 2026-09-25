@@ -12,14 +12,14 @@
   canvas:focus-visible { outline: 2px solid rgba(125, 211, 252, 0.5); outline-offset: -2px; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   #controls:focus-within { position: fixed; left: 8px; right: 8px; bottom: 8px; width: auto; height: auto; clip: auto; white-space: normal; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border-radius: 12px; background: #111a2e; border: 1px solid #233250; }
-  #controls button, #controls a { min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center; text-decoration: none; padding: 0 12px; border-radius: 10px; border: 1px solid #233250; background: #16223c; color: #eaf2ff; font: 600 15px system-ui, sans-serif; }
+  #controls button, #controls a { min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center; text-decoration: none; padding: 0 12px; border-radius: 10px; border: 1px solid #233250; background: #16223c; color: #eaf2ff; font: 600 16px system-ui, sans-serif; }
   #controls a[hidden] { display: none; }
   #controls button:focus, #controls a:focus { outline: 2px solid #7dd3fc; }
   #copybox { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(4, 8, 16, 0.82); }
   #copybox.open { display: flex; }
   #copybox .card { width: min(92vw, 420px); box-sizing: border-box; padding: 18px; border-radius: 16px; background: #111a2e; border: 1px solid #233250; color: #eaf2ff; }
-  #copybox p { margin: 0 0 10px; font-size: 15px; line-height: 1.4; }
-  #copybox textarea { width: 100%; height: 100px; box-sizing: border-box; padding: 10px; border-radius: 10px; border: 1px solid #233250; background: #0a0f1e; color: #cdeeff; font: 15px/1.45 ui-monospace, Menlo, Consolas, monospace; resize: none; -webkit-user-select: text; user-select: text; }
+  #copybox p { margin: 0 0 10px; font-size: 16px; line-height: 1.4; }
+  #copybox textarea { width: 100%; height: 100px; box-sizing: border-box; padding: 10px; border-radius: 10px; border: 1px solid #233250; background: #0a0f1e; color: #cdeeff; font: 16px/1.45 ui-monospace, Menlo, Consolas, monospace; resize: none; -webkit-user-select: text; user-select: text; }
   #copybox button { margin-top: 12px; width: 100%; height: 44px; border: 0; border-radius: 10px; background: #7dd3fc; color: #06222f; font-weight: 700; font-size: 16px; cursor: pointer; }
 </style>
 </head>
@@ -323,12 +323,17 @@
   // ---- puzzle core end ----
 
   // ---- layout & state ----
-  const W = 480, H = 720;
+  // 3:4 like the portal frame that carries it (ARK-88, D-083/D-085): a 480×720
+  // canvas letterboxed inside that frame scaled by only ~0.65 on a 390×844
+  // phone, where 480×640 fills it edge to edge at ~0.73 (and ~0.50 on 844×390).
+  // Text is 24+ logical px (~17.5 CSS px portrait, ~12 landscape) and drawn
+  // targets 62+ logical px (~45 CSS px portrait).
+  const W = 480, H = 640;
   const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
   const SLUG = 'bearing';
   const STORE = 'arkai:bearing:v1', STORE_MUTE = 'arkai:bearing:muted', STORE_GATE = 'arkai:bearing:gateok';
   const SHARE_URL = 'https:' + '//arkai.win/games/bearing/?ref=share';
-  const RING_CX = 240, RING_CY = 316, RING_R = 132;
+  const RING_CX = 240, RING_CY = 290, RING_R = 104;
 
   const C = {
     bg: '#0a0f1e', card: '#111a2e',
@@ -1134,16 +1139,11 @@
     roundRect(x, y, w, h, 10); ctx.fill();
     ctx.strokeStyle = C.accentDim; ctx.lineWidth = 1; roundRect(x, y, w, h, 10); ctx.stroke();
     ctx.fillStyle = !enabled ? C.muted : active ? '#06222f' : C.text;
-    ctx.font = `700 15px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(label, x + w / 2, y + h / 2 + 1);
-    // The drawn pill stays as it is; only its hit box grows. On a 390×844 phone the
-    // 480-wide canvas scales by 0.8125, so a 44 logical px button is 35.8 CSS px —
-    // under the 44 px touch floor. Grow the hit box to at least 55 logical px and
-    // let it reach 4 px past every drawn edge, centred so it never drifts.
-    if (enabled) {
-      const hitH = Math.max(55, h + 8);
-      addHit(x, y - (hitH - h) / 2, w, hitH, action);
-    }
+    ctx.font = `700 24px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(label, x + w / 2, y + h / 2 + 1, w - 12);
+    // The pill is drawn at the size the touch floor needs (62+ logical px,
+    // ~45 CSS px in the portal frame — ARK-88), so the hit box is the pill.
+    if (enabled) addHit(x, y, w, h, action);
   }
 
   function iconButton(x, y, w, h, icon, action) {
@@ -1151,11 +1151,16 @@
     roundRect(x, y, w, h, 10); ctx.fill();
     ctx.strokeStyle = C.accentDim; ctx.lineWidth = 1; roundRect(x, y, w, h, 10); ctx.stroke();
     const cx = x + w / 2, cy = y + h / 2;
+    // The glyph paths are written around (0, 0) and scaled up to the bigger
+    // pill, so the icons read at the same weight as their 62 px target.
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(1.5, 1.5);
     ctx.strokeStyle = C.text; ctx.fillStyle = C.text; ctx.lineWidth = 2; ctx.lineCap = 'round';
     if (icon === 'home') {
       ctx.beginPath();
-      ctx.moveTo(cx - 8, cy - 1); ctx.lineTo(cx, cy - 8); ctx.lineTo(cx + 8, cy - 1);
-      ctx.moveTo(cx - 5, cy - 3); ctx.lineTo(cx - 5, cy + 8); ctx.lineTo(cx + 5, cy + 8); ctx.lineTo(cx + 5, cy - 3);
+      ctx.moveTo(-8, -1); ctx.lineTo(0, -8); ctx.lineTo(8, -1);
+      ctx.moveTo(-5, -3); ctx.lineTo(-5, 8); ctx.lineTo(5, 8); ctx.lineTo(5, -3);
       ctx.stroke();
     } else if (icon === 'prev' || icon === 'next') {
       // Same chevron the sibling games (One Step Late, Ink Side Down, Blind
@@ -1164,123 +1169,133 @@
       const back = icon === 'prev' ? 1 : -1;
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.moveTo(cx + 5 * back, cy - 11); ctx.lineTo(cx - 6 * back, cy); ctx.lineTo(cx + 5 * back, cy + 11);
+      ctx.moveTo(5 * back, -11); ctx.lineTo(-6 * back, 0); ctx.lineTo(5 * back, 11);
       ctx.stroke();
     } else {
       ctx.beginPath();
-      ctx.moveTo(cx - 9, cy - 3); ctx.lineTo(cx - 5, cy - 3); ctx.lineTo(cx, cy - 8);
-      ctx.lineTo(cx, cy + 8); ctx.lineTo(cx - 5, cy + 3); ctx.lineTo(cx - 9, cy + 3);
+      ctx.moveTo(-9, -3); ctx.lineTo(-5, -3); ctx.lineTo(0, -8);
+      ctx.lineTo(0, 8); ctx.lineTo(-5, 3); ctx.lineTo(-9, 3);
       ctx.closePath(); ctx.fill();
       ctx.beginPath();
       if (S.muted) {
-        ctx.moveTo(cx + 3, cy - 4); ctx.lineTo(cx + 10, cy + 4);
-        ctx.moveTo(cx + 10, cy - 4); ctx.lineTo(cx + 3, cy + 4);
+        ctx.moveTo(3, -4); ctx.lineTo(10, 4);
+        ctx.moveTo(10, -4); ctx.lineTo(3, 4);
       } else {
-        ctx.arc(cx + 2, cy, 5, -0.9, 0.9);
-        ctx.moveTo(cx + 6, cy - 8); ctx.arc(cx + 2, cy, 9, -0.9, 0.9);
+        ctx.arc(2, 0, 5, -0.9, 0.9);
+        ctx.moveTo(6, -8); ctx.arc(2, 0, 9, -0.9, 0.9);
       }
       ctx.stroke();
     }
-    ctx.lineCap = 'butt';
+    ctx.restore();
     addHit(x, y, w, h, action);
   }
 
-  function wrapText(text, x, y, maxW, lineH) {
-    const words = text.split(' ');
-    let line = '', ly = y;
-    for (const w of words) {
+  // The words of `text` in lines no wider than maxW, in the current font: a box
+  // can be sized to its lines before any of them is drawn (the toast, ARK-89).
+  function wrapLines(text, maxW) {
+    const lines = [];
+    let line = '';
+    for (const w of text.split(' ')) {
       const test = line ? `${line} ${w}` : w;
-      if (ctx.measureText(test).width > maxW && line) { ctx.fillText(line, x, ly); line = w; ly += lineH; }
+      if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = w; }
       else line = test;
     }
-    if (line) ctx.fillText(line, x, ly);
-    return ly;
+    if (line) lines.push(line);
+    return lines;
+  }
+
+  // Draws the lines from y down, lineH apart; returns the y of the last line.
+  function wrapText(text, x, y, maxW, lineH) {
+    const lines = wrapLines(text, maxW);
+    lines.forEach((line, i) => ctx.fillText(line, x, y + i * lineH));
+    return y + Math.max(0, lines.length - 1) * lineH;
   }
 
   function drawTitle() {
     ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
     addHit(0, 0, W, H, 'titledefault');
 
-    iconButton(W - 10 - 34, 4, 34, 32, 'mute', 'mute');
+    iconButton(W - 10 - 62, 4, 62, 62, 'mute', 'mute');
 
-    // The nextday pill (x426..470, y20..60) used to be a bare '›' glyph and
-    // never collided with mute (x436..470, y4..36); as an opaque icon button
-    // it overlapped mute's bottom 16px and, because hitTest resolves the
-    // last-added region first, stole taps meant for mute (dual-review found
-    // this while closing BENCHMARK gap #2). Dropping the row 20px clears it.
-    const DAY_ROW_Y = 40;
+    // The nextday pill and mute never share a row: the day row sits 6px below
+    // mute's pill, and hitTest resolves the last-added region first, so a tap
+    // on an overlap would be nextday's — there is none (dual-review found the
+    // old overlap while closing BENCHMARK gap #2; kept clear since).
+    const DAY_ROW_Y = 72;
     const prevOk = S.day > 1, nextOk = S.day < S.today;
     // Only drawn when navigable — matches the sibling games' dayArrows(),
     // which omit the arrow entirely rather than showing it greyed out.
-    if (prevOk) iconButton(10, DAY_ROW_Y, 44, 40, 'prev', 'prevday');
-    if (nextOk) iconButton(426, DAY_ROW_Y, 44, 40, 'next', 'nextday');
+    if (prevOk) iconButton(10, DAY_ROW_Y, 62, 62, 'prev', 'prevday');
+    if (nextOk) iconButton(W - 10 - 62, DAY_ROW_Y, 62, 62, 'next', 'nextday');
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = C.muted; ctx.font = `600 15px ${FONT}`;
-    ctx.fillText(titleDay(S.day, dayDate(S.day), archive()), 240, DAY_ROW_Y + 20);
+    ctx.fillStyle = C.muted; ctx.font = `600 24px ${FONT}`;
+    ctx.fillText(titleDay(S.day, dayDate(S.day), archive()), 240, DAY_ROW_Y + 31, 320);
 
-    ctx.fillStyle = C.accent; ctx.font = `800 38px ${FONT}`;
-    ctx.fillText('Bearing', 240, 90);
-    ctx.fillStyle = C.muted; ctx.font = `400 15px ${FONT}`;
-    ctx.fillText('Rotate. Listen. Triangulate the hidden sources.', 240, 118);
-    ctx.font = `400 13px ${FONT}`;
-    ctx.fillText('Best with headphones or stereo speakers.', 240, 138);
+    ctx.fillStyle = C.accent; ctx.font = `800 40px ${FONT}`;
+    ctx.fillText('Bearing', 240, 140);
+    ctx.fillStyle = C.muted; ctx.font = `400 24px ${FONT}`;
+    ctx.fillText('Rotate. Listen. Triangulate', 240, 172);
+    ctx.fillText('the hidden sources.', 240, 198);
+    ctx.fillText('Best with headphones or stereo speakers.', 240, 222, 440);
 
-    const cardY = [172, 300], cardH = 108;
+    const cardY = [238, 326], cardH = 82;
     TIERS.forEach((t, tier) => {
       const y = cardY[tier], r = S.runs[tier];
       ctx.fillStyle = C.card;
-      roundRect(40, y, 400, cardH, 14); ctx.fill();
+      roundRect(20, y, 440, cardH, 14); ctx.fill();
       ctx.strokeStyle = r.solved ? C.good : C.accentDim; ctx.lineWidth = 2;
-      roundRect(40, y, 400, cardH, 14); ctx.stroke();
-      ctx.fillStyle = C.text; ctx.font = `800 22px ${FONT}`; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-      ctx.fillText(t.label, 62, y + 38);
-      ctx.fillStyle = C.muted; ctx.font = `400 14px ${FONT}`;
-      ctx.fillText(`${t.k} sources · 16-point compass · par ${t.par}`, 62, y + 60);
+      roundRect(20, y, 440, cardH, 14); ctx.stroke();
+      ctx.fillStyle = C.text; ctx.font = `800 26px ${FONT}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText(t.label, 44, y + 28);
       ctx.textAlign = 'right';
       if (r.solved) {
         ctx.fillStyle = r.solvedMoves - r.par <= 0 ? C.good : C.warn;
-        ctx.font = `700 16px ${FONT}`;
-        ctx.fillText(parNote(r.solvedMoves, r.par), 418, y + 38);
-        ctx.fillStyle = C.muted; ctx.font = `400 13px ${FONT}`;
-        ctx.fillText(`${r.solvedMoves} listens spent`, 418, y + 60);
+        ctx.font = `700 24px ${FONT}`;
+        ctx.fillText(parNote(r.solvedMoves, r.par), 436, y + 28, 220);
+        ctx.fillStyle = C.muted; ctx.font = `400 24px ${FONT}`;
+        ctx.fillText(`${r.solvedMoves} listens spent`, 436, y + 60, 220);
       } else {
-        ctx.fillStyle = C.accent; ctx.font = `700 16px ${FONT}`;
-        ctx.fillText(r.moves ? 'In progress' : 'Not started', 418, y + 38);
+        ctx.fillStyle = C.accent; ctx.font = `700 24px ${FONT}`;
+        ctx.fillText(r.moves ? 'In progress' : 'Not started', 436, y + 28);
       }
+      ctx.textAlign = 'left'; ctx.fillStyle = C.muted; ctx.font = `400 24px ${FONT}`;
+      ctx.fillText(`${t.k} sources · 16-point compass · par ${t.par}`, 44, y + 60, 380);
       ctx.textAlign = 'center';
-      addHit(40, y, 400, cardH, `card${tier}`);
+      addHit(20, y, 440, cardH, `card${tier}`);
     });
 
     if (solvedCount() === TIERS.length) {
-      ctx.fillStyle = S.streak > 0 ? C.good : C.muted; ctx.font = `700 15px ${FONT}`;
+      ctx.fillStyle = S.streak > 0 ? C.good : C.muted; ctx.font = `700 24px ${FONT}`;
       ctx.fillText(S.streak > 0 ? `Streak ${S.streak}${S.bestStreak > S.streak ? ` · best ${S.bestStreak}` : ''}` : 'Both puzzles solved.', 240, 428);
     }
 
-    button(40, 452, 400, 48, 'Share', 'share', false);
-    button(40, 512, 190, 44, 'How to play', 'help', false);
-    button(250, 512, 190, 44, S.gatePassed ? 'Sound check ✓' : 'Sound check', 'opengate', false);
-    ctx.fillStyle = C.muted; ctx.font = `400 12px ${FONT}`;
-    ctx.fillText('Missed a day? The arrows above open every earlier one.', 240, 610);
-    ctx.fillText('Self-contained, no network. Made by an AI agent.', 240, 686);
+    button(20, 440, 440, 62, 'Share', 'share', false);
+    button(20, 508, 214, 62, 'How to play', 'help', false);
+    button(246, 508, 214, 62, S.gatePassed ? 'Sound check ✓' : 'Sound check', 'opengate', false);
+    ctx.fillStyle = C.muted; ctx.font = `400 24px ${FONT}`;
+    ctx.fillText('Missed a day? The arrows above', 240, 584);
+    ctx.fillText('open every earlier one.', 240, 608);
+    // The credit moved to the How-to-play panel: three lines of small print
+    // did not fit the 640-tall title at a size a phone can read (ARK-88).
   }
 
   function drawGate() {
     ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
-    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-    ctx.fillStyle = C.accent; ctx.font = `800 28px ${FONT}`;
-    ctx.fillText('Sound check', 240, 120);
-    ctx.fillStyle = C.muted; ctx.font = `400 15px ${FONT}`; ctx.textBaseline = 'middle';
-    wrapText('Bearing is heard, not just seen. Put on headphones or sit between stereo speakers, then press play and say which side the tone came from.', 240, 168, 380, 22);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = C.accent; ctx.font = `800 32px ${FONT}`;
+    ctx.fillText('Sound check', 240, 72);
+    ctx.fillStyle = C.muted; ctx.font = `400 24px ${FONT}`;
+    wrapText('Bearing is heard, not just seen. Put on headphones or sit between stereo speakers, then press play and say which side the tone came from.', 240, 112, 400, 30);
 
-    button(140, 240, 200, 52, 'Play the tone', 'gatetone', false);
+    button(140, 244, 200, 62, 'Play the tone', 'gatetone', false);
 
-    button(60, 340, 165, 90, 'LEFT', 'gateleft', false);
-    button(255, 340, 165, 90, 'RIGHT', 'gateright', false);
+    button(56, 330, 168, 96, 'LEFT', 'gateleft', false);
+    button(256, 330, 168, 96, 'RIGHT', 'gateright', false);
 
-    ctx.fillStyle = C.muted; ctx.font = `400 13px ${FONT}`; ctx.textBaseline = 'alphabetic';
-    ctx.fillText(S.gateAttempts >= 2 ? 'Missed twice — that is fine.' : 'A quick tap is all it takes.', 240, 460);
+    ctx.fillStyle = C.muted; ctx.font = `400 24px ${FONT}`;
+    ctx.fillText(S.gateAttempts >= 2 ? 'Missed twice — that is fine.' : 'A quick tap is all it takes.', 240, 452);
 
-    button(140, 500, 200, 44, 'Continue without it', 'gateskip', false);
+    button(110, 486, 260, 62, 'Continue without it', 'gateskip', false);
   }
 
   function drawDial() {
@@ -1300,12 +1315,17 @@
       ctx.lineWidth = cardinal ? 2 : 1;
       ctx.beginPath(); ctx.moveTo(inner.x, inner.y); ctx.lineTo(outer.x, outer.y); ctx.stroke();
       if (cardinal) {
-        const label = stopPoint(s, RING_R + 26);
-        ctx.fillStyle = C.muted; ctx.font = `700 13px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        const label = stopPoint(s, RING_R + 28);
+        ctx.fillStyle = C.muted; ctx.font = `700 24px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(POINTS[s], label.x, label.y);
       }
+      // As wide as the gap between two neighbouring stops allows: at R 104 the
+      // stops sit ~40.8 logical px apart, so 48-square hits overlap at the
+      // diagonals (the later-added region wins those slivers). 16 points at
+      // 44 CSS px each would need a ring this frame cannot hold — the rotate
+      // buttons and arrow keys carry the same action (ARK-88).
       const hit = stopPoint(s, RING_R);
-      addHit(hit.x - 18, hit.y - 18, 36, 36, `stop${s}`);
+      addHit(hit.x - 24, hit.y - 24, 48, 48, `stop${s}`);
     }
 
     // Candidate ticks: every source's accumulated reading, small and colored per source.
@@ -1354,15 +1374,18 @@
     // nothing forces the opposite-corners split the title screen uses for
     // mute alone — stacking left keeps in-play home/mute geometry identical
     // across all three Era-B dailies.
-    iconButton(8, 4, 34, 32, 'home', 'home');
-    iconButton(48, 4, 34, 32, 'mute', 'mute');
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = C.text; ctx.font = `700 16px ${FONT}`;
-    ctx.fillText(`Day ${S.day} · ${TIERS[S.tier].label}${S.practice ? ' · practice' : ''}`, 240, 22);
+    iconButton(W - 10 - 62, 4, 62, 62, 'home', 'home');
+    iconButton(W - 10 - 2 * 62 - 6, 4, 62, 62, 'mute', 'mute');
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left'; ctx.fillStyle = C.text; ctx.font = `700 24px ${FONT}`;
+    ctx.fillText(`Day ${S.day} · ${TIERS[S.tier].label}${S.practice ? ' · practice' : ''}`, 14, 36, 320);
 
     const p = puzzle(), r = run();
-    ctx.fillStyle = C.muted; ctx.font = `400 13px ${FONT}`;
-    ctx.fillText(`Facing ${POINTS[S.heading]} · ${r.listens.length} listen${r.listens.length === 1 ? '' : 's'} spent · par ${p.par}`, 240, 46);
+    // Its own full-width row below the icon pills: at a phone-readable size the
+    // sentence no longer fits beside them (ARK-88; the visual checker found the
+    // old right-aligned tail tucked under the home pill).
+    ctx.fillStyle = C.muted; ctx.font = `400 24px ${FONT}`;
+    ctx.fillText(`Facing ${POINTS[S.heading]} · ${r.listens.length} listen${r.listens.length === 1 ? '' : 's'} spent · par ${p.par}`, 14, 80, 452);
 
     ctx.save();
     if (S.shake > 0) ctx.translate((Math.random() - 0.5) * S.shake, (Math.random() - 0.5) * S.shake);
@@ -1372,11 +1395,11 @@
     // Per-source readouts, in words, next to the dial — the exact equivalent of
     // what a listen conveys, for anyone who cannot rely on stereo hearing alone.
     const cand = candidateSets(p, r.listens);
-    ctx.textAlign = 'left'; ctx.font = `600 13px ${FONT}`;
+    ctx.textAlign = 'left'; ctx.font = `600 24px ${FONT}`;
     cand.forEach((set, i) => {
       ctx.fillStyle = C.src[i % C.src.length];
       const text = `Source ${i + 1}: ${set.size ? [...set].map((s) => POINTS[s]).join(' or ') : 'not listened yet'}`;
-      ctx.fillText(text, 30, 470 + i * 20);
+      ctx.fillText(text, 24, 446 + i * 24, 452);
     });
 
     // The coach over the dial: what to find, what a listen gives, how to finish.
@@ -1385,61 +1408,71 @@
     const coach = coachLines(p.k, cand, S.marks, locked());
     if (coach) {
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillStyle = C.accent; ctx.font = `700 16px ${FONT}`;
-      ctx.fillText(coach[0], 240, 88);
-      ctx.fillStyle = C.muted; ctx.font = `400 13px ${FONT}`;
-      ctx.fillText(coach[1], 240, 112);
+      ctx.fillStyle = C.accent; ctx.font = `700 25px ${FONT}`;
+      ctx.fillText(coach[0], 240, 106, 452);
+      ctx.fillStyle = C.muted; ctx.font = `400 24px ${FONT}`;
+      ctx.fillText(coach[1], 240, 132, 452);
     }
 
-    button(30, 540, 200, 50, locked() ? 'Solved' : 'Listen', 'listen', false, !locked());
-    button(250, 540, 100, 50, '‹', 'rotateccw', false);
-    button(350, 540, 100, 50, '›', 'rotatecw', false);
+    button(24, 508, 208, 62, locked() ? 'Solved' : 'Listen', 'listen', false, !locked());
+    button(240, 508, 112, 62, '‹', 'rotateccw', false);
+    button(356, 508, 112, 62, '›', 'rotatecw', false);
 
-    button(30, 602, 120, 44, locked() ? 'Replay' : 'Check', locked() ? 'replay' : 'check', false, true);
-    button(160, 602, 120, 44, 'Clear', 'clear', false, !locked());
-    button(290, 602, 160, 44, S.tier === 0 ? 'Three-source' : 'Two-source', `card${1 - S.tier}`, false);
+    button(24, 572, 134, 62, locked() ? 'Replay' : 'Check', locked() ? 'replay' : 'check', false, true);
+    button(162, 572, 134, 62, 'Clear', 'clear', false, !locked());
+    button(300, 572, 168, 62, S.tier === 0 ? 'Three-source' : 'Two-source', `card${1 - S.tier}`, false);
 
-    ctx.fillStyle = C.muted; ctx.font = `400 12px ${FONT}`;
+    ctx.fillStyle = C.muted; ctx.font = `400 24px ${FONT}`;
     ctx.fillText('', 0, 0); // no-op keeps text state consistent for the next draw call
   }
 
   function drawHelp() {
     ctx.fillStyle = 'rgba(4,8,16,0.92)'; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = C.card;
-    roundRect(30, 70, W - 60, H - 140, 16); ctx.fill();
-    ctx.strokeStyle = C.accentDim; ctx.lineWidth = 1; roundRect(30, 70, W - 60, H - 140, 16); ctx.stroke();
-    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-    ctx.fillStyle = C.accent; ctx.font = `800 22px ${FONT}`;
-    ctx.fillText('How to play', 240, 106);
-    ctx.fillStyle = C.text; ctx.font = `400 14px ${FONT}`; ctx.textAlign = 'left';
-    const lines = [
-      'Two or three sound sources sit at fixed compass',
-      'points, hidden. Rotate your heading, then listen.',
-      '',
-      'Each source pulls left or right the way a real ear',
-      'hears it. That pull always matches two possible',
-      'bearings, mirrored across your heading — the same',
-      'pull comes from a source ahead of you or behind it.',
-      '',
-      'Listen again from a different heading: the new pair',
-      'and the old pair share exactly one bearing. That is',
-      'the truth. Mark it, and every other source, then',
-      'press Check.',
-      '',
-      'Every listen costs 1. A wrong check costs 2. No hard',
-      'limit — extra listens are always worth it if unsure.',
+    roundRect(24, 10, W - 48, H - 20, 16); ctx.fill();
+    ctx.strokeStyle = C.accentDim; ctx.lineWidth = 1; roundRect(24, 10, W - 48, H - 20, 16); ctx.stroke();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = C.accent; ctx.font = `800 26px ${FONT}`;
+    ctx.fillText('How to play', 240, 48);
+    ctx.fillStyle = C.text; ctx.font = `400 24px ${FONT}`; ctx.textAlign = 'left';
+    // Re-flowed by wrapText at the new size (ARK-88): the same words, broken
+    // where they fit rather than where the old 14px lines happened to end.
+    const paragraphs = [
+      'Two or three sound sources sit at fixed compass points, hidden. Rotate your heading, then listen.',
+      'Each source pulls left or right the way a real ear hears it. That pull always matches two possible bearings, mirrored across your heading — the same pull comes from a source ahead of you or behind it.',
+      'Listen again from a different heading: the new pair and the old pair share exactly one bearing. That is the truth. Mark it, and every other source, then press Check.',
+      'Every listen costs 1. A wrong check costs 2. No hard limit — extra listens are always worth it if unsure.',
     ];
-    lines.forEach((l, i) => ctx.fillText(l, 56, 140 + i * 24));
+    // Every paragraph is wrapped before any is drawn, so the lines can close up
+    // before anything overlaps: 27 px apart with Roboto, tighter only where a
+    // wider system font needs more lines, and the last one stays 36 px above the
+    // credit line (ARK-89: the first cut started each paragraph 12 px under the
+    // last line of the one above, drawing over it).
+    let ly = 84;
+    const blocks = paragraphs.map((paragraph) => wrapLines(paragraph, 408));
+    const count = blocks.reduce((n, lines) => n + lines.length, 0);
+    const lineH = Math.min(27, (H - 74 - ly - 12 * (blocks.length - 1)) / (count - 1));
+    for (const lines of blocks) {
+      lines.forEach((line, i) => ctx.fillText(line, 44, ly + i * lineH));
+      ly += lines.length * lineH + 12;
+    }
+    ctx.textAlign = 'center'; ctx.fillStyle = C.muted; ctx.font = `400 24px ${FONT}`;
+    ctx.fillText('Self-contained, no network. Made by an AI agent.', 240, H - 38, 420);
     addHit(0, 0, W, H, 'closehelp');
   }
 
   function drawEffects() {
     if (S.flash > 0) { ctx.fillStyle = `rgba(125,211,252,${S.flash * 0.3})`; ctx.fillRect(0, 0, W, H); }
     if (S.toast) {
+      // The box grows up from the bottom edge to hold every line (ARK-89: at 24 px
+      // the wrong-check toast is three lines, and the last fell off the canvas).
+      ctx.font = `600 24px ${FONT}`;
+      const lines = wrapLines(S.toast.text, W - 120);
+      const boxH = 24 + 28 * lines.length, top = H - 16 - boxH;
       ctx.fillStyle = 'rgba(10,15,30,0.92)';
-      roundRect(40, H - 74, W - 80, 46, 12); ctx.fill();
-      ctx.fillStyle = C.text; ctx.font = `600 14px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      wrapText(S.toast.text, W / 2, H - 51, W - 110, 16);
+      roundRect(36, top, W - 72, boxH, 12); ctx.fill();
+      ctx.fillStyle = C.text; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      lines.forEach((line, i) => ctx.fillText(line, W / 2, top + 26 + i * 28));
     }
   }
 
