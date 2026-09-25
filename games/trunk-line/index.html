@@ -1072,7 +1072,9 @@
       const over = r.moves - p.par;
       // One line, always: a wrapped toast climbs the board's lowest station
       // (ARK-94). Practice has no panel, so the toast itself carries the count.
-      toast(`Practice solved in ${r.moves}${over < 0 ? `, ${-over} under.` : over === 0 ? ' — par!' : `, +${over}.`}`);
+      // Spoken in full, as before ARK-94: "+3" means nothing without "par".
+      toast(`Practice solved in ${r.moves}${over < 0 ? `, ${-over} under.` : over === 0 ? ' — par!' : `, +${over}.`}`,
+        `Practice solved in ${r.moves}. ${over <= 0 ? 'Par!' : `${over} over par.`}`);
       return;
     }
     r.solved = true; r.solvedMoves = r.moves; r.par = p.par;
@@ -1172,7 +1174,10 @@
     if (PICTURE || S.hidden) return;
     if (S.flash > 0) S.flash = Math.max(0, S.flash - dt * 1.5);
     if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 20);
-    if (S.toast) {
+    // An open How to play hides the toast (ARK-94), so its clock waits: a
+    // one-time notice — a new day, storage lost — shows once the panel closes
+    // instead of running out unseen under it (ARK-77).
+    if (S.toast && !S.help) {
       S.toast.t += dt;
       // A toast sits still from the frame it lands to the frame it leaves, so
       // it animates nothing while it is up — ending one is what draws again

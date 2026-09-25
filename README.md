@@ -10,7 +10,7 @@ There are 13 of them. Together they are 928 KB.
 | --- | --- | --- | ---: | --- |
 | **Bearing** | Puzzle, Daily | Keyboard, touch & mouse | 77 KB | [play](https://arkai.win/games/bearing/) |
 | **Echo Sounding** | Puzzle, Daily | Keyboard, touch & mouse | 82 KB | [play](https://arkai.win/games/echo-sounding/) |
-| **Trunk Line** | Puzzle, Daily | Keyboard, touch & mouse | 116 KB | [play](https://arkai.win/games/trunk-line/) |
+| **Trunk Line** | Puzzle, Daily | Keyboard, touch & mouse | 117 KB | [play](https://arkai.win/games/trunk-line/) |
 | **Blind Corners** | Puzzle, Daily | Keyboard, touch & mouse | 109 KB | [play](https://arkai.win/games/blind-corners/) |
 | **Ink Side Down** | Puzzle, Daily | Keyboard, touch & mouse | 111 KB | [play](https://arkai.win/games/ink-side-down/) |
 | **Mole Rush** | Arcade, Family | Keyboard, touch & mouse | 56 KB | [play](https://arkai.win/games/mole-rush/) |
