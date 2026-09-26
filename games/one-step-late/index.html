@@ -3,31 +3,31 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="light">
 <title>One Step Late — Arkai</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #0d0b1f; overflow: hidden; }
+  html, body { margin: 0; height: 100%; background: #FFE3B4; overflow: hidden; }
   body { -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
   /* dvh where it exists: on iOS 100vh is taller than the visible page while the
      address bar shows, which pushed the buttons under it and offset every tap. */
   canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; outline: none; cursor: pointer; }
   /* The browser decides when focus should show. Chrome also shows it once a
      player who clicked starts using the arrows, so the ring is kept quiet:
-     2px at 45% gold still clears 3:1 against the page. */
-  canvas:focus-visible { outline: 2px solid rgba(255, 209, 102, 0.45); outline-offset: -2px; }
+     2px navy clears well against the sunlit sky. */
+  canvas:focus-visible { outline: 2px solid rgba(22, 50, 79, 0.7); outline-offset: -2px; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   /* The same actions as the canvas buttons, for screen readers and the Tab key.
      Hidden until one of them has focus, then shown as a bar. */
-  #controls:focus-within { position: fixed; left: 8px; right: 8px; bottom: 8px; width: auto; height: auto; clip: auto; white-space: normal; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border-radius: 12px; background: #1a1636; border: 1px solid #3b3470; }
-  #controls button, #controls a { min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center; text-decoration: none; padding: 0 12px; border-radius: 10px; border: 1px solid #3b3470; background: #1e1a42; color: #ece9ff; font: 600 16px system-ui, sans-serif; }
+  #controls:focus-within { position: fixed; left: 8px; right: 8px; bottom: 8px; width: auto; height: auto; clip: auto; white-space: normal; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border-radius: 12px; background: #FFF4DC; border: 1px solid #16324F; }
+  #controls button, #controls a { min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center; text-decoration: none; padding: 0 12px; border-radius: 10px; border: 1px solid #16324F; background: #19B7B0; color: #16324F; font: 600 16px system-ui, sans-serif; }
   #controls a[hidden] { display: none; }
-  #controls button:focus, #controls a:focus { outline: 2px solid #ffd166; }
-  #copybox { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(8, 6, 20, 0.82); }
+  #controls button:focus, #controls a:focus { outline: 2px solid #C77E00; }
+  #copybox { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(22, 50, 79, 0.45); }
   #copybox.open { display: flex; }
-  #copybox .card { width: min(92vw, 420px); box-sizing: border-box; padding: 18px; border-radius: 16px; background: #1a1636; border: 1px solid #3b3470; color: #ece9ff; }
+  #copybox .card { width: min(92vw, 420px); box-sizing: border-box; padding: 18px; border-radius: 16px; background: #FFF4DC; border: 1px solid #16324F; color: #16324F; }
   #copybox p { margin: 0 0 10px; font-size: 16px; line-height: 1.4; }
-  #copybox textarea { width: 100%; height: 100px; box-sizing: border-box; padding: 10px; border-radius: 10px; border: 1px solid #3b3470; background: #0d0b1f; color: #ffe7a8; font: 16px/1.45 ui-monospace, Menlo, Consolas, monospace; resize: none; -webkit-user-select: text; user-select: text; }
-  #copybox button { margin-top: 12px; width: 100%; height: 44px; border: 0; border-radius: 10px; background: #ffd166; color: #1a1300; font-weight: 700; font-size: 16px; cursor: pointer; }
+  #copybox textarea { width: 100%; height: 100px; box-sizing: border-box; padding: 10px; border-radius: 10px; border: 1px solid #16324F; background: #FFE3B4; color: #16324F; font: 16px/1.45 ui-monospace, Menlo, Consolas, monospace; resize: none; -webkit-user-select: text; user-select: text; }
+  #copybox button { margin-top: 12px; width: 100%; height: 44px; border: 0; border-radius: 10px; background: #FFB627; color: #16324F; font-weight: 700; font-size: 16px; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -537,12 +537,17 @@
   const DIR_NAMES = ['up', 'right', 'down', 'left'];
 
   const C = {
-    bg: '#0d0b1f', board: '#15122e', tile: '#1a1638', grid: 'rgba(255,255,255,0.045)',
-    wall: '#2d2858', wallTop: '#3d3677', wallEdge: '#1b1740',
-    gold: '#ffd166', goldHi: '#fff3c4', goldDeep: '#e2a92c',
-    lilac: '#a99cf0', shade: '#4c3d86', shadeHi: '#7a68c4',
-    text: '#ece9ff', muted: '#a8a2d0', good: '#6ee7a8', warn: '#fbbf24', bad: '#f87171',
-    button: '#1e1a42', buttonHot: '#262150', buttonDown: '#2a2552', line: 'rgba(169, 156, 240, 0.35)',
+    bg: '#FFE3B4', skyTop: '#FFE3B4', skyMid: '#FFC07A', skyBot: '#F3A96E',
+    board: '#E9AC5E', tile: '#F6C479', plankGrain: 'rgba(120, 70, 30, 0.16)', grid: 'rgba(22, 50, 79, 0.20)',
+    wall: '#2AA79E', wallTop: '#7FD4C7', wallEdge: '#14605F',
+    hole: '#0E5A63', holeDeep: '#083F46', holeRim: '#9c2b1f',
+    gold: '#FFB627', goldHi: '#FFE2A0', goldDeep: '#D98A00', goldText: '#7A4E00',
+    lilac: '#6E84C0', shade: '#4E5F97', shadeHi: '#7C8FC4', shadeText: '#33456F', moonFill: '#B9C6EA',
+    cream: '#FFF4DC', creamHi: '#FFFBF0', brass: '#C9922E', brassHi: '#E8B34A',
+    teal: '#19B7B0', tealHi: '#2FC9C2', tealDeep: '#0E8A85',
+    text: '#16324F', muted: '#34455c', good: '#0a6b60', warn: '#8a4f00', bad: '#9c2b1f',
+    line: 'rgba(22, 50, 79, 0.30)',
+    button: '#FFF4DC', buttonHot: '#FFFBF0', buttonDown: '#EFE0C0',
   };
 
   const canvas = document.getElementById('game');
@@ -760,7 +765,10 @@
     }
   }
   const float = (x, y, message, color) => S.floats.push({ x, y, text: message, color, t: 0 });
-  const toast = (message, spoken = message) => { S.toast = { text: message, t: 0 }; announce(spoken); };
+  // Long enough to actually read (ARK-111): a floor of ~4s, growing with the
+  // message so a share code or a "solved in another tab" note is not gone
+  // before the last word lands.
+  const toast = (message, spoken = message) => { S.toast = { text: message, t: 0, life: Math.max(4, 1.4 + message.length * 0.11) }; announce(spoken); };
   const shake = (amount) => { if (!calm()) S.shake = amount; };
 
   function describeBoard() {
@@ -1442,7 +1450,7 @@
     }
     if (S.toast) {
       S.toast.t += dt;
-      if (S.toast.t > 3) S.toast = null;
+      if (S.toast.t > S.toast.life) S.toast = null;
     }
     if (S.fall) {
       S.fall.t += dt;
@@ -1459,9 +1467,11 @@
 
   // ---- drawing ----
   const view = { scale: 1, ox: 0, oy: 0, dpr: 1 };
-  const stars = Array.from({ length: 64 }, (_, i) => {
+  // Gold lantern motes drifting up the dusk: Lantern Harbour's light carries
+  // the board's warmth into the sky (ARK-111).
+  const motes = Array.from({ length: 64 }, (_, i) => {
     const r = seeded(9001, i);
-    return { x: r() * W, y: r() * 780, s: 0.6 + r() * 1.4, p: r() * 6.28 };
+    return { x: r() * W, y: r() * 780, s: 1.5 + r() * 3, p: r() * 6.28, a: 0.2 + r() * 0.5 };
   });
 
   function resize() {
@@ -1500,15 +1510,25 @@
 
   function drawBackground() {
     const g = ctx.createLinearGradient(0, 0, 0, L.H);
-    g.addColorStop(0, '#120f2b');
-    g.addColorStop(1, '#07061a');
+    g.addColorStop(0, C.skyTop);
+    g.addColorStop(0.55, C.skyMid);
+    g.addColorStop(1, C.skyBot);
     ctx.fillStyle = g;
     ctx.fillRect(-view.ox / view.scale, -view.oy / view.scale, W + (2 * view.ox) / view.scale, L.H + (2 * view.oy) / view.scale);
-    ctx.fillStyle = '#d9d2ff';
-    for (const s of stars) {
-      if (s.y > L.H) continue;
-      ctx.globalAlpha = 0.25 + 0.35 * (0.5 + 0.5 * wave(1.3, s.p));
-      ctx.fillRect(s.x, s.y, s.s, s.s);
+    // A low warm sun sits right of the board and washes the top of the page.
+    const sg = ctx.createRadialGradient(W * 0.86, L.H * 0.06, 8, W * 0.86, L.H * 0.06, L.H * 0.85);
+    sg.addColorStop(0, 'rgba(255, 224, 150, 0.55)');
+    sg.addColorStop(0.4, 'rgba(255, 190, 110, 0.22)');
+    sg.addColorStop(1, 'rgba(255, 190, 110, 0)');
+    ctx.fillStyle = sg;
+    ctx.fillRect(-view.ox / view.scale, -view.oy / view.scale, W + (2 * view.ox) / view.scale, L.H + (2 * view.oy) / view.scale);
+    ctx.fillStyle = C.gold;
+    for (const m of motes) {
+      if (m.y > L.H) continue;
+      ctx.globalAlpha = m.a * (0.5 + 0.5 * wave(1.3, m.p));
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, m.s, 0, Math.PI * 2);
+      ctx.fill();
     }
     ctx.globalAlpha = 1;
   }
@@ -1521,7 +1541,7 @@
     ctx.rotate(spin);
     ctx.scale(scale, scale);
     const glow = ctx.createRadialGradient(0, 0, r * 0.4, 0, 0, r * 1.9);
-    glow.addColorStop(0, you ? 'rgba(255, 209, 102, 0.34)' : 'rgba(140, 120, 240, 0.26)');
+    glow.addColorStop(0, you ? 'rgba(255, 182, 39, 0.36)' : 'rgba(78, 95, 151, 0.32)');
     glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
     ctx.fillStyle = glow;
     ctx.beginPath();
@@ -1537,11 +1557,11 @@
     ctx.beginPath();
     ctx.ellipse(0, 0, r * (1 + wob), r * (1 - wob), 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = you ? C.goldDeep : C.lilac;
+    ctx.strokeStyle = you ? C.goldDeep : C.shadeText;
     ctx.lineWidth = 2;
     ctx.stroke();
     const lx = look >= 0 ? DX[look] * r * 0.18 : 0, ly = look >= 0 ? DY[look] * r * 0.18 : 0;
-    ctx.fillStyle = you ? '#3a2600' : '#e4defe';
+    ctx.fillStyle = you ? '#3a2600' : C.text;
     for (const side of [-1, 1]) {
       ctx.beginPath();
       ctx.ellipse(side * r * 0.3 + lx, -r * 0.08 + ly, r * 0.1, r * 0.15, 0, 0, Math.PI * 2);
@@ -1553,56 +1573,72 @@
   function drawSun(x, y, size, lit) {
     ctx.save();
     ctx.globalAlpha = lit ? 1 : 0.85 + 0.15 * wave(2);
-    ctx.strokeStyle = C.gold;
-    ctx.lineWidth = 3.5;
+    // Sun buoy: a lit amber globe resting on the plank.
+    const g = ctx.createRadialGradient(x - size * 0.08, y - size * 0.12, size * 0.02, x, y, size * 0.30);
+    g.addColorStop(0, C.goldHi);
+    g.addColorStop(0.55, C.gold);
+    g.addColorStop(1, C.goldDeep);
+    ctx.fillStyle = g;
     ctx.beginPath();
-    ctx.arc(x, y, size * 0.24, 0, Math.PI * 2);
+    ctx.arc(x, y, size * 0.30, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = C.goldDeep;
+    ctx.lineWidth = 2;
     ctx.stroke();
-    ctx.lineWidth = 3;
+    // Short warm rays so the buoy reads as light, not as a target reticle.
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
     const turnAngle = calm() ? 0 : S.turn;
     for (let i = 0; i < 8; i++) {
       const a = (Math.PI / 4) * i + turnAngle;
       ctx.beginPath();
-      ctx.moveTo(x + Math.cos(a) * size * 0.31, y + Math.sin(a) * size * 0.31);
-      ctx.lineTo(x + Math.cos(a) * size * 0.41, y + Math.sin(a) * size * 0.41);
+      ctx.moveTo(x + Math.cos(a) * size * 0.34, y + Math.sin(a) * size * 0.34);
+      ctx.lineTo(x + Math.cos(a) * size * 0.42, y + Math.sin(a) * size * 0.42);
       ctx.stroke();
     }
+    ctx.lineCap = 'butt';
     ctx.restore();
   }
 
   function drawMoon(x, y, size, lit, backdrop) {
     ctx.save();
     ctx.globalAlpha = lit ? 1 : 0.85 + 0.15 * wave(2, 1);
-    ctx.strokeStyle = C.lilac;
-    ctx.lineWidth = 3;
-    ctx.setLineDash([6, 5]);
+    // Moon buoy: a frosted sea-glass globe, cool against the warm planks.
+    const g = ctx.createRadialGradient(x - size * 0.08, y - size * 0.12, size * 0.02, x, y, size * 0.30);
+    g.addColorStop(0, '#FFFFFF');
+    g.addColorStop(0.5, C.moonFill);
+    g.addColorStop(1, C.lilac);
+    ctx.fillStyle = g;
     ctx.beginPath();
-    ctx.arc(x, y, size * 0.37, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle = C.lilac;
-    ctx.beginPath();
-    ctx.arc(x, y, size * 0.21, 0, Math.PI * 2);
+    ctx.arc(x, y, size * 0.30, 0, Math.PI * 2);
     ctx.fill();
+    // Dark navy rim so the frosted globe reads on the warm planks, like the sun's goldDeep.
+    ctx.strokeStyle = C.shadeText;
+    ctx.lineWidth = 2;
+    ctx.stroke();
     ctx.fillStyle = backdrop;
     ctx.beginPath();
-    ctx.arc(x + size * 0.09, y - size * 0.06, size * 0.17, 0, Math.PI * 2);
+    ctx.arc(x + size * 0.09, y - size * 0.06, size * 0.18, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
 
+  const plankAt = (cell) => (cell % COLS + ((cell / COLS) | 0)) % 2 ? C.tile : C.board;
+
   function drawBoard() {
     const p = puzzle(), top0 = L.boardY;
-    ctx.fillStyle = C.board;
+    // Tide-wall frame: cream enamel with a brass lip, the harbour's edge.
+    ctx.fillStyle = C.cream;
     roundRect(BOARD_X - 6, top0 - 6, BOARD_W + 12, BOARD_H + 12, 14);
     ctx.fill();
-    ctx.strokeStyle = 'rgba(169, 156, 240, 0.22)';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = C.brass;
+    ctx.lineWidth = 3;
     ctx.stroke();
     for (let cell = 0; cell < CELLS; cell++) {
       const x = BOARD_X + (cell % COLS) * CELL, y = top0 + ((cell / COLS) | 0) * CELL;
       const kind = p.board[cell];
       if (kind === WALL) {
+        // Teal wet-stone wall block; the light lip on top catches the low sun.
         ctx.fillStyle = C.wallEdge;
         roundRect(x + 4, y + 7, CELL - 8, CELL - 8, 10);
         ctx.fill();
@@ -1612,30 +1648,50 @@
         ctx.fillStyle = C.wallTop;
         roundRect(x + 10, y + 8, CELL - 20, 8, 4);
         ctx.fill();
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.28)';
+        ctx.beginPath();
+        ctx.arc(x + CELL * 0.30, y + CELL * 0.42, 3, 0, Math.PI * 2);
+        ctx.fill();
         continue;
       }
-      ctx.fillStyle = (cell % COLS + ((cell / COLS) | 0)) % 2 ? C.tile : C.board;
+      // Sun-bleached teak planks in a soft checker, each with a grain line.
+      ctx.fillStyle = plankAt(cell);
       ctx.fillRect(x, y, CELL, CELL);
-      // The two goal cells are tinted, so they read as places and not as decoration.
+      ctx.strokeStyle = C.plankGrain;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x + 7, y + CELL - 7);
+      ctx.lineTo(x + CELL - 7, y + 7);
+      ctx.stroke();
+      // The two goal cells glow so they read as places, not decoration.
       if (cell === p.sun || cell === p.moon) {
-        ctx.fillStyle = cell === p.sun ? 'rgba(255, 209, 102, 0.13)' : 'rgba(169, 156, 240, 0.15)';
+        ctx.fillStyle = cell === p.sun ? 'rgba(255, 182, 39, 0.20)' : 'rgba(110, 132, 192, 0.30)';
         roundRect(x + 3, y + 3, CELL - 6, CELL - 6, 10);
         ctx.fill();
       }
       if (kind === HOLE) {
         const hx = x + CELL / 2, hy = y + CELL / 2;
+        // Teal water: deep in the middle, lighter at the deck's edge.
         const g = ctx.createRadialGradient(hx, hy, 2, hx, hy, CELL * 0.38);
-        g.addColorStop(0, '#000000');
-        g.addColorStop(0.85, '#05041a');
-        g.addColorStop(1, 'rgba(20, 10, 30, 1)');
+        g.addColorStop(0, C.holeDeep);
+        g.addColorStop(0.85, C.hole);
+        g.addColorStop(1, C.hole);
         ctx.fillStyle = g;
         ctx.beginPath();
         ctx.ellipse(hx, hy, CELL * 0.37, CELL * 0.33, 0, 0, Math.PI * 2);
         ctx.fill();
-        // Holes are the only thing that can cost you a move, so their rim is the
-        // one warm colour on the board apart from your own.
-        ctx.strokeStyle = 'rgba(248, 113, 113, 0.6)';
-        ctx.lineWidth = 2.5;
+        // Mint foam where water meets plank.
+        ctx.strokeStyle = 'rgba(191, 241, 230, 0.6)';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        // A specular glint sells the surface, not a bottomless pit.
+        ctx.fillStyle = 'rgba(191, 241, 230, 0.5)';
+        ctx.beginPath();
+        ctx.ellipse(hx - CELL * 0.10, hy - CELL * 0.11, CELL * 0.10, CELL * 0.05, -0.6, 0, Math.PI * 2);
+        ctx.fill();
+        // Holes are the only thing that can cost you a move: red is loss only.
+        ctx.strokeStyle = C.holeRim;
+        ctx.lineWidth = 2;
         ctx.stroke();
       }
     }
@@ -1646,8 +1702,8 @@
     for (let i = 1; i < ROWS; i++) { ctx.moveTo(BOARD_X, top0 + i * CELL); ctx.lineTo(BOARD_X + BOARD_W, top0 + i * CELL); }
     ctx.stroke();
     drawSun(cx(p.sun), cy(p.sun), CELL, S.you === p.sun);
-    // The crescent is cut with the colour of the tinted cell under it.
-    drawMoon(cx(p.moon), cy(p.moon), CELL, S.shadow === p.moon, (p.moon % COLS + ((p.moon / COLS) | 0)) % 2 ? '#2f2a54' : '#2b274b');
+    // The crescent is cut with the plank colour under the moon.
+    drawMoon(cx(p.moon), cy(p.moon), CELL, S.shadow === p.moon, plankAt(p.moon));
   }
 
   function actorPos(anim) {
@@ -1688,8 +1744,20 @@
     } else if (S.shadowAnim.t < 1 && S.shadowAnim.from === S.shadowAnim.to) {
       alpha = 0.3 + 0.7 * Math.max(0, S.shadowAnim.t);
     }
+    // Contact shadows ground the orbs on the sunlit planks (ARK-111).
+    ctx.save();
+    ctx.globalAlpha = alpha * 0.9;
+    ctx.fillStyle = 'rgba(120, 70, 30, 0.30)';
+    ctx.beginPath();
+    ctx.ellipse(s.x, s.y + CELL * 0.16, CELL * 0.22, CELL * 0.09, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
     drawOrb(s.x, s.y, CELL * 0.27, S.last, 'shadow', alpha * 0.95, scale, spin);
     const you = actorPos(S.youAnim);
+    ctx.fillStyle = 'rgba(120, 70, 30, 0.32)';
+    ctx.beginPath();
+    ctx.ellipse(you.x, you.y + CELL * 0.16, CELL * 0.22, CELL * 0.09, 0, 0, Math.PI * 2);
+    ctx.fill();
     drawOrb(you.x, you.y, CELL * 0.27, S.last, 'you');
     if (S.fall || S.mode !== 'play' || (locked() && !S.demo)) return;
 
@@ -1699,16 +1767,16 @@
       if (S.last >= 0) {
         const danger = doomed(p.board, S.shadow, S.last);
         const bob = (danger ? 5 : 3) * wave(danger ? 10 : 6);
-        drawArrow(s.x + DX[S.last] * (CELL * 0.44 + bob), s.y + DY[S.last] * (CELL * 0.44 + bob), S.last, danger ? C.bad : C.lilac);
+        drawArrow(s.x + DX[S.last] * (CELL * 0.44 + bob), s.y + DY[S.last] * (CELL * 0.44 + bob), S.last, danger ? C.bad : C.shadeText);
         if (danger) label('Undo!', s.x, s.y - CELL * 0.52, L.small, C.bad, 'center', '800', CELL - 4);
       } else {
-        label('waits', s.x, s.y - CELL * 0.5, L.small, C.lilac, 'center', '700', CELL - 4);
+        label('waits', s.x, s.y - CELL * 0.5, L.small, C.shadeText, 'center', '700', CELL - 4);
       }
     }
     // Before the first move, name the two pieces: they are the same shape.
     if (!history().length && !S.demo) {
-      label('you', you.x, you.y + CELL * 0.48, L.small, C.gold, 'center', '800', CELL - 4);
-      label('shadow', s.x, s.y + CELL * 0.48, L.small, C.lilac, 'center', '800', CELL - 4);
+      label('you', you.x, you.y + CELL * 0.48, L.small, C.goldText, 'center', '800', CELL - 4);
+      label('shadow', s.x, s.y + CELL * 0.48, L.small, C.shadeText, 'center', '800', CELL - 4);
     }
   }
 
@@ -1784,8 +1852,18 @@
 
   function drawIcon(b) {
     const x = b.x + b.w / 2, y = b.y + b.h / 2;
-    ctx.fillStyle = S.hover === b.id ? C.buttonHot : C.button;
-    roundRect(b.x, b.y, b.w, b.h, 12);
+    const hot = S.hover === b.id;
+    const down = S.press && S.press.id === b.id;
+    const oy = down ? 2 : 0;
+    ctx.fillStyle = hot ? C.buttonHot : C.button;
+    roundRect(b.x, b.y + oy, b.w, b.h, 12);
+    ctx.fill();
+    // Bevel: a sunlit lip on top, a shade under the bottom, navy edge.
+    ctx.fillStyle = C.creamHi;
+    roundRect(b.x + 3, b.y + oy + 3, b.w - 6, b.h * 0.5, 9);
+    ctx.fill();
+    ctx.fillStyle = C.buttonDown;
+    roundRect(b.x + 3, b.y + oy + b.h - 6, b.w - 6, 3, 2);
     ctx.fill();
     ctx.strokeStyle = C.line;
     ctx.lineWidth = 1.5;
@@ -1830,15 +1908,22 @@
     if (b.card) { drawTierCard(b, Number(b.id.slice(4)), S.hover === b.id); return; }
     const down = S.press && S.press.id === b.id;
     const hot = S.hover === b.id;
-    ctx.fillStyle = b.primary ? (down ? C.goldDeep : C.gold) : down ? C.buttonDown : hot ? C.buttonHot : C.button;
-    roundRect(b.x, b.y + (down ? 2 : 0), b.w, b.h, 12);
+    const oy = down ? 2 : 0;
+    const fill = b.primary ? (down ? C.goldDeep : C.gold) : down ? C.buttonDown : hot ? C.buttonHot : C.button;
+    ctx.fillStyle = fill;
+    roundRect(b.x, b.y + oy, b.w, b.h, 12);
     ctx.fill();
-    if (!b.primary) {
-      ctx.strokeStyle = C.line;
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-    }
-    label(b.label, b.x + b.w / 2, b.y + b.h / 2 + (down ? 2 : 0), 24, b.primary ? '#1a1300' : C.text, 'center', '700', b.w - 16);
+    // Bevel lip and press shade, then the brass/navy edge (ARK-111).
+    ctx.fillStyle = b.primary ? C.goldHi : C.creamHi;
+    roundRect(b.x + 3, b.y + oy + 3, b.w - 6, b.h * 0.45, 9);
+    ctx.fill();
+    ctx.fillStyle = b.primary ? 'rgba(122, 78, 0, 0.35)' : C.buttonDown;
+    roundRect(b.x + 3, b.y + oy + b.h - 6, b.w - 6, 3, 2);
+    ctx.fill();
+    ctx.strokeStyle = b.primary ? C.goldDeep : C.line;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    label(b.label, b.x + b.w / 2, b.y + b.h / 2 + oy, 24, C.text, 'center', '700', b.w - 16);
   }
 
   /** "★ 5 moves" at par, "7 moves, +2" above it: one notation everywhere. */
@@ -1849,22 +1934,22 @@
 
   function drawTierCard(b, tier, active) {
     const r = S.runs[tier], p = S.puzzles[tier];
-    ctx.fillStyle = active ? C.buttonHot : '#17143a';
+    ctx.fillStyle = active ? C.buttonHot : C.button;
     roundRect(b.x, b.y, b.w, b.h, 12);
     ctx.fill();
-    ctx.strokeStyle = active ? C.gold : r.solved ? 'rgba(255, 209, 102, 0.45)' : 'rgba(169, 156, 240, 0.25)';
+    ctx.strokeStyle = active ? C.brass : r.solved ? 'rgba(201, 146, 46, 0.6)' : 'rgba(22, 50, 79, 0.25)';
     ctx.lineWidth = active ? 2 : 1.5;
     ctx.stroke();
     const size = L.tabText;
     label(`${TIERS[tier].name} · ${TIERS[tier].label}`, b.x + b.w / 2, b.y + b.h * 0.32, size + 1, active || r.solved ? C.text : C.muted, 'center', '700', b.w - 8);
-    label(r.solved ? resultText(r.solvedMoves, p.par) : `par ${p.par}`, b.x + b.w / 2, b.y + b.h * 0.72, size, r.solved ? C.gold : C.muted, 'center', '600', b.w - 6);
+    label(r.solved ? resultText(r.solvedMoves, p.par) : `par ${p.par}`, b.x + b.w / 2, b.y + b.h * 0.72, size, r.solved ? C.goldText : C.muted, 'center', '600', b.w - 6);
   }
 
   function drawDemoStrip(x, y) {
     const { path, i } = S.demo;
     const step = Math.min(22, 250 / path.length);
     path.forEach((dir, k) => {
-      const color = k === i - 1 ? C.gold : k < i ? C.text : 'rgba(168, 162, 208, 0.55)';
+      const color = k === i - 1 ? C.goldDeep : k < i ? C.text : 'rgba(22, 50, 79, 0.35)';
       drawArrow(x + k * step + step / 2, y, dir, color, step / 26);
     });
   }
@@ -1872,7 +1957,7 @@
   function drawHud() {
     if (L.heading) {
       label('One Step Late', 12, 28, 26, C.text, 'left', '800');
-      if (!PICTURE) label(`Day ${S.day}${archive() ? ' · archive' : ''}`, 12, 56, 22, C.gold, 'left', '700');
+      if (!PICTURE) label(`Day ${S.day}${archive() ? ' · archive' : ''}`, 12, 56, 22, C.goldText, 'left', '700');
     }
     for (const t of tabs()) drawTierCard(t, t.tier, t.tier === S.tier);
     const p = puzzle(), r = run();
@@ -1881,7 +1966,7 @@
     if (S.toast && toastOverInfo()) {
       // the toast is drawn here instead, for its three seconds
     } else if (S.newDay && !L.heading) {
-      label(touch() ? 'New puzzles are out: tap home' : 'New puzzles are out: press Esc', BOARD_X, y, 24, C.gold, 'left', '800', 456);
+      label(touch() ? 'New puzzles are out: tap home' : 'New puzzles are out: press Esc', BOARD_X, y, 24, C.goldText, 'left', '800', 456);
     } else if (S.demo) {
       label('Par line', BOARD_X, y, 24, C.text, 'left', '800');
       drawDemoStrip(BOARD_X + 104, y);
@@ -1889,7 +1974,7 @@
     } else if (locked()) {
       const over = r.solvedMoves - p.par;
       label(`${day}Solved in ${r.solvedMoves}`, BOARD_X, y, 24, C.text, 'left', '800', 250);
-      label(over <= 0 ? '★ par' : `par ${p.par}, +${over}`, BOARD_X + BOARD_W, y, 24, C.gold, 'right', '800', 200);
+      label(over <= 0 ? '★ par' : `par ${p.par}, +${over}`, BOARD_X + BOARD_W, y, 24, C.goldText, 'right', '800', 200);
     } else {
       const moves = S.practice ? S.practiceMoves : r.moves;
       const over = moves - p.par;
@@ -1901,15 +1986,15 @@
 
   const RULES = [
     ['You step where you choose.', C.text],
-    ['Then your shadow repeats the move', C.lilac],
-    ['you made the turn before; an arrow marks it.', C.lilac],
+    ['Then your shadow repeats the move', C.shadeText],
+    ['you made the turn before; an arrow marks it.', C.shadeText],
     ['You never walk into a hole.', C.text],
     ['Your shadow does. The move that aimed', C.bad],
     ['it there is taken back, and still counts.', C.bad],
     ['Walls, edges and each other block you;', C.muted],
     ['a blocked move still counts and is copied.', C.muted],
-    ['Finish with you on the sun and your', C.gold],
-    ['shadow on the moon, at the same time.', C.gold],
+    ['Finish with you on the sun and your', C.goldText],
+    ['shadow on the moon, at the same time.', C.goldText],
     ['Every move counts: undo and restart', C.text],
     ['do not give moves back.', C.text],
   ];
@@ -1927,11 +2012,11 @@
   // fixed to them the way the play-mode panel always was.
   function drawHelp(top = L.boardY - 8, bottom = top + BOARD_H + 16) {
     const h = bottom - top;
-    ctx.fillStyle = '#14111c';
+    ctx.fillStyle = C.cream;
     roundRect(BOARD_X - 8, top, BOARD_W + 16, h, 16);
     ctx.fill();
-    ctx.strokeStyle = C.line;
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = C.brass;
+    ctx.lineWidth = 2;
     roundRect(BOARD_X - 8, top, BOARD_W + 16, h, 16);
     ctx.stroke();
     const lh = Math.min(34, (h - 60) / (RULES.length - 1));
@@ -1948,7 +2033,7 @@
 
   function drawFooter(y) {
     if (S.toast || !y) return;
-    if (S.newDay) { label(touch() ? 'New puzzles are out: tap the home button' : 'New puzzles are out: press Esc', W / 2, y, 24, C.gold, 'center', '700'); return; }
+    if (S.newDay) { label(touch() ? 'New puzzles are out: tap the home button' : 'New puzzles are out: press Esc', W / 2, y, 24, C.goldText, 'center', '700'); return; }
     if (touch()) { label('Swipe, or tap toward a cell', W / 2, y, 24, C.muted, 'center', '500'); return; }
     const lines = S.mode === 'title' ? (S.today > 1 ? FOOT_HINTS.titleDays : FOOT_HINTS.titleFirst) : FOOT_HINTS.play;
     lines.forEach((line, i) => label(line, W / 2, y + (i - (lines.length - 1) / 2) * 28, 24, C.muted, 'center', '500'));
@@ -1978,7 +2063,7 @@
     const T = L.title;
     label('ONE STEP LATE', W / 2, T.name, T.nameSize, C.text, 'center', '900');
     const past = archive();
-    label(titleDay(S.day, past ? dayDate(S.day) : '', past, PICTURE), W / 2, T.day, 24, C.gold, 'center', '700', W - 2 * (14 + ARROW + 6));
+    label(titleDay(S.day, past ? dayDate(S.day) : '', past, PICTURE), W / 2, T.day, 24, C.goldText, 'center', '700', W - 2 * (14 + ARROW + 6));
     label('Your shadow copies your last move,', W / 2, T.tagline, 24, C.muted, 'center', '500', W - 40);
     label('one step late.', W / 2, T.tagline2, 24, C.muted, 'center', '500', W - 40);
 
@@ -1986,7 +2071,7 @@
     ctx.globalAlpha = allDone ? 1 : 0.8 + 0.2 * wave(3);
     const go = touch() ? 'Tap' : 'Tap or press Space';
     const done = past ? `Day ${S.day} is done` : `Next puzzles in ${untilMidnight()}`;
-    label(allDone ? done : `${go} to ${solvedCount() ? 'continue' : 'play'}`, W / 2, T.cta, 26, allDone ? C.text : C.gold, 'center', '800');
+    label(allDone ? done : `${go} to ${solvedCount() ? 'continue' : 'play'}`, W / 2, T.cta, 26, allDone ? C.text : C.goldText, 'center', '800');
     ctx.globalAlpha = 1;
     // Finished for today is the moment an earlier day is worth offering.
     const again = allDone ? (!past && S.day > 1 ? '‹ plays earlier days' : 'Tap a puzzle to see it again') : '';
@@ -2011,15 +2096,19 @@
 
   function drawToast() {
     if (!S.toast) return;
-    const a = Math.min(1, S.toast.t * 6, (3 - S.toast.t) * 3);
+    const a = Math.min(1, S.toast.t * 6, (S.toast.life - S.toast.t) * 3);
     ctx.globalAlpha = Math.max(0, a);
     ctx.font = `700 24px ${FONT}`;
     const w = Math.min(W - 12, ctx.measureText(S.toast.text).width + 36);
     const y = S.mode === 'title' ? L.title.footer - 18 : L.toastY;
     const h = toastOverInfo() ? 36 : 44; // compact: clear of the board frame
-    ctx.fillStyle = '#2d2860';
+    ctx.fillStyle = C.cream;
     roundRect((W - w) / 2, y, w, h, h / 2);
     ctx.fill();
+    ctx.strokeStyle = C.brass;
+    ctx.lineWidth = 1.5;
+    roundRect((W - w) / 2, y, w, h, h / 2);
+    ctx.stroke();
     label(S.toast.text, W / 2, y + h / 2, 24, C.text, 'center', '700', w - 16);
     ctx.globalAlpha = 1;
   }
@@ -2036,7 +2125,7 @@
     else drawPlay();
     drawToast();
     if (S.flash > 0) {
-      ctx.fillStyle = `rgba(255, 243, 196, ${S.flash * 0.25})`;
+      ctx.fillStyle = `rgba(255, 182, 39, ${S.flash * 0.3})`;
       ctx.fillRect(0, 0, W, L.H);
     }
   }
