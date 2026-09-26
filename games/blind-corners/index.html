@@ -1317,7 +1317,7 @@
     if (writeStore()) return;
     celebrate();
     const over = r.solvedMoves - p.par;
-    emit('gameover', { won: true, score: r.solvedMoves, par: p.par, tier: S.tier + 1, day: S.day, archive: archive(), streak: S.streak });
+    emit('gameover', { won: true, score: r.solvedMoves, par: p.par, tier: S.tier + 1, day: S.day, archive: archive(), streak: liveStreak() });
     const allDone = solvedCount() === TIERS.length;
     toast(solvedNotice(over, allDone));
   }
