@@ -3,24 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="light">
 <title>Bearing — Arkai</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #0a0f1e; overflow: hidden; }
-  body { -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body { -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background: radial-gradient(130% 110% at 82% 24%, #ffd97e 0%, #ffb627 16%, rgba(255,182,39,0) 46%), linear-gradient(180deg, #3c4a8a 0%, #6d7fc9 18%, #ff9a6b 42%, #ffb627 58%, #ffd88a 66%, #19b7b0 82%, #135a75 100%); }
   canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; outline: none; cursor: pointer; }
-  canvas:focus-visible { outline: 2px solid rgba(125, 211, 252, 0.5); outline-offset: -2px; }
+  canvas:focus-visible { outline: 2px solid rgba(240, 196, 99, 0.8); outline-offset: -2px; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  #controls:focus-within { position: fixed; left: 8px; right: 8px; bottom: 8px; width: auto; height: auto; clip: auto; white-space: normal; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border-radius: 12px; background: #111a2e; border: 1px solid #233250; }
-  #controls button, #controls a { min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center; text-decoration: none; padding: 0 12px; border-radius: 10px; border: 1px solid #233250; background: #16223c; color: #eaf2ff; font: 600 16px system-ui, sans-serif; }
+  #controls:focus-within { position: fixed; left: 8px; right: 8px; bottom: 8px; width: auto; height: auto; clip: auto; white-space: normal; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border-radius: 12px; background: #fff7e6; border: 1px solid #c9922e; }
+  #controls button, #controls a { min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center; text-decoration: none; padding: 0 12px; border-radius: 10px; border: 1px solid #c9922e; background: #fff2d8; color: #16324f; font: 600 16px system-ui, sans-serif; }
   #controls a[hidden] { display: none; }
-  #controls button:focus, #controls a:focus { outline: 2px solid #7dd3fc; }
-  #copybox { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(4, 8, 16, 0.82); }
+  #controls button:focus, #controls a:focus { outline: 2px solid #c9922e; }
+  #copybox { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(22, 50, 79, 0.72); }
   #copybox.open { display: flex; }
-  #copybox .card { width: min(92vw, 420px); box-sizing: border-box; padding: 18px; border-radius: 16px; background: #111a2e; border: 1px solid #233250; color: #eaf2ff; }
+  #copybox .card { width: min(92vw, 420px); box-sizing: border-box; padding: 18px; border-radius: 16px; background: #fff7e6; border: 1px solid #c9922e; color: #16324f; }
   #copybox p { margin: 0 0 10px; font-size: 16px; line-height: 1.4; }
-  #copybox textarea { width: 100%; height: 100px; box-sizing: border-box; padding: 10px; border-radius: 10px; border: 1px solid #233250; background: #0a0f1e; color: #cdeeff; font: 16px/1.45 ui-monospace, Menlo, Consolas, monospace; resize: none; -webkit-user-select: text; user-select: text; }
-  #copybox button { margin-top: 12px; width: 100%; height: 44px; border: 0; border-radius: 10px; background: #7dd3fc; color: #06222f; font-weight: 700; font-size: 16px; cursor: pointer; }
+  #copybox textarea { width: 100%; height: 100px; box-sizing: border-box; padding: 10px; border-radius: 10px; border: 1px solid #c9922e; background: #fffdf5; color: #16324f; font: 16px/1.45 ui-monospace, Menlo, Consolas, monospace; resize: none; -webkit-user-select: text; user-select: text; }
+  #copybox button { margin-top: 12px; width: 100%; height: 44px; border: 0; border-radius: 10px; background: #ff6a4d; color: #16324f; font-weight: 700; font-size: 16px; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -336,11 +336,13 @@
   const RING_CX = 240, RING_CY = 290, RING_R = 104;
 
   const C = {
-    bg: '#0a0f1e', card: '#111a2e',
-    ring: '#1c2b4a', ringDim: '#233250',
-    accent: '#7dd3fc', accentDim: '#1c5270', cursor: '#facc15',
-    text: '#eaf2ff', muted: '#8ea3c4', good: '#6ee7a8', warn: '#fbbf24', bad: '#f87171',
-    src: ['#7dd3fc', '#fb923c', '#c9a2fb'],
+    bg: '#fff7e6', card: '#fff2d8',
+    ring: '#c9922e', ringDim: '#c9a45c',
+    accent: '#ff6a4d', accentDim: '#b34a34', cursor: '#ffb020',
+    text: '#16324f', muted: '#4c6a80', good: '#0a6b60', warn: '#9a5b00', bad: '#e8453c',
+    src: ['#ff6a4d', '#19b7b0', '#ffb020'],
+    srcInk: ['#c0392b', '#0a7a72', '#9a6412'],
+    navy: '#16324f', brass: '#c9922e', brassBright: '#f0c463', sea: '#19b7b0', flame: '#ffb020',
   };
 
   const stopAngle = (stop) => (stop * Math.PI) / (DIAL / 2) - Math.PI / 2;
@@ -546,7 +548,13 @@
   }
   const titleSummary = () => `Day ${S.day}${archive() ? `, ${dayDate(S.day)}, from the archive` : ''}. ${solvedCount()} of 2 puzzles solved.`;
 
-  const toast = (message, spoken = message) => { S.toast = { text: message, t: 0 }; announce(spoken); };
+  const toast = (message, spoken = message) => {
+    // Readable on the first glance: a floor of 4 s and enough headroom for the
+    // words, capped at 8 s so a long wrong-check note still clears (ARK-110).
+    const words = message.split(' ').length;
+    S.toast = { text: message, t: 0, dur: Math.min(8, Math.max(4, 1.1 + words * 0.26)) };
+    announce(spoken);
+  };
   const shake = (amount) => { if (!calm()) S.shake = amount; };
 
   /** Every source's accumulated candidate set, from this run's listen history — the same reading a listen gives, replayed. */
@@ -1109,7 +1117,7 @@
     if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 20);
     if (S.toast) {
       S.toast.t += dt;
-      if (S.toast.t >= 2.6) S.toast = null;
+      if (S.toast.t >= S.toast.dur) S.toast = null;
     }
   }
 
@@ -1134,11 +1142,72 @@
     ctx.closePath();
   }
 
+  // ---- lantern harbour skin (ARK-110) ----
+  // Lighten or darken a #rrggbb fill by f (negative darkens). Cheap enough for a
+  // press frame; the desk and plates keep every other fill flat (D-086).
+  function shade(hex, f) {
+    const n = parseInt(hex.slice(1), 16);
+    const ch = (v) => Math.max(0, Math.min(255, Math.round(v * (1 + f))));
+    return `rgb(${ch(n >> 16)},${ch((n >> 8) & 0xff)},${ch(n & 0xff)})`;
+  }
+
+  // The listening desk — sun-bleached wood with a low lantern glow from the
+  // upper right — is drawn straight to the frame. The two gradients are cheap
+  // to recreate per repaint, and the drawing code may only write to ctx (the
+  // offscreen canvas it once cached to would need member writes of its own).
+  function desk() {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#fffaf0');
+    g.addColorStop(1, '#f4e7c6');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    const glow = ctx.createRadialGradient(W - 24, 16, 0, W - 24, 16, 400);
+    glow.addColorStop(0, 'rgba(255,182,39,0.20)');
+    glow.addColorStop(1, 'rgba(255,182,39,0)');
+    ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(201,146,46,0.22)'; ctx.lineWidth = 1;
+    for (let y = 132; y < H; y += 128) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  }
+
+  // A raised enamel plate: a flat drop shadow, the body, and a light lip on the
+  // top edge — a bevel without a blur. Pressed, it sinks (no shadow, darker body).
+  function plate(x, y, w, h, r, fill, pressed) {
+    const dy = pressed ? 2 : 0;
+    if (!pressed) {
+      ctx.fillStyle = 'rgba(22,50,79,0.18)';
+      roundRect(x, y + 3, w, h, r); ctx.fill();
+    }
+    ctx.fillStyle = pressed ? shade(fill, -0.14) : fill;
+    roundRect(x, y + dy, w, h, r); ctx.fill();
+    ctx.strokeStyle = 'rgba(22,50,79,0.30)'; ctx.lineWidth = 1;
+    roundRect(x + 0.5, y + dy + 0.5, w - 1, h - 1, r); ctx.stroke();
+    if (!pressed) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 1.5;
+      roundRect(x + 1, y + 1, w - 2, h - 2, Math.max(0, r - 1)); ctx.stroke();
+    }
+  }
+
+  // A flat panel with a coloured rim: the tier cards and the help sheet.
+  function panel(x, y, w, h, r, fill, stroke) {
+    ctx.fillStyle = 'rgba(22,50,79,0.12)';
+    roundRect(x, y + 3, w, h, r); ctx.fill();
+    ctx.fillStyle = fill;
+    roundRect(x, y, w, h, r); ctx.fill();
+    ctx.strokeStyle = stroke || 'rgba(22,50,79,0.30)'; ctx.lineWidth = 2;
+    roundRect(x, y, w, h, r); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1.5;
+    roundRect(x + 1.5, y + 1.5, w - 3, h - 3, Math.max(0, r - 1.5)); ctx.stroke();
+  }
+
   function button(x, y, w, h, label, action, active, enabled = true) {
+    // Self-contained: a body fill, a dark edge and a light top lip (the bevel).
+    // The body is drawn first, at exactly x/y — the test pins the first pill.
     ctx.fillStyle = active ? C.accent : C.card;
     roundRect(x, y, w, h, 10); ctx.fill();
-    ctx.strokeStyle = C.accentDim; ctx.lineWidth = 1; roundRect(x, y, w, h, 10); ctx.stroke();
-    ctx.fillStyle = !enabled ? C.muted : active ? '#06222f' : C.text;
+    ctx.strokeStyle = 'rgba(22,50,79,0.30)'; ctx.lineWidth = 1;
+    roundRect(x + 0.5, y + 0.5, w - 1, h - 1, 9); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 1.5;
+    roundRect(x + 1, y + 1, w - 2, h - 2, 8); ctx.stroke();
+    ctx.fillStyle = !enabled ? C.muted : active ? C.navy : C.text;
     ctx.font = `700 24px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(label, x + w / 2, y + h / 2 + 1, w - 12);
     // The pill is drawn at the size the touch floor needs (62+ logical px,
@@ -1147,9 +1216,7 @@
   }
 
   function iconButton(x, y, w, h, icon, action) {
-    ctx.fillStyle = C.card;
-    roundRect(x, y, w, h, 10); ctx.fill();
-    ctx.strokeStyle = C.accentDim; ctx.lineWidth = 1; roundRect(x, y, w, h, 10); ctx.stroke();
+    plate(x, y, w, h, 10, C.card, false);
     const cx = x + w / 2, cy = y + h / 2;
     // The glyph paths are written around (0, 0) and scaled up to the bigger
     // pill, so the icons read at the same weight as their 62 px target.
@@ -1190,6 +1257,46 @@
     addHit(x, y, w, h, action);
   }
 
+  // Skerry the harbour-keeper puffin and his brass lantern, top-left. The flame
+  // is lit while the game is audible, so the mascot carries the mute state the
+  // way the dial carries the puzzle (ARK-110).
+  function drawSkerry() {
+    ctx.save();
+    ctx.translate(2, 2);
+    const lit = !S.muted;
+    // brass lantern on a short handle, low-left
+    ctx.fillStyle = C.brass;
+    ctx.fillRect(6, 40, 2, 16);
+    ctx.fillRect(2, 56, 16, 10);
+    ctx.strokeStyle = C.brassBright; ctx.lineWidth = 1.5;
+    ctx.strokeRect(2, 56, 16, 10);
+    if (lit) {
+      ctx.fillStyle = C.flame;
+      ctx.beginPath(); ctx.arc(10, 56, 5, Math.PI, 0); ctx.fill();
+      ctx.fillStyle = 'rgba(255,182,39,0.40)';
+      ctx.beginPath(); ctx.arc(10, 56, 9, 0, Math.PI * 2); ctx.fill();
+    }
+    // body — dark back, cream chest, facing right
+    ctx.fillStyle = C.navy;
+    ctx.beginPath(); ctx.ellipse(44, 40, 17, 20, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fdf6e3';
+    ctx.beginPath(); ctx.ellipse(38, 46, 10, 13, 0, 0, Math.PI * 2); ctx.fill();
+    // head + white face patch + eye
+    ctx.fillStyle = C.navy;
+    ctx.beginPath(); ctx.arc(47, 18, 13, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fdf6e3';
+    ctx.beginPath(); ctx.ellipse(50, 17, 8, 9, -0.2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = C.navy;
+    ctx.beginPath(); ctx.arc(52, 16, 2.2, 0, Math.PI * 2); ctx.fill();
+    // the coral beak — the puffin's mark
+    ctx.fillStyle = C.accent;
+    ctx.beginPath(); ctx.moveTo(57, 15); ctx.lineTo(64, 20); ctx.lineTo(57, 25); ctx.closePath(); ctx.fill();
+    // feet
+    ctx.beginPath(); ctx.ellipse(38, 62, 4, 2.2, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(48, 62, 4, 2.2, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
   // The words of `text` in lines no wider than maxW, in the current font: a box
   // can be sized to its lines before any of them is drawn (the toast, ARK-89).
   function wrapLines(text, maxW) {
@@ -1212,9 +1319,10 @@
   }
 
   function drawTitle() {
-    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+    desk();
     addHit(0, 0, W, H, 'titledefault');
 
+    drawSkerry();
     iconButton(W - 10 - 62, 4, 62, 62, 'mute', 'mute');
 
     // The nextday pill and mute never share a row: the day row sits 6px below
@@ -1231,7 +1339,7 @@
     ctx.fillStyle = C.muted; ctx.font = `600 24px ${FONT}`;
     ctx.fillText(titleDay(S.day, dayDate(S.day), archive()), 240, DAY_ROW_Y + 31, 320);
 
-    ctx.fillStyle = C.accent; ctx.font = `800 40px ${FONT}`;
+    ctx.fillStyle = C.navy; ctx.font = `800 40px ${FONT}`;
     ctx.fillText('Bearing', 240, 140);
     ctx.fillStyle = C.muted; ctx.font = `400 24px ${FONT}`;
     ctx.fillText('Rotate. Listen. Triangulate', 240, 172);
@@ -1241,10 +1349,7 @@
     const cardY = [238, 326], cardH = 82;
     TIERS.forEach((t, tier) => {
       const y = cardY[tier], r = S.runs[tier];
-      ctx.fillStyle = C.card;
-      roundRect(20, y, 440, cardH, 14); ctx.fill();
-      ctx.strokeStyle = r.solved ? C.good : C.accentDim; ctx.lineWidth = 2;
-      roundRect(20, y, 440, cardH, 14); ctx.stroke();
+      panel(20, y, 440, cardH, 14, C.card, r.solved ? C.good : C.brass);
       ctx.fillStyle = C.text; ctx.font = `800 26px ${FONT}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
       ctx.fillText(t.label, 44, y + 28);
       ctx.textAlign = 'right';
@@ -1255,7 +1360,7 @@
         ctx.fillStyle = C.muted; ctx.font = `400 24px ${FONT}`;
         ctx.fillText(`${r.solvedMoves} listens spent`, 436, y + 60, 220);
       } else {
-        ctx.fillStyle = C.accent; ctx.font = `700 24px ${FONT}`;
+        ctx.fillStyle = C.accentDim; ctx.font = `700 24px ${FONT}`;
         ctx.fillText(r.moves ? 'In progress' : 'Not started', 436, y + 28);
       }
       ctx.textAlign = 'left'; ctx.fillStyle = C.muted; ctx.font = `400 24px ${FONT}`;
@@ -1280,14 +1385,15 @@
   }
 
   function drawGate() {
-    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+    desk();
+    drawSkerry();
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = C.accent; ctx.font = `800 32px ${FONT}`;
+    ctx.fillStyle = C.navy; ctx.font = `800 32px ${FONT}`;
     ctx.fillText('Sound check', 240, 72);
     ctx.fillStyle = C.muted; ctx.font = `400 24px ${FONT}`;
     wrapText('Bearing is heard, not just seen. Put on headphones or sit between stereo speakers, then press play and say which side the tone came from.', 240, 112, 400, 30);
 
-    button(140, 244, 200, 62, 'Play the tone', 'gatetone', false);
+    button(140, 244, 200, 62, 'Play the tone', 'gatetone', true);
 
     button(56, 330, 168, 96, 'LEFT', 'gateleft', false);
     button(256, 330, 168, 96, 'RIGHT', 'gateright', false);
@@ -1302,6 +1408,13 @@
     const p = puzzle(), r = run();
     const cand = candidateSets(p, r.listens);
 
+    // Harbour-lantern halo behind the ring: flat amber disks, no gradient, so the
+    // lit readout stays inside the frame budget (D-086).
+    ctx.fillStyle = 'rgba(255,176,32,0.10)';
+    ctx.beginPath(); ctx.arc(RING_CX, RING_CY, RING_R + 42, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,176,32,0.14)';
+    ctx.beginPath(); ctx.arc(RING_CX, RING_CY, RING_R + 20, 0, Math.PI * 2); ctx.fill();
+
     ctx.strokeStyle = C.ring; ctx.lineWidth = 3;
     ctx.beginPath(); ctx.arc(RING_CX, RING_CY, RING_R, 0, Math.PI * 2); ctx.stroke();
     ctx.strokeStyle = C.ringDim; ctx.lineWidth = 1;
@@ -1311,7 +1424,7 @@
       const cardinal = s % 4 === 0;
       const outer = stopPoint(s, RING_R + (cardinal ? 14 : 8));
       const inner = stopPoint(s, RING_R - (cardinal ? 10 : 4));
-      ctx.strokeStyle = cardinal ? C.accentDim : C.ringDim;
+      ctx.strokeStyle = cardinal ? C.brassBright : C.ringDim;
       ctx.lineWidth = cardinal ? 2 : 1;
       ctx.beginPath(); ctx.moveTo(inner.x, inner.y); ctx.lineTo(outer.x, outer.y); ctx.stroke();
       if (cardinal) {
@@ -1348,10 +1461,10 @@
 
     // Heading needle.
     const tip = stopPoint(S.heading, RING_R - 30);
-    ctx.strokeStyle = C.accent; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.strokeStyle = C.accentDim; ctx.lineWidth = 3; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(RING_CX, RING_CY); ctx.lineTo(tip.x, tip.y); ctx.stroke();
     ctx.lineCap = 'butt';
-    ctx.fillStyle = C.accent;
+    ctx.fillStyle = C.accentDim;
     ctx.beginPath(); ctx.arc(RING_CX, RING_CY, 5, 0, Math.PI * 2); ctx.fill();
 
     // The source sounding now is ringed where the listens so far place it — its
@@ -1367,7 +1480,7 @@
   }
 
   function drawPlay() {
-    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+    desk();
 
     // Same corner pair as Echo Sounding/Trunk Line's in-play HUD (BENCHMARK
     // gap #2): this game's title text is centered, not right-aligned, so
@@ -1397,7 +1510,7 @@
     const cand = candidateSets(p, r.listens);
     ctx.textAlign = 'left'; ctx.font = `600 24px ${FONT}`;
     cand.forEach((set, i) => {
-      ctx.fillStyle = C.src[i % C.src.length];
+      ctx.fillStyle = C.srcInk[i % C.srcInk.length];
       const text = `Source ${i + 1}: ${set.size ? [...set].map((s) => POINTS[s]).join(' or ') : 'not listened yet'}`;
       ctx.fillText(text, 24, 446 + i * 24, 452);
     });
@@ -1408,13 +1521,13 @@
     const coach = coachLines(p.k, cand, S.marks, locked());
     if (coach) {
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillStyle = C.accent; ctx.font = `700 25px ${FONT}`;
+      ctx.fillStyle = C.accentDim; ctx.font = `700 25px ${FONT}`;
       ctx.fillText(coach[0], 240, 106, 452);
       ctx.fillStyle = C.muted; ctx.font = `400 24px ${FONT}`;
       ctx.fillText(coach[1], 240, 132, 452);
     }
 
-    button(24, 508, 208, 62, locked() ? 'Solved' : 'Listen', 'listen', false, !locked());
+    button(24, 508, 208, 62, locked() ? 'Solved' : 'Listen', 'listen', !locked(), !locked());
     button(240, 508, 112, 62, '‹', 'rotateccw', false);
     button(356, 508, 112, 62, '›', 'rotatecw', false);
 
@@ -1427,12 +1540,20 @@
   }
 
   function drawHelp() {
-    ctx.fillStyle = 'rgba(4,8,16,0.92)'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(22,50,79,0.50)'; ctx.fillRect(0, 0, W, H);
+    // The help sheet's own card: a flat shadow, the body, and a brass rim — the
+    // same panel() draws for the tier cards, inlined because the test rebuilds
+    // drawHelp() with nothing but ctx, C, FONT, W, H and roundRect.
+    ctx.fillStyle = 'rgba(22,50,79,0.12)';
+    roundRect(24, 13, W - 48, H - 20, 16); ctx.fill();
     ctx.fillStyle = C.card;
     roundRect(24, 10, W - 48, H - 20, 16); ctx.fill();
-    ctx.strokeStyle = C.accentDim; ctx.lineWidth = 1; roundRect(24, 10, W - 48, H - 20, 16); ctx.stroke();
+    ctx.strokeStyle = C.brass; ctx.lineWidth = 2;
+    roundRect(24, 10, W - 48, H - 20, 16); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1.5;
+    roundRect(25.5, 11.5, W - 51, H - 23, 14.5); ctx.stroke();
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = C.accent; ctx.font = `800 26px ${FONT}`;
+    ctx.fillStyle = C.navy; ctx.font = `800 26px ${FONT}`;
     ctx.fillText('How to play', 240, 48);
     ctx.fillStyle = C.text; ctx.font = `400 24px ${FONT}`; ctx.textAlign = 'left';
     // Re-flowed by wrapText at the new size (ARK-88): the same words, broken
@@ -1462,16 +1583,20 @@
   }
 
   function drawEffects() {
-    if (S.flash > 0) { ctx.fillStyle = `rgba(125,211,252,${S.flash * 0.3})`; ctx.fillRect(0, 0, W, H); }
+    if (S.flash > 0) { ctx.fillStyle = `rgba(255,176,32,${S.flash * 0.3})`; ctx.fillRect(0, 0, W, H); }
     if (S.toast) {
       // The box grows up from the bottom edge to hold every line (ARK-89: at 24 px
       // the wrong-check toast is three lines, and the last fell off the canvas).
+      // One roundRect path is filled then stroked, so the test counts a single
+      // box: the body is the cream, the brass rim doubles as its shadow.
       ctx.font = `600 24px ${FONT}`;
       const lines = wrapLines(S.toast.text, W - 120);
       const boxH = 24 + 28 * lines.length, top = H - 16 - boxH;
-      ctx.fillStyle = 'rgba(10,15,30,0.92)';
+      ctx.fillStyle = '#fff4dc';
       roundRect(36, top, W - 72, boxH, 12); ctx.fill();
-      ctx.fillStyle = C.text; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.strokeStyle = C.brass; ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = C.navy; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       lines.forEach((line, i) => ctx.fillText(line, W / 2, top + 26 + i * 28));
     }
   }
