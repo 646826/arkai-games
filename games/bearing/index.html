@@ -338,7 +338,7 @@
   const C = {
     bg: '#fff7e6', card: '#fff2d8',
     ring: '#c9922e', ringDim: '#c9a45c',
-    accent: '#ff6a4d', accentDim: '#b34a34', cursor: '#ffb020',
+    accent: '#ff6a4d', accentDim: '#b34a34', cursor: '#9a6412', // the amber mark, darkened to srcInk amber: #ffb020 sat at 1.5:1 on the lit desk (ARK-116 P0)
     text: '#16324f', muted: '#4c6a80', good: '#0a6b60', warn: '#9a5b00', bad: '#e8453c',
     src: ['#ff6a4d', '#19b7b0', '#ffb020'],
     srcInk: ['#c0392b', '#0a7a72', '#9a6412'],
@@ -1442,8 +1442,10 @@
     }
 
     // Candidate ticks: every source's accumulated reading, small and colored per source.
+    // Inks, not the light src palette: coral/teal/amber sat at 1.2–1.9:1 on the lit
+    // desk (ARK-116 P0), so the ticks wear the same dark inks as the readouts.
     cand.forEach((set, i) => {
-      const color = C.src[i % C.src.length];
+      const color = C.srcInk[i % C.srcInk.length];
       for (const stop of set) {
         const pt = stopPoint(stop, RING_R - 26 - i * 8);
         ctx.fillStyle = color;
@@ -1471,7 +1473,7 @@
     // candidate stops, the same ones the readout names — never at its true bearing:
     // the picture must not tell more than the ears (it did until session #303).
     if (S.listening && S.listenStep >= 0 && cand[S.listenStep]) {
-      ctx.strokeStyle = C.src[S.listenStep % C.src.length]; ctx.lineWidth = 3;
+      ctx.strokeStyle = C.srcInk[S.listenStep % C.srcInk.length]; ctx.lineWidth = 3;
       for (const s of cand[S.listenStep]) {
         const pt = stopPoint(s, RING_R + 20);
         ctx.beginPath(); ctx.arc(pt.x, pt.y, 10, 0, Math.PI * 2); ctx.stroke();
