@@ -340,9 +340,8 @@
     ring: '#c9922e', ringDim: '#c9a45c',
     accent: '#ff6a4d', accentDim: '#b34a34', cursor: '#9a6412', // the amber mark, darkened to srcInk amber: #ffb020 sat at 1.5:1 on the lit desk (ARK-116 P0)
     text: '#16324f', muted: '#4c6a80', good: '#0a6b60', warn: '#9a5b00', bad: '#e8453c',
-    src: ['#ff6a4d', '#19b7b0', '#ffb020'],
     srcInk: ['#c0392b', '#0a7a72', '#9a6412'],
-    navy: '#16324f', brass: '#c9922e', brassBright: '#f0c463', sea: '#19b7b0', flame: '#ffb020',
+    navy: '#16324f', brass: '#c9922e', brassBright: '#f0c463', brassInk: '#8a5f1a', flame: '#ffb020',
   };
 
   const stopAngle = (stop) => (stop * Math.PI) / (DIAL / 2) - Math.PI / 2;
@@ -1424,7 +1423,9 @@
       const cardinal = s % 4 === 0;
       const outer = stopPoint(s, RING_R + (cardinal ? 14 : 8));
       const inner = stopPoint(s, RING_R - (cardinal ? 10 : 4));
-      ctx.strokeStyle = cardinal ? C.brassBright : C.ringDim;
+      // Cardinals in dark brass: brassBright #f0c463 sat at ~1.5:1 on the lit desk —
+      // fainter than the minor 22.5° ticks, an inverted hierarchy (ARK-116 re-review).
+      ctx.strokeStyle = cardinal ? C.brassInk : C.ringDim;
       ctx.lineWidth = cardinal ? 2 : 1;
       ctx.beginPath(); ctx.moveTo(inner.x, inner.y); ctx.lineTo(outer.x, outer.y); ctx.stroke();
       if (cardinal) {
