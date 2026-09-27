@@ -3,32 +3,37 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="light">
 <title>Blind Corners — Arkai</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #0d1321; overflow: hidden; }
+  html, body { margin: 0; height: 100%; background: #d8623f; overflow: hidden; }
   body { -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
   /* dvh where it exists: on iOS 100vh is taller than the visible page while the
      address bar shows, which pushed the buttons under it and offset every tap. */
   canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; outline: none; cursor: pointer; }
-  canvas:focus-visible { outline: 2px solid rgba(61, 214, 208, 0.5); outline-offset: -2px; }
+  /* A short landscape frame can be taller than the visible page. A vertical
+     gesture on its canvas must be able to scroll the portal to the controls. */
+  @media (min-width: 700px) and (max-height: 480px) and (min-aspect-ratio: 3/2) {
+    canvas { touch-action: pan-y; }
+  }
+  canvas:focus-visible { outline: 2px solid rgba(22, 50, 79, 0.6); outline-offset: -2px; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   /* The same actions as the canvas buttons, for screen readers and the Tab key.
      Hidden until one of them has focus, then shown as a bar. */
-  #controls:focus-within { position: fixed; left: 8px; right: 8px; bottom: 8px; width: auto; height: auto; clip: auto; white-space: normal; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border-radius: 12px; background: #162036; border: 1px solid #35456b; }
-  #controls button, #controls a { min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center; text-decoration: none; padding: 0 12px; border-radius: 10px; border: 1px solid #35456b; background: #1f2a44; color: #eef3fb; font: 600 16px system-ui, sans-serif; }
+  #controls:focus-within { position: fixed; left: 8px; right: 8px; bottom: 8px; width: auto; height: auto; clip: auto; white-space: normal; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border-radius: 12px; background: #fff7e6; border: 1px solid #c9922e; }
+  #controls button, #controls a { min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center; text-decoration: none; padding: 0 12px; border-radius: 10px; border: 1px solid #c9922e; background: #fff2d8; color: #16324f; font: 600 16px system-ui, sans-serif; }
   #controls a[hidden] { display: none; }
-  #controls button:focus, #controls a:focus { outline: 2px solid #3dd6d0; }
-  #copybox { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(6, 10, 20, 0.82); }
+  #controls button:focus, #controls a:focus { outline: 2px solid #16324f; outline-offset: 2px; }
+  #copybox { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(22, 50, 79, 0.72); }
   #copybox.open { display: flex; }
-  #copybox .card { width: min(92vw, 420px); box-sizing: border-box; padding: 18px; border-radius: 16px; background: #162036; border: 1px solid #35456b; color: #eef3fb; }
+  #copybox .card { width: min(92vw, 420px); box-sizing: border-box; padding: 18px; border-radius: 16px; background: #fff7e6; border: 1px solid #c9922e; color: #16324f; }
   #copybox p { margin: 0 0 10px; font-size: 16px; line-height: 1.4; }
-  #copybox textarea { width: 100%; height: 100px; box-sizing: border-box; padding: 10px; border-radius: 10px; border: 1px solid #35456b; background: #0d1321; color: #d6fffb; font: 16px/1.45 ui-monospace, Menlo, Consolas, monospace; resize: none; -webkit-user-select: text; user-select: text; }
-  #copybox button { margin-top: 12px; width: 100%; height: 44px; border: 0; border-radius: 10px; background: #3dd6d0; color: #04201f; font-weight: 700; font-size: 16px; cursor: pointer; }
+  #copybox textarea { width: 100%; height: 100px; box-sizing: border-box; padding: 10px; border-radius: 10px; border: 1px solid #c9922e; background: #fffdf5; color: #16324f; font: 16px/1.45 ui-monospace, Menlo, Consolas, monospace; resize: none; -webkit-user-select: text; user-select: text; }
+  #copybox button { margin-top: 12px; width: 100%; height: 44px; border: 0; border-radius: 10px; background: #0b7a72; color: #fffdf5; font-weight: 700; font-size: 16px; cursor: pointer; }
 </style>
 </head>
 <body>
-<canvas id="game" tabindex="0" role="application" aria-label="Blind Corners, a daily puzzle. A dark box hides mirrors. Fire a beam into it from any port on the edge and you learn only where it comes out. Mark where the mirrors must be, then check. Arrow keys or WASD move the cursor, Space fires a beam from a port or marks a square, slash and backslash place a mirror, Shift-Space or a right click pencils an ungraded guess, K checks, X clears your marks, L describes the box, H shows the rules. Comma and period open the previous or next day. Press Tab for buttons."></canvas>
+<canvas id="game" tabindex="0" role="application" aria-label="Blind Corners, a daily puzzle. A box hides mirrors. Fire a beam into it from any port on the edge and you learn only where it comes out. Mark where the mirrors must be, then check. Arrow keys or WASD move the cursor, Space fires a beam from a port or marks a square, slash and backslash place a mirror, Shift-Space or a right click pencils an ungraded guess, K checks, X clears your marks, L describes the box, H shows the rules. Comma and period open the previous or next day. Press Tab for buttons."></canvas>
 <div id="status" class="sr" aria-live="polite"></div>
 <div id="controls" class="sr" role="group" aria-label="Game controls">
   <button type="button" data-act="dir0">Move the cursor up</button>
@@ -560,16 +565,9 @@
   // ---- puzzle core end ----
 
   // ---- layout (logical pixels) ----
-  // Two shapes. The portal frames a game at 3:4 on phones and 4:3 on desktops,
-  // and a game page opened on its own on a phone is taller than both. The
-  // compact shape drops the heading (the page around the frame already shows it)
-  // and is itself 3:4.
-  const W = 480;
-  // Text and targets are sized for the frame each shape lands in (ARK-88,
-  // D-083): the compact canvas scales by ~0.73 on a 390×844 phone and ~0.50 on
-  // 844×390, so 24 logical px is ~17.5 CSS px portrait and ~12 landscape, and
-  // a 62 logical px target is ~45 CSS px portrait; the tall canvas scales by
-  // ~0.81 on a bare phone page, where 24 is ~19.5 CSS px and 56 is ~45.4.
+  // Wide landscape uses CSS pixels; other shapes use 480px.
+  let W = 480;
+  // Compact phone scales about 0.73; the tall bare page about 0.81.
   const LAYOUTS = {
     tall: {
       H: 780, heading: true, iconY: 10, icon: 56, tabsY: 76, tabH: 64, infoY: 160, boardY: 180,
@@ -581,10 +579,17 @@
       buttonH: 62, toastY: 70, footerY: 0, small: 24, tabText: 24,
       title: { name: 74, nameSize: 40, day: 114, tagline: 150, tagline2: 178, cards: 202, cta: 300, sub: 330, howto: 362, share: 440, footer: 590 },
     },
+    landscape: {
+      H: 324, landscape: true, heading: false, iconY: 256, icon: 60, tabsY: 8, tabH: 70, infoY: 110, boardY: 8,
+      buttonH: 62, toastY: 103, footerY: 0, small: 24, tabText: 24,
+      title: { name: 114, nameSize: 34, day: 42, tagline: 162, tagline2: 190, cards: 84, cta: 258, sub: 292, howto: 166, share: 244, footer: 0 },
+    },
   };
   let L = LAYOUTS.tall;
-  // The box and the ring of ports around it share one square, whatever the size of the box.
-  const BOARD = 456, BOARD_X = (W - BOARD) / 2;
+  // Cap the wide board to leave room for controls.
+  let BOARD = 456, BOARD_X = (W - BOARD) / 2;
+  const sideX = () => BOARD_X + BOARD + 16;
+  const sideWidth = () => W - sideX() - 8;
   const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
   const SLUG = 'blind-corners';
   const STORE = 'arkai:blind-corners:v1', STORE_MUTE = 'arkai:blind-corners:muted';
@@ -602,14 +607,20 @@
   const TENT_NAMES = ['no pencil mark', 'a pencilled slash', 'a pencilled backslash'];
 
   const C = {
-    bg: '#0d1321', box: '#0a0f1c', boxAlt: '#0d1424', grid: 'rgba(150, 180, 230, 0.10)', frame: '#1f2a44',
-    port: '#1a2440', portEdge: '#35456b', arrow: '#8fa6d6',
-    ink: '#2bb8b2', inkHi: '#3dd6d0', mirror: '#eef3fb', mirrorLit: '#ffd166',
-    text: '#eef3fb', muted: '#9aa8c0', good: '#6ee7a8', warn: '#fbbf24', bad: '#ff8a80',
-    button: '#1f2a44', buttonHot: '#28365a', buttonDown: '#31416b', line: 'rgba(170, 195, 240, 0.28)',
+    // Lantern Harbour (ARK-110): a lamp-lit back-alley brick wall, a brass board
+    // on a cream panel. Lit, not dark — navy ink on cream and brick (owner #41 §4).
+    bg: '#d8623f', box: '#f9e6a0', boxAlt: '#e8b84c', grid: 'rgba(154, 96, 56, 0.34)', frame: '#c9922e',
+    port: '#fff2d8', portEdge: '#16324f', arrow: '#16324f',
+    ink: '#0b7a72', inkHi: '#0b9a9d', mirror: '#16324f', mirrorLit: '#8a5a00',
+    text: '#16324f', foot: '#241205', muted: '#6a4a2a', wallText: '#3f2a12', cursor: '#463a6e', good: '#045a50', warn: '#6a3f00', bad: '#8a2419', dash: '#ff8a80',
+    button: '#fff2d8', buttonHot: '#f0c463', buttonDown: '#d9a244', line: 'rgba(22, 50, 79, 0.30)',
+    brass: '#c9922e', brassBright: '#f0c463', flame: '#ffb020',
   };
   // One colour per beam, told apart by more than hue: the number on the port is the same at both ends.
-  const BEAM_COLORS = ['#3dd6d0', '#ffd166', '#ff8fa3', '#9d8cff', '#7bd88f', '#ff9f5a', '#6cb8ff', '#f4a3ff', '#d4e157', '#ffb4a2'];
+  // Solver-designed: every ray >=3.3:1 on the cream checkerboard at full alpha, white
+  // port numbers >=6.9:1, adjacent rays >=8.5 dE apart, none within 8 dE of the cursor
+  // or byte-equal to any semantic colour. Charcoal is the rare tenth beam.
+  const BEAM_COLORS = ['#99363e', '#594612', '#4c5931', '#175912', '#14663d', '#2d5d80', '#823699', '#80264b', '#664024', '#3a3a3a'];
 
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -820,7 +831,9 @@
     }
   }
   const float = (x, y, message, color) => S.floats.push({ x, y, text: message, color, t: 0 });
-  const toast = (message, spoken = message) => { S.toast = { text: message, t: 0 }; announce(spoken); };
+  // A toast stays long enough to read: a floor of four seconds, plus a little
+  // more for a longer message, with the fade at the end (ARK-112).
+  const toast = (message, spoken = message) => { S.toast = { text: message, t: 0, dur: Math.max(4, 2 + message.length * 0.08) }; announce(spoken); };
   const shake = (amount) => { if (!calm()) S.shake = amount; };
 
   function describeBeam(beam, k) {
@@ -1535,7 +1548,7 @@
     }
     if (S.toast) {
       S.toast.t += dt;
-      if (S.toast.t > 3) S.toast = null;
+      if (S.toast.t > S.toast.dur) S.toast = null;
     }
     // A page left open over midnight must not keep offering yesterday.
     S.dayCheck -= dt;
@@ -1554,13 +1567,16 @@
     invalidate(); // a canvas given a new size is blank until it is drawn again
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const cw = canvas.clientWidth || window.innerWidth, ch = canvas.clientHeight || window.innerHeight;
-    // Below 480:780 both shapes are limited by width and scale alike, so the one
-    // with the heading wins; above it the compact shape is always the larger.
-    L = cw / ch > 0.62 ? LAYOUTS.compact : LAYOUTS.tall;
+    // A 324px wide frame gives seven Hard port columns 44px each.
+    const wide = cw >= 700 && ch <= 480 && cw / ch >= 1.5;
+    W = wide ? cw : 480;
+    BOARD = wide ? Math.min(ch - 16, 312) : 456;
+    BOARD_X = wide ? 8 : (W - BOARD) / 2;
+    L = wide ? { ...LAYOUTS.landscape, H: ch, boardY: (ch - BOARD) / 2, iconY: ch - 68 } : cw / ch > 0.62 ? LAYOUTS.compact : LAYOUTS.tall;
     view.dpr = dpr;
-    view.scale = Math.min(cw / W, ch / L.H);
-    view.ox = (cw - W * view.scale) / 2;
-    view.oy = (ch - L.H * view.scale) / 2;
+    view.scale = wide ? 1 : Math.min(cw / W, ch / L.H);
+    view.ox = wide ? 0 : (cw - W * view.scale) / 2;
+    view.oy = wide ? 0 : (ch - L.H * view.scale) / 2;
     canvas.width = Math.round(cw * dpr);
     canvas.height = Math.round(ch * dpr);
   }
@@ -1584,16 +1600,67 @@
     ctx.fillText(str, x, y, maxWidth);
   }
 
+  // A brass harbour lantern, the alley's light: it hangs over the title and its
+  // flame is the board's "character" — one warm, lit object owning the light.
+  function drawLantern(x, y) {
+    ctx.save();
+    const glow = ctx.createRadialGradient(x, y + 34, 4, x, y + 34, 92);
+    glow.addColorStop(0, 'rgba(255, 176, 32, 0.30)');
+    glow.addColorStop(1, 'rgba(255, 176, 32, 0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(x - 92, y - 4, 184, 96);
+    // chain
+    ctx.strokeStyle = C.brass; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x, y - 6); ctx.lineTo(x, y + 16); ctx.stroke();
+    // cap, glass body, base
+    ctx.fillStyle = C.brass;
+    roundRect(x - 15, y + 14, 30, 6, 3); ctx.fill();
+    ctx.fillStyle = C.brassBright;
+    roundRect(x - 12, y + 18, 24, 28, 5); ctx.fill();
+    ctx.strokeStyle = C.brass; ctx.lineWidth = 1.5;
+    roundRect(x - 12, y + 18, 24, 28, 5); ctx.stroke();
+    ctx.fillStyle = C.flame;
+    ctx.beginPath(); ctx.arc(x, y + 32, 5.5, Math.PI, 0); ctx.fill();
+    ctx.fillStyle = 'rgba(255, 176, 32, 0.5)';
+    ctx.beginPath(); ctx.arc(x, y + 32, 9, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = C.brass;
+    roundRect(x - 15, y + 48, 30, 5, 2); ctx.fill();
+    ctx.restore();
+  }
+
   function drawBackground() {
+    // A back-alley brick wall in Lantern Harbour, lamp-lit from the upper left.
+    const left = -view.ox / view.scale, right = W + view.ox / view.scale;
+    const top = -view.oy / view.scale, bottom = L.H + view.oy / view.scale;
     const g = ctx.createLinearGradient(0, 0, 0, L.H);
-    g.addColorStop(0, '#111a2e');
-    g.addColorStop(1, '#080c16');
+    g.addColorStop(0, '#ffa04a');
+    g.addColorStop(0.55, '#f06a32');
+    g.addColorStop(1, '#d8623f');
     ctx.fillStyle = g;
-    ctx.fillRect(-view.ox / view.scale, -view.oy / view.scale, W + (2 * view.ox) / view.scale, L.H + (2 * view.oy) / view.scale);
-    ctx.fillStyle = '#9fd8ff';
+    ctx.fillRect(left, top, right - left, bottom - top);
+    // Masonry: faint mortar courses and staggered joints, sitting behind the board.
+    const course = 46, bw = 84;
+    ctx.strokeStyle = 'rgba(251, 229, 187, 0.20)';
+    ctx.lineWidth = 1.5;
+    for (let y = Math.floor(top / course) * course; y < bottom; y += course) {
+      ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke();
+      const row = Math.round(y / course);
+      const shift = (row % 2) ? bw / 2 : 0;
+      for (let x = Math.floor((left - shift) / bw) * bw + shift; x < right; x += bw) {
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + course); ctx.stroke();
+      }
+    }
+    // The lantern's glow: one dominant light direction, upper-left.
+    const glow = ctx.createRadialGradient(44, 36, 8, 44, 36, 360);
+    glow.addColorStop(0, 'rgba(255, 176, 32, 0.30)');
+    glow.addColorStop(1, 'rgba(255, 176, 32, 0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(left, top, right - left, bottom - top);
+    // Warm embers drifting through the lamplight.
+    ctx.fillStyle = '#ffd9a0';
     for (const s of specks) {
       if (s.y > L.H) continue;
-      ctx.globalAlpha = 0.08 + 0.07 * (0.5 + 0.5 * wave(0.9, s.p));
+      ctx.globalAlpha = 0.10 + 0.08 * (0.5 + 0.5 * wave(0.9, s.p));
       ctx.beginPath();
       ctx.arc(s.x, s.y, s.s, 0, Math.PI * 2);
       ctx.fill();
@@ -1626,11 +1693,16 @@
       points.forEach(([x, y], i) => { if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
       ctx.stroke();
     };
-    ctx.strokeStyle = color;
     ctx.lineJoin = 'round';
     if (dashed) ctx.setLineDash([8, 7]);
-    stroke(9, alpha * 0.22);
-    stroke(3.5, alpha);
+    // A navy groove under the coloured beam, so a bright beam still reads on the
+    // cream panel; then the colour and a thin lit core.
+    ctx.strokeStyle = 'rgba(22, 50, 79, 0.30)';
+    stroke(9, alpha);
+    ctx.strokeStyle = color;
+    stroke(4, alpha);
+    ctx.strokeStyle = 'rgba(255, 253, 245, 0.85)';
+    stroke(1.5, alpha);
     ctx.setLineDash([]);
     ctx.lineJoin = 'miter';
     ctx.globalAlpha = 1;
@@ -1638,11 +1710,27 @@
 
   function drawBox() {
     const n = size(), px = cellPx(), top0 = L.boardY;
+    // A brass frame with a dropped shadow and a light lip — the lit board's rim.
+    ctx.fillStyle = 'rgba(22, 50, 79, 0.20)';
+    roundRect(BOARD_X - 8, top0 - 8 + 3, BOARD + 16, BOARD + 16, 16);
+    ctx.fill();
     ctx.fillStyle = C.frame;
     roundRect(BOARD_X - 8, top0 - 8, BOARD + 16, BOARD + 16, 16);
     ctx.fill();
+    ctx.strokeStyle = 'rgba(22, 50, 79, 0.30)';
+    ctx.lineWidth = 1.5;
+    roundRect(BOARD_X - 8, top0 - 8, BOARD + 16, BOARD + 16, 16);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+    ctx.lineWidth = 1.5;
+    roundRect(BOARD_X - 8 + 1.5, top0 - 8 + 1.5, BOARD + 13, BOARD + 13, 14);
+    ctx.stroke();
     const x0 = BOARD_X + px, y0 = top0 + px, span = n * px;
-    ctx.fillStyle = C.box;
+    // The cream panel, lit from the upper left.
+    const g = ctx.createLinearGradient(x0, y0, x0 + span, y0 + span);
+    g.addColorStop(0, '#fff0b0');
+    g.addColorStop(1, '#e8b84c');
+    ctx.fillStyle = g;
     roundRect(x0, y0, span, span, 8);
     ctx.fill();
     ctx.fillStyle = C.boxAlt;
@@ -1686,7 +1774,7 @@
     const n = size(), px = cellPx();
     if (locked()) return; // a solved box shows real marks only
     ctx.setLineDash([4, 4]);
-    ctx.globalAlpha = 0.6;
+    ctx.globalAlpha = 0.9;
     S.tent.forEach((mark, cell) => {
       if (!mark) return;
       drawMirror(ringX((cell % n) + 1), ringY(Math.floor(cell / n) + 1), px, mark, C.muted, px > 70 ? 4 : 3.5);
@@ -1715,7 +1803,7 @@
         ctx.save();
         ctx.translate(x, y);
         ctx.rotate((Math.PI / 2) * dir);
-        ctx.globalAlpha = locked() ? 0.25 : 0.6 + 0.25 * wave(2.4, port * 0.7);
+        ctx.globalAlpha = locked() ? 0.25 : 0.8 + 0.2 * wave(2.4, port * 0.7);
         ctx.fillStyle = C.arrow;
         ctx.beginPath();
         ctx.moveTo(0, -a); ctx.lineTo(a, a * 0.6); ctx.lineTo(-a, a * 0.6);
@@ -1729,20 +1817,30 @@
         ctx.globalAlpha = k === S.sel ? 1 : 0.78;
         ctx.fill();
         ctx.globalAlpha = 1;
-        // Explained by the marks: a calm solid edge. Not yet: a dashed red one, whatever the beam's colour.
-        ctx.strokeStyle = ok ? 'rgba(255, 255, 255, 0.85)' : C.bad;
-        ctx.lineWidth = ok ? (k === S.sel ? 3 : 1.5) : 3.5;
-        if (!ok) ctx.setLineDash([6, 5]);
-        ctx.stroke();
+        // Explained by the marks: a calm solid edge. Not yet: a dashed red
+        // outer edge on brass and a cream inner edge on every dark beam fill.
+        if (ok) {
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+          ctx.lineWidth = k === S.sel ? 3 : 1.5;
+          ctx.stroke();
+        } else {
+          ctx.setLineDash([6, 5]);
+          ctx.strokeStyle = C.bad;
+          ctx.lineWidth = 6;
+          ctx.stroke();
+          ctx.strokeStyle = '#fffdf5';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
         ctx.setLineDash([]);
-        label(String(k + 1), x, y + 1, Math.min(26, px * 0.4), '#0a0f1c', 'center', '800');
+        label(String(k + 1), x, y + 1, Math.min(26, px * 0.4), '#fffdf5', 'center', '800');
       }
       if (ranks && ranks.has(port)) {
         ctx.fillStyle = C.mirrorLit;
         ctx.beginPath();
         ctx.arc(x + half - 6, y - half + 6, 16, 0, Math.PI * 2);
         ctx.fill();
-        label(String(ranks.get(port)), x + half - 6, y - half + 7, 24, '#1a1300', 'center', '800');
+        label(String(ranks.get(port)), x + half - 6, y - half + 7, 24, '#fffdf5', 'center', '800');
       }
     }
     if (S.shot) {
@@ -1763,7 +1861,7 @@
   function drawCursor() {
     if (!S.keys || S.mode !== 'play' || S.help) return;
     const px = cellPx();
-    ctx.strokeStyle = C.inkHi;
+    ctx.strokeStyle = C.cursor;
     ctx.lineWidth = 3;
     roundRect(ringX(S.cursor.x) - px / 2 + 2, ringY(S.cursor.y) - px / 2 + 2, px - 4, px - 4, 10);
     ctx.stroke();
@@ -1801,13 +1899,23 @@
   function buttons() {
     if (S.mode === 'title') {
       const T = L.title;
+      if (L.landscape) {
+        const sx = sideX(), sw = sideWidth();
+        const list = icons(false).concat(dayArrows(), row(TIERS.map((t, i) => [`card${i}`, t.label]), T.cards, L.tabH, sx, W - 8).map((b) => ({ ...b, card: true })));
+        list.push({ id: 'help', label: 'How to play', x: sx, y: T.howto, w: sw, h: L.buttonH });
+        const right = W - L.icon - 16;
+        if (onward()) list.push(...row([['share', archive() ? `Share Day ${S.day}` : 'Share', true], ['onward', `Play ${ONWARD.title}`]], T.share, L.buttonH, sx, right));
+        else if (solvedCount()) list.push({ id: 'share', label: archive() ? `Share Day ${S.day}` : 'Share today’s result', x: sx, y: T.share, w: right - sx, h: L.buttonH, primary: true });
+        return list;
+      }
       const list = icons(false).concat(dayArrows(), row(TIERS.map((t, i) => [`card${i}`, t.label]), T.cards, L.tabH).map((b) => ({ ...b, card: true })));
       list.push({ id: 'help', label: 'How to play', x: 80, y: T.howto, w: W - 160, h: L.buttonH });
       if (onward()) list.push(...row([['share', archive() ? `Share Day ${S.day}` : 'Share', true], ['onward', `Play ${ONWARD.title}`]], T.share, L.buttonH, 20, W - 20));
       else if (solvedCount()) list.push({ id: 'share', label: archive() ? `Share Day ${S.day}` : 'Share today’s result', x: 80, y: T.share, w: W - 160, h: L.buttonH, primary: true });
       return list;
     }
-    const y = L.boardY + BOARD + (L.heading ? 18 : 10), h = L.buttonH;
+    const y = L.landscape ? 176 : L.boardY + BOARD + (L.heading ? 18 : 10), h = L.buttonH;
+    const x0 = L.landscape ? sideX() : 10, x1 = L.landscape ? W - 8 : W - 10;
     const key = (k) => (touch() ? '' : `  ${k}`);
     if (locked()) {
       const allDone = solvedCount() === TIERS.length;
@@ -1815,38 +1923,46 @@
         ['next', allDone ? 'Done' : 'Next', true],
         ['share', 'Share', true],
         ['best', S.line ? 'Hide' : 'Solver'],
-      ], y, h));
+      ], y, h, x0, x1));
     }
     return icons(true).concat(row([
       ['check', `Check${key('K')}`, true],
       ['clear', `Clear${key('X')}`],
       ['help', `${S.help ? 'Close' : 'Rules'}${key('H')}`],
-    ], y, h));
+    ], y, h, x0, x1));
   }
 
   // Either side of the day line on the title screen, each only where there is a day to go to.
   const ARROW = 62;
   function dayArrows() {
     const y = L.title.day - ARROW / 2, list = [];
-    if (S.day > 1) list.push({ id: 'prevday', icon: 'prev', x: 14, y, w: ARROW, h: ARROW });
-    if (S.day < S.today) list.push({ id: 'nextday', icon: 'next', x: W - 14 - ARROW, y, w: ARROW, h: ARROW });
+    if (S.day > 1) list.push({ id: 'prevday', icon: 'prev', x: L.landscape ? sideX() : 14, y, w: ARROW, h: ARROW });
+    if (S.day < S.today) list.push({ id: 'nextday', icon: 'next', x: W - (L.landscape ? 8 : 14) - ARROW, y, w: ARROW, h: ARROW });
     return list;
   }
 
   function tabs() {
-    const x1 = L.heading ? W - 10 : W - 6 - 2 * L.icon - 12;
-    return row(TIERS.map((t, i) => [`tier${i}`, t.label]), L.tabsY, L.tabH, L.heading ? 10 : 6, x1).map((b, i) => ({ ...b, tier: i }));
+    const x1 = L.landscape ? W - 8 : L.heading ? W - 10 : W - 6 - 2 * L.icon - 12;
+    return row(TIERS.map((t, i) => [`tier${i}`, t.label]), L.tabsY, L.tabH, L.landscape ? sideX() : L.heading ? 10 : 6, x1).map((b, i) => ({ ...b, tier: i }));
   }
 
   const inside = (b, x, y) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
 
   function drawIcon(b) {
     const x = b.x + b.w / 2, y = b.y + b.h / 2;
+    ctx.fillStyle = 'rgba(22, 50, 79, 0.18)';
+    roundRect(b.x, b.y + 3, b.w, b.h, 12);
+    ctx.fill();
     ctx.fillStyle = S.hover === b.id ? C.buttonHot : C.button;
     roundRect(b.x, b.y, b.w, b.h, 12);
     ctx.fill();
     ctx.strokeStyle = C.line;
     ctx.lineWidth = 1.5;
+    roundRect(b.x, b.y, b.w, b.h, 12);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+    ctx.lineWidth = 1;
+    roundRect(b.x + 1, b.y + 1, b.w - 2, b.h - 2, 11);
     ctx.stroke();
     ctx.fillStyle = C.text;
     ctx.strokeStyle = C.text;
@@ -1888,65 +2004,100 @@
     if (b.card) { drawTierCard(b, Number(b.id.slice(4)), S.hover === b.id); return; }
     const down = S.press && S.press.id === b.id;
     const hot = S.hover === b.id;
-    ctx.fillStyle = b.primary ? (down ? C.ink : C.inkHi) : down ? C.buttonDown : hot ? C.buttonHot : C.button;
-    roundRect(b.x, b.y + (down ? 2 : 0), b.w, b.h, 12);
-    ctx.fill();
-    if (!b.primary) {
-      ctx.strokeStyle = C.line;
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
+    // Ink, not inkHi: the white label on inkHi is 3.37:1 and the compact phone
+    // shape renders it at normal-text size (4.5:1 needed); ink is 5.10:1.
+    const fill = b.primary ? C.ink : down ? C.buttonDown : hot ? C.buttonHot : C.button;
+    const dy = down ? 2 : 0;
+    // A dropped shadow and a light top lip — a bevel that reads as a raised button.
+    if (!down) {
+      ctx.fillStyle = 'rgba(22, 50, 79, 0.18)';
+      roundRect(b.x, b.y + 3, b.w, b.h, 12); ctx.fill();
     }
-    label(b.label, b.x + b.w / 2, b.y + b.h / 2 + (down ? 2 : 0), 24, b.primary ? '#04201f' : C.text, 'center', '700', b.w - 16);
+    ctx.fillStyle = fill;
+    roundRect(b.x, b.y + dy, b.w, b.h, 12); ctx.fill();
+    ctx.strokeStyle = 'rgba(22, 50, 79, 0.30)';
+    ctx.lineWidth = 1.5;
+    roundRect(b.x, b.y + dy, b.w, b.h, 12); ctx.stroke();
+    if (!down) {
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+      ctx.lineWidth = 1.5;
+      roundRect(b.x + 1, b.y + 1 + dy, b.w - 2, b.h - 2, 11); ctx.stroke();
+    }
+    label(b.label, b.x + b.w / 2, b.y + b.h / 2 + dy, 24, b.primary ? '#fffdf5' : C.text, 'center', '700', b.w - 16);
   }
 
 
   function drawTierCard(b, tier, active) {
     const r = S.runs[tier], t = TIERS[tier];
-    ctx.fillStyle = active ? C.buttonHot : '#141c30';
+    ctx.fillStyle = 'rgba(22, 50, 79, 0.15)';
+    roundRect(b.x, b.y + 3, b.w, b.h, 12); ctx.fill();
+    ctx.fillStyle = active ? C.buttonHot : C.button;
     roundRect(b.x, b.y, b.w, b.h, 12);
     ctx.fill();
-    ctx.strokeStyle = active ? C.inkHi : r.solved ? 'rgba(61, 214, 208, 0.5)' : C.line;
+    ctx.strokeStyle = active ? C.brass : r.solved ? C.good : C.line;
     ctx.lineWidth = active ? 2 : 1.5;
+    roundRect(b.x, b.y, b.w, b.h, 12);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+    ctx.lineWidth = 1;
+    roundRect(b.x + 1, b.y + 1, b.w - 2, b.h - 2, 11);
     ctx.stroke();
     const px = L.tabText;
     label(`${t.name} · ${t.label}`, b.x + b.w / 2, b.y + b.h * 0.32, px + 1, active || r.solved ? C.text : C.muted, 'center', '700', b.w - 8);
     // An unsolved card says what the box is, not its par: par costs a search, and a card is drawn before anyone asks.
-    label(r.solved ? resultText(r.solvedMoves, parOf(tier)) : `${t.size}×${t.size} · ${t.mirrors} mirrors`, b.x + b.w / 2, b.y + b.h * 0.72, px, r.solved ? C.inkHi : C.muted, 'center', '600', b.w - 6);
+    label(r.solved ? resultText(r.solvedMoves, parOf(tier)) : `${t.size}×${t.size} · ${t.mirrors} mirrors`, b.x + b.w / 2, b.y + b.h * 0.72, px, r.solved ? C.good : C.muted, 'center', '600', b.w - 6);
   }
 
   function drawHud() {
     if (L.heading) {
       label('Blind Corners', 12, 28, 26, C.text, 'left', '800');
-      if (!PICTURE) label(`Day ${S.day}${archive() ? ' · archive' : ''}`, 12, 56, 22, C.inkHi, 'left', '700');
+      if (!PICTURE) label(`Day ${S.day}${archive() ? ' · archive' : ''}`, 12, 56, 22, C.text, 'left', '700');
     }
     for (const t of tabs()) drawTierCard(t, t.tier, t.tier === S.tier);
     const p = puzzle(), r = run();
+    if (L.landscape) {
+      const sx = sideX(), sw = sideWidth();
+      if (S.toast) return; // the toast takes these two lines while it is visible
+      if (S.newDay) {
+        label('New puzzles are out', sx, 110, 24, C.text, 'left', '800', sw);
+        label(touch() ? 'Tap home to refresh' : 'Press Esc to refresh', sx, 146, 22, C.text, 'left', '700', sw);
+      } else if (locked()) {
+        label(`Day ${S.day} · Solved in ${r.solvedMoves}`, sx, 110, 24, C.text, 'left', '800', sw);
+        label(parNote(r.solvedMoves, parOf(S.tier)), sx, 146, 22, C.good, 'left', '700', sw);
+      } else {
+        const first = !S.beams.length && !r.moves;
+        label(first ? (touch() ? 'Tap an arrow: fire a beam in' : 'Click an arrow: fire a beam in') : `Day ${S.day} · Spent ${r.moves}`, sx, 110, 24, C.text, 'left', '800', sw);
+        const over = r.moves - p.par;
+        label(first ? `Find ${p.mirrors} mirrors · par ${p.par}` : `${markCount()}/${p.mirrors} mirrors · par ${p.par} (solver)`, sx, 146, 22, r.moves <= p.par ? C.good : over <= 2 ? C.warn : C.bad, 'left', '700', sw);
+      }
+      return;
+    }
     const y = L.infoY, x1 = BOARD_X + BOARD;
     const day = L.heading || PICTURE ? '' : `Day ${S.day} · `; // a picture names no day
 
     if (S.toast && toastOverInfo()) {
-      // the toast is drawn here instead, for its three seconds
+      // the toast is drawn here instead, for its reading window
     } else if (S.newDay && !L.heading) {
-      label(touch() ? 'New puzzles are out: tap home' : 'New puzzles are out: press Esc', BOARD_X, y, 24, C.inkHi, 'left', '800', 300);
+      label(touch() ? 'New puzzles are out: tap home' : 'New puzzles are out: press Esc', BOARD_X, y, 24, C.text, 'left', '800', 300);
     } else if (locked()) {
       label(`${day}Solved in ${r.solvedMoves}`, BOARD_X, y, 24, C.text, 'left', '800', 260);
-      label(parNote(r.solvedMoves, parOf(S.tier)), x1, y, 24, C.inkHi, 'right', '800', 190);
+      label(parNote(r.solvedMoves, parOf(S.tier)), x1, y, 24, C.text, 'right', '800', 190);
     } else {
       const over = r.moves - p.par;
       // Before the first beam, the line says what to do: the box itself is the first screen.
       const first = !S.beams.length && !r.moves;
       const left = first ? (touch() ? 'Tap an arrow: fire a beam in' : 'Click an arrow: fire a beam in') : `${day}Spent ${r.moves} · ${markCount()}/${p.mirrors} mirrors`;
-      label(left, BOARD_X, y, 24, first ? C.inkHi : C.text, 'left', '800', BOARD * 0.62);
+      label(left, BOARD_X, y, 24, C.text, 'left', '800', BOARD * 0.62);
       const color = r.moves <= p.par ? C.good : over <= 2 ? C.warn : C.bad;
       label(`par ${p.par} (solver)`, x1, y, 24, color, 'right', '700', 168);
     }
   }
 
   const RULES = [
-    ['The dark box hides mirrors: / or \\.', C.text],
-    ['Tap an arrow on the edge to fire a beam in.', C.inkHi],
-    ['It turns at every mirror it meets,', C.inkHi],
-    ['and you see only where it comes out.', C.inkHi],
+    ['The box hides mirrors: / or \\.', C.text],
+    ['Tap an arrow on the edge to fire a beam in.', C.text],
+    ['It turns at every mirror it meets,', C.text],
+    ['and you see only where it comes out.', C.text],
     ['Tap a square to mark a mirror: / then \\.', C.text],
     ['The line is the beam through your marks;', C.muted],
     ['a dashed red port: they do not explain it yet.', C.muted],
@@ -1964,24 +2115,37 @@
     if (S.help) announce(rulesText());
   }
 
-  // On the title screen the panel must clear the day-nav arrows sitting above
-  // the board's usual position, so its top (and, to still fit above the
-  // footer, its height) are only defaulted to the board's own bounds — not
-  // fixed to them the way the play-mode panel always was.
+  // Title help clears the day arrows and footer.
   function drawHelp(top = L.boardY - 8, bottom = top + BOARD + 16) {
-    // Fully opaque, not the near-opaque wash this used to be: over the board's mid-tone
-    // cells a 4% bleed was invisible, but title mode puts this over bright card/tagline
-    // text, where the same 4% showed through as faint ghost letters.
+    if (L.landscape) {
+      const x = sideX(), w = sideWidth(), y = 8, h = L.H - 16;
+      ctx.fillStyle = 'rgba(22, 50, 79, 0.18)';
+      roundRect(x, y + 3, w, h, 16); ctx.fill();
+      ctx.fillStyle = C.box;
+      roundRect(x, y, w, h, 16); ctx.fill();
+      ctx.strokeStyle = C.brass; ctx.lineWidth = 1.5;
+      roundRect(x, y, w, h, 16); ctx.stroke();
+      const lineH = Math.min(24, (h - 94) / (RULES.length - 1));
+      RULES.forEach(([str, color], i) => label(str, x + w / 2, y + 22 + i * lineH, 19, color, 'center', '600', w - 20));
+      // Any panel tap closes it; this button makes that clear.
+      drawButton({ id: 'help', label: 'Close rules', x: x + 8, y: y + h - 50, w: w - 16, h: 44 });
+      return;
+    }
+    // Fully opaque cream, so navy rules text never ghosts whatever sits behind it.
     const h = bottom - top;
-    ctx.fillStyle = '#0a0f1c';
+    ctx.fillStyle = 'rgba(22, 50, 79, 0.18)';
+    roundRect(BOARD_X - 8, top + 3, BOARD + 16, h, 16); ctx.fill();
+    ctx.fillStyle = C.box;
     roundRect(BOARD_X - 8, top, BOARD + 16, h, 16);
     ctx.fill();
-    ctx.strokeStyle = C.line;
+    ctx.strokeStyle = C.brass;
     ctx.lineWidth = 1.5;
     roundRect(BOARD_X - 8, top, BOARD + 16, h, 16);
     ctx.stroke();
-    const lh = Math.min(34, (h - 60) / (RULES.length - 1));
-    RULES.forEach(([str, color], i) => label(str, W / 2, top + 44 + i * lh, 24, color, 'center', '600', BOARD - 4));
+    const titleHelp = S.mode === 'title';
+    const lh = Math.min(34, (h - (titleHelp ? 118 : 60)) / (RULES.length - 1));
+    RULES.forEach(([str, color], i) => label(str, W / 2, top + (titleHelp ? 30 : 44) + i * lh, 24, color, 'center', '600', BOARD - 4));
+    if (titleHelp) drawButton({ id: 'help', label: 'Close rules', x: 80, y: bottom - L.buttonH - 8, w: W - 160, h: L.buttonH });
   }
 
   // The keyboard hints at a size a phone can read run to two lines (ARK-88):
@@ -1996,12 +2160,14 @@
 
   function drawFooter(y) {
     if (S.toast || !y) return;
-    if (S.newDay) { label(touch() ? 'New puzzles are out: tap the home button' : 'New puzzles are out: press Esc', W / 2, y, 24, C.inkHi, 'center', '700'); return; }
-    if (touch()) { FOOT_HINTS.touch.forEach((line, i) => label(line, W / 2, y + (i - 0.5) * 28, 24, C.muted, 'center', '500')); return; }
+    // The wall's bottom band is dark: navy sits at 3.6:1 there, so the hints take
+    // the darker foot ink (4.98:1 at the worst band of each shape).
+    if (S.newDay) { label(touch() ? 'New puzzles are out: tap the home button' : 'New puzzles are out: press Esc', W / 2, y, 24, C.foot, 'center', '700'); return; }
+    if (touch()) { FOOT_HINTS.touch.forEach((line, i) => label(line, W / 2, y + (i - 0.5) * 28, 24, C.foot, 'center', '500')); return; }
     // The keyboard cursor is drawn only once a key has moved it; to a player on the mouse,
     // "Arrows move" would promise a cursor that is not on the screen.
     const lines = S.mode === 'title' ? (S.today > 1 ? FOOT_HINTS.titleDays : FOOT_HINTS.titleFirst) : S.keys ? FOOT_HINTS.keys : FOOT_HINTS.mouse;
-    lines.forEach((line, i) => label(line, W / 2, y + (i - (lines.length - 1) / 2) * 28, 24, C.muted, 'center', '500'));
+    lines.forEach((line, i) => label(line, W / 2, y + (i - (lines.length - 1) / 2) * 28, 24, C.foot, 'center', '500'));
   }
 
   function drawPlay() {
@@ -2016,9 +2182,10 @@
     drawCursor();
     drawParts();
     ctx.restore();
-    if (S.help) drawHelp();
+    if (S.help && !L.landscape) drawHelp();
     for (const b of buttons()) drawButton(b);
     drawFooter(L.footerY);
+    if (S.help && L.landscape) drawHelp();
   }
 
   function untilMidnight() {
@@ -2028,50 +2195,83 @@
     return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m`;
   }
 
-  // A box of three by three, with one mirror in it. A beam goes in on the left
-  // and comes out of the top; then the mirror that explains it is marked. The
-  // whole game, shown before it is read.
   function drawTitle() {
     const T = L.title;
+    if (L.landscape) {
+      const mid = BOARD_X + BOARD / 2, sx = sideX(), sw = sideWidth();
+      drawLantern(mid, 8);
+      label('BLIND CORNERS', mid, T.name, T.nameSize, C.text, 'center', '900', BOARD - 12);
+      const past = archive(), allDone = solvedCount() === TIERS.length;
+      if (!S.toast) {
+        label('Mirrors hide in the box.', mid, T.tagline, 22, C.wallText, 'center', '500', BOARD - 12);
+        label('Find them by firing beams.', mid, T.tagline2, 22, C.wallText, 'center', '500', BOARD - 12);
+        label(allDone ? (past ? `Day ${S.day} is done` : `Next puzzles in ${untilMidnight()}`) : `${touch() ? 'Tap' : 'Tap or press Space'} to ${solvedCount() || S.runs.some((r) => r.moves) ? 'continue' : 'play'}`, mid, T.cta, 24, C.text, 'center', '800', BOARD - 12);
+      }
+      const dayLine = sw < 430 ? `Day ${S.day}${past ? ' · archive' : ''}` : titleDay(S.day, past ? dayDate(S.day) : '', past, PICTURE);
+      label(dayLine, sx + sw / 2, T.day, 24, C.text, 'center', '700', sw - 2 * (ARROW + 8));
+      for (const b of buttons()) drawButton(b);
+      if (S.help) drawHelp();
+      return;
+    }
+    drawLantern(W / 2, 6);
     label('BLIND CORNERS', W / 2, T.name, T.nameSize, C.text, 'center', '900');
     const past = archive();
-    label(titleDay(S.day, past ? dayDate(S.day) : '', past, PICTURE), W / 2, T.day, 24, C.inkHi, 'center', '700', W - 2 * (14 + ARROW + 6));
-    label('Mirrors hide in the box.', W / 2, T.tagline, 24, C.muted, 'center', '500', W - 40);
-    label('Find them by firing beams.', W / 2, T.tagline2, 24, C.muted, 'center', '500', W - 40);
+    label(titleDay(S.day, past ? dayDate(S.day) : '', past, PICTURE), W / 2, T.day, 24, C.text, 'center', '700', W - 2 * (14 + ARROW + 6));
+    label('Mirrors hide in the box.', W / 2, T.tagline, 24, C.wallText, 'center', '500', W - 40);
+    label('Find them by firing beams.', W / 2, T.tagline2, 24, C.wallText, 'center', '500', W - 40);
 
     const allDone = solvedCount() === TIERS.length;
-    ctx.globalAlpha = allDone ? 1 : 0.8 + 0.2 * wave(3);
+    ctx.globalAlpha = allDone ? 1 : 0.9 + 0.1 * wave(3);
     const go = touch() ? 'Tap' : 'Tap or press Space';
     const done = past ? `Day ${S.day} is done` : `Next puzzles in ${untilMidnight()}`;
-    label(allDone ? done : `${go} to ${solvedCount() || S.runs.some((r) => r.moves) ? 'continue' : 'play'}`, W / 2, T.cta, 26, allDone ? C.text : C.inkHi, 'center', '800');
+    label(allDone ? done : `${go} to ${solvedCount() || S.runs.some((r) => r.moves) ? 'continue' : 'play'}`, W / 2, T.cta, 26, C.text, 'center', '800');
     ctx.globalAlpha = 1;
     // Finished for today is the moment an earlier day is worth offering.
     const again = allDone ? (!past && S.day > 1 ? '‹ plays earlier days' : 'Tap a puzzle to see it again') : '';
     const sub = past
       ? again || 'Earlier days do not count toward the streak'
       : [again, S.bestStreak ? `Streak ${liveStreak()} · best ${S.bestStreak}` : ''].filter(Boolean).join('  ·  ');
-    if (sub) label(sub, W / 2, T.sub, 24, C.muted, 'center', '600', W - 24);
+    if (sub) label(sub, W / 2, T.sub, 24, C.wallText, 'center', '600', W - 24);
     for (const b of buttons()) drawButton(b);
     drawFooter(T.footer);
     if (S.help) drawHelp(T.day + ARROW / 2 + 8, T.footer - 24);
   }
 
   // In the compact shape the toast takes the place of the info line for its
-  // three seconds, par-line strip included.
+  // reading window, par-line strip included.
   const toastOverInfo = () => !L.heading && S.mode === 'play';
 
   function drawToast() {
     if (!S.toast) return;
-    const a = Math.min(1, S.toast.t * 6, (3 - S.toast.t) * 3);
+    const d = S.toast.dur;
+    const a = Math.min(1, S.toast.t * 6, (d - S.toast.t) * 3);
     ctx.globalAlpha = Math.max(0, a);
     ctx.font = `700 24px ${FONT}`;
-    const w = Math.min(W - 12, ctx.measureText(S.toast.text).width + 36);
-    const y = S.mode === 'title' ? L.title.footer - 18 : L.toastY;
-    const h = toastOverInfo() ? 36 : 44; // compact: clear of the board frame
-    ctx.fillStyle = '#26345a';
-    roundRect((W - w) / 2, y, w, h, h / 2);
-    ctx.fill();
-    label(S.toast.text, W / 2, y + h / 2, 24, C.text, 'center', '700', w - 16);
+    const titleWide = L.landscape && S.mode === 'title';
+    const w = titleWide ? BOARD - 16 : Math.min(L.landscape ? sideWidth() : W - 12, ctx.measureText(S.toast.text).width + 36);
+    const x = titleWide ? BOARD_X + 8 : L.landscape ? sideX() + (sideWidth() - w) / 2 : (W - w) / 2;
+    const y = titleWide ? 150 : L.landscape ? L.toastY : S.mode === 'title' ? L.title.footer - 18 : L.toastY;
+    const h = titleWide ? 88 : L.landscape ? 52 : toastOverInfo() ? 36 : 44; // compact: clear of the board frame
+    ctx.fillStyle = 'rgba(22, 50, 79, 0.18)';
+    roundRect(x, y + 3, w, h, h / 2); ctx.fill();
+    ctx.fillStyle = C.button;
+    roundRect(x, y, w, h, h / 2); ctx.fill();
+    ctx.strokeStyle = C.brass; ctx.lineWidth = 1.5;
+    roundRect(x, y, w, h, h / 2); ctx.stroke();
+    if (titleWide) {
+      // Wrap the warning away from the tier cards.
+      ctx.font = `700 20px ${FONT}`;
+      const lines = [''];
+      for (const word of S.toast.text.split(' ')) {
+        const current = lines.length - 1;
+        const next = lines[current] ? `${lines[current]} ${word}` : word;
+        if (lines[current] && ctx.measureText(next).width > w - 24) lines.push(word);
+        else lines[current] = next;
+      }
+      lines.forEach((line, i) => label(line, x + w / 2, y + h / 2 + (i - (lines.length - 1) / 2) * 24, 20, C.text, 'center', '700', w - 24));
+    } else {
+      label(S.toast.text, x + w / 2, y + h / 2, 24, C.text, 'center', '700', w - 16);
+    }
     ctx.globalAlpha = 1;
   }
 
@@ -2087,7 +2287,7 @@
     else drawPlay();
     drawToast();
     if (S.flash > 0) {
-      ctx.fillStyle = `rgba(210, 245, 255, ${S.flash * 0.22})`;
+      ctx.fillStyle = `rgba(255, 240, 214, ${S.flash * 0.20})`;
       ctx.fillRect(0, 0, W, L.H);
     }
   }
